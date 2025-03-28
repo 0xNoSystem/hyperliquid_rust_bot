@@ -1,15 +1,12 @@
 use log::info;
-use ethers::types::H160;
 use ethers::signers::LocalWallet;
 use hyperliquid_rust_sdk::{ExchangeClient, InfoClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams,};
-use indicators::rsi2::Rsi;
 use crate::trade_setup::{Strategy, Risk, TradeParams};
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use tokio::{
-    spawn,
-    sync::mpsc::{unbounded_channel},
+    sync::mpsc::{Receiver},
     time::{sleep, Duration},
 };
 
@@ -53,6 +50,8 @@ impl Bot {
     pub async fn init(&mut self){
 
         self.update_lev(self.trade_params.lev).await;
+        println!("\nBot init: SUCCESS\n");
+        println!("Trade settings:\n\n{}", &self.trade_params);
     }
 
     pub async fn update_lev(&mut self, lev: u32){
@@ -133,38 +132,104 @@ impl Bot{
 
 
 
-    pub async fn trade_exec(&mut self, size: f32, is_long: bool){
+    pub async fn trade_exec(&mut self, size: f32, signal: Option<bool>){
+        
+        if let Some(pos)  = signal{
+        self.trade_active.store(true, Ordering::SeqCst);
 
-            self.trade_active.store(true, Ordering::SeqCst);
+    
+        self.open_order(size, pos).await;
+        println!("Trade opened");
 
-            self.open_order(size, is_long).await;
+        let _ = sleep(Duration::from_secs(self.trade_params.trade_time)).await;
 
-            let _ = sleep(Duration::from_secs(self.trade_params.trade_time)).await;
+        self.close_order(size, pos).await;
+        println!("Closed trade");
 
-            self.close_order(size, is_long).await;
+        self.trade_active.store(false, Ordering::SeqCst);
 
-            self.trade_active.store(false, Ordering::SeqCst);
+        println!("PNL: {}", self.get_last_pnl().await);
+        }
         
     }
 
+    pub async fn get_signal(&self, rsi: f32) -> Option<bool>{
+
+        let thresh = self.get_rsi().await;
+        match self.trade_params.strategy{
+            Strategy::Bull => {
+                if  rsi < thresh.0{
+                    return Some(true);
+                }else{
+                    return None;
+                }
+            },
+
+            Strategy::Bear =>   {
+                if rsi > thresh.1{
+                    return Some(false);
+                }else{
+                    return None;
+                }
+            }
+
+            Strategy::Neutral => {
+                if rsi < thresh.0{
+                    return Some(true);
+                }else if rsi > thresh.1{
+                    return Some(false);
+                }else{
+                    return None;
+                }
+            }
+        }
+
+    }
+
+    pub async fn get_rsi(&self) -> (f32, f32){
+        match self.trade_params.risk{
+            Risk::Low => (25.0, 77.0),
+            Risk::Medium => (30.0, 70.0),
+            Risk::High => (35.0, 67.0),
+        }
+    }
 
 
+    async fn get_last_pnl(&self) -> f32{
 
-    async fn get_last_pnl(&self, info_client: &InfoClient) -> f32{
-        println!("HEY");
         let user =   self.public_key.parse().unwrap();
 
-        let fills = info_client.user_fills(user).await.unwrap();
+        let fills = self.info_client.user_fills(user).await.unwrap();
     
         let fee = fills[0].fee.parse::<f32>().unwrap();
 
         let pnl = fills[0].closed_pnl.parse::<f32>().unwrap();
 
         return pnl - fee
-}
+    }
 
     pub fn is_active(&self) -> bool{
         self.trade_active.load(Ordering::SeqCst)
     }
 
+
+
+    pub async fn bot_event_loop(mut self, mut rx: Receiver<BotCommand>) {
+        println!("hey");
+        while let Some(cmd) = rx.recv().await {
+            match cmd {
+                BotCommand::ExecuteTrade { size, rsi} => {
+                    let signal = self.get_signal(rsi).await;
+                    self.trade_exec(size, signal).await;
+                }
+            }
+        }
+    }
+
+
+}
+
+
+pub enum BotCommand {
+    ExecuteTrade { size: f32, rsi: f32 },
 }

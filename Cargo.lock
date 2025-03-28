@@ -1800,7 +1800,7 @@ dependencies = [
 [[package]]
 name = "indicators"
 version = "0.1.0"
-source = "git+https://github.com/0xNoSystem/Indicators_rs.git?branch=main#df6c3ba01b759153797899f4aa13d2816d8fb534"
+source = "git+https://github.com/0xNoSystem/Indicators_rs.git?branch=main#99b42016f0572eca632e03df7c88ee537cbf2eca"
 
 [[package]]
 name = "inout"

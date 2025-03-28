@@ -1,5 +1,6 @@
 use hyperliquid_rust_sdk::{ExchangeClient};
 use log::info;
+use std::fmt;
 
 #[derive(Clone, Debug, Copy)]
 pub enum Risk {
@@ -40,6 +41,8 @@ impl TradeParams{
         
             info!("Update leverage response: {response:?}");
     }
+
+
 }
 
 
@@ -61,4 +64,17 @@ impl Default for TradeParams {
     }
 }
 
-
+impl fmt::Display for TradeParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "leverage: {}\nStrategy: {:?},\nRisk: {:?},\nTrade time: {} s,\nasset: {},\ntime_frame: {}",
+            self.lev,
+            self.strategy,
+            self.risk,
+            self.trade_time,
+            self.asset,
+            self.time_frame
+        )
+    }
+}
