@@ -6,7 +6,6 @@ use crate::trade_setup::{Strategy, Risk, TradeParams};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use tokio::{
-    sync::mpsc::{Receiver},
     time::{sleep, Duration},
 };
 
@@ -135,29 +134,29 @@ impl Bot{
     pub async fn trade_exec(&mut self, size: f32, signal: Option<bool>){
         
         if let Some(pos)  = signal{
-            if !self.is_active(){
-                
-                self.trade_active.store(true, Ordering::Relaxed);
+                if !self.is_active(){
+                    let direction = if pos { "LONG" } else { "SHORT" };
+                    self.trade_active.store(true, Ordering::SeqCst);
 
-                self.open_order(size, pos).await;
-                println!("------------------BOT:Trade opened");
+                    self.open_order(size, pos).await;
+                    
+                    println!("--------------------BOT:Trade opened ({})", direction);
 
-                let _ = sleep(Duration::from_secs(self.trade_params.trade_time)).await;
+                    let _ = sleep(Duration::from_secs(self.trade_params.trade_time)).await;
 
-                self.close_order(size, pos).await;
-                println!("------------------BOT:Closed trade");
+                    self.close_order(size, pos).await;
+                    println!("--------------------BOT:Closed trade ({})", direction);
 
-                self.trade_active.store(false, Ordering::Relaxed);
-
-                println!("------------------PNL: {}", self.get_last_pnl().await);
-            };
-
-            self.trade_active.store(false, Ordering::Relaxed);
-            };
-        }
+                    let pnl = self.get_last_pnl().await;
+                    self.pnl_history.push(pnl);
+                    println!("--------------------PNL: {}\n--------------------Session PNL: {}", pnl, self.get_session_pnl());   
+                    self.trade_active.store(false, Ordering::SeqCst);
+        };
+        };
+    }
         
     pub async fn get_signal(&self, rsi: f32) -> Option<bool>{
-
+        
         let thresh = self.get_rsi().await;
         match self.trade_params.strategy{
             Strategy::Bull => {
@@ -203,36 +202,28 @@ impl Bot{
         let user =   self.public_key.parse().unwrap();
 
         let fills = self.info_client.user_fills(user).await.unwrap();
-    
-        let fee = fills[0].fee.parse::<f32>().unwrap();
+        
+        let close_fee = fills[0].fee.parse::<f32>().unwrap();
+        let open_fee = fills[1].fee.parse::<f32>().unwrap();
 
         let pnl = fills[0].closed_pnl.parse::<f32>().unwrap();
 
-        return pnl - fee
+        return pnl - open_fee - close_fee;
+    }
+
+    fn get_session_pnl(&self) -> f32{
+
+        self.pnl_history.iter().sum()
     }
 
     pub fn is_active(&self) -> bool{
-        self.trade_active.load(Ordering::Relaxed)
+        self.trade_active.load(Ordering::SeqCst)
     }
-
-
-
-    pub async fn bot_event_loop(mut self, mut rx: Receiver<BotCommand>) {
-        
-        while let Some(cmd) = rx.recv().await {
-            match cmd {
-                BotCommand::ExecuteTrade { size, rsi} => {
-                    let signal = self.get_signal(rsi).await;
-                    self.trade_exec(size, signal).await;
-                }
-            }
-        }
-    }
-
 
 }
 
-
+#[derive(Debug)]
 pub enum BotCommand {
     ExecuteTrade { size: f32, rsi: f32 },
 }
+

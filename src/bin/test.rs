@@ -4,7 +4,7 @@
 use ethers::signers::LocalWallet;
 use ethers::types::H160;
 use log::info;
-use std::env;
+use std::{thread,env};
 use dotenv::dotenv;
 
 use hyperliquid_rust_sdk::{
@@ -13,7 +13,7 @@ use hyperliquid_rust_sdk::{
 };
 use hyperliquid_rust_sdk::{BaseUrl, InfoClient, Message, Subscription};
 use tokio::{
-    sync::mpsc::{unbounded_channel},
+    sync::mpsc::{unbounded_channel,UnboundedReceiver},
     time::{sleep, Duration},
 };
 
@@ -23,6 +23,7 @@ use indicators::rsi2::Rsi;
 use hyperliquid_rust_bot::bot::{Bot, BotCommand};
 use hyperliquid_rust_bot::trade_setup::{TradeParams, Strategy, Risk};
 
+use flume::{bounded, TrySendError};
 
 const SIZE: f32 = 1.0;
 const COIN: &str = "SOL";
@@ -39,65 +40,45 @@ async fn main(){
 
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
     let mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
-    let  mut info_client2 = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    
     let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None)
         .await
         .unwrap();
 
     let trade_params = TradeParams {
         strategy: Strategy::Neutral,
-        risk: Risk::High,
-        lev: 8,
-        trade_time: 240,
+        risk: Risk::Low,
+        lev: 20,
+        trade_time: 480,
         asset: COIN.to_string(),        
         time_frame: TF.to_string(),    
     };
 
     let mut bot = Bot::new(
-        wallet.clone(),
+        wallet,
         pubkey,
         info_client,
         exchange_client,
         trade_params,
     );
     bot.init().await;
-    
-    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-        tokio::spawn(async move{
-            while let Some(cmd) = rx.recv().await {
-                
-            match cmd {
-                BotCommand::ExecuteTrade { size, rsi } => {
-                    if !bot.is_active(){
-                        let signal = bot.get_signal(rsi).await;
-                        bot.trade_exec(size, signal).await;
-                    };
-                }
+ 
+    let (tx, rx) = bounded::<BotCommand>(0);
+   
+    tokio::spawn(async move {
+    while let Ok(cmd) = rx.recv_async().await {
+        match cmd {
+            BotCommand::ExecuteTrade { size, rsi } => {
+                let signal = bot.get_signal(rsi).await;
+                bot.trade_exec(size, signal).await;
             }
         }
-        });
-        
-    let mut rsi = Rsi::new(14, 10);
-
-    let (sender, mut receiver) = unbounded_channel();
-
-    let subscription_id = info_client2
-        .subscribe(
-            Subscription::Candle{
-                coin: COIN.to_string(),
-                interval: TF.to_string(),
-            },
-            sender,
-        )
-        .await
-        .unwrap();
-
-    tokio::spawn(async move {
-        sleep(Duration::from_secs(30000)).await;
-        info!("Unsubscribing from candle data");
-        info_client2.unsubscribe(subscription_id).await.unwrap();
-        
+    }
     });
+        
+    let mut rsi = Rsi::new(12, 10);
+    let (mut receiver, _subscription_id) = subscribe_candles(30000,COIN, TF).await;
+
 
     let mut time = 0;
     let mut candle_count = 0;
@@ -119,15 +100,17 @@ async fn main(){
                 }
             }
             
+            if let Some(sma_on_rsi) = rsi.get_sma_rsi(){
+                println!("SMA_ON_RSI: {}", sma_on_rsi);
+            }
+            
             if let Some(rsi_value) = rsi.get_last(){
                 println!("RSI: {}",&rsi_value);
-                let _ = tx.try_send(BotCommand::ExecuteTrade { size: SIZE, rsi: rsi_value });
-                
+                let _ = tx.try_send(BotCommand::ExecuteTrade { size: SIZE, rsi: rsi_value});
+                    
             };
 
         }
-
-        
 
     }
 
@@ -135,3 +118,34 @@ async fn main(){
 }
 
 
+
+pub async fn subscribe_candles(
+    session_time_secs: u64,
+    coin: &str,
+    tf: &str,
+) -> (UnboundedReceiver<Message>, u32) {
+    let  mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+
+    let subscription_id = info_client
+        .subscribe(
+            Subscription::Candle {
+                coin: coin.to_string(),
+                interval: tf.to_string(),
+            },
+            sender,
+        )
+        .await
+        .unwrap();
+        println!("Subscribed to candle data: {:?}", subscription_id);
+    // Auto-unsubscribe
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(session_time_secs)).await;
+        println!("Unsubscribing from candle data");
+        let _ = info_client.unsubscribe(subscription_id).await;
+    });
+
+
+    (receiver, subscription_id)
+}

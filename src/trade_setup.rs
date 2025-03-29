@@ -56,8 +56,8 @@ impl Default for TradeParams {
         Self {
             strategy: Strategy::Neutral,
             risk: Risk::Medium,
-            lev: 5,
-            trade_time: 120,
+            lev: 20,
+            trade_time: 300,
             asset: String::from("SOL"),
             time_frame: String::from("5m"),
         }
@@ -68,7 +68,7 @@ impl fmt::Display for TradeParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "leverage: {}\nStrategy: {:?},\nRisk: {:?},\nTrade time: {} s,\nasset: {},\ntime_frame: {}",
+            "leverage: {}\nStrategy: {:?}\nRisk: {:?},\nTrade time: {} s\nasset: {}\ntime_frame: {}",
             self.lev,
             self.strategy,
             self.risk,
