@@ -135,24 +135,27 @@ impl Bot{
     pub async fn trade_exec(&mut self, size: f32, signal: Option<bool>){
         
         if let Some(pos)  = signal{
-        self.trade_active.store(true, Ordering::SeqCst);
+            if !self.is_active(){
+                
+                self.trade_active.store(true, Ordering::Relaxed);
 
-    
-        self.open_order(size, pos).await;
-        println!("Trade opened");
+                self.open_order(size, pos).await;
+                println!("------------------BOT:Trade opened");
 
-        let _ = sleep(Duration::from_secs(self.trade_params.trade_time)).await;
+                let _ = sleep(Duration::from_secs(self.trade_params.trade_time)).await;
 
-        self.close_order(size, pos).await;
-        println!("Closed trade");
+                self.close_order(size, pos).await;
+                println!("------------------BOT:Closed trade");
 
-        self.trade_active.store(false, Ordering::SeqCst);
+                self.trade_active.store(false, Ordering::Relaxed);
 
-        println!("PNL: {}", self.get_last_pnl().await);
+                println!("------------------PNL: {}", self.get_last_pnl().await);
+            };
+
+            self.trade_active.store(false, Ordering::Relaxed);
+            };
         }
         
-    }
-
     pub async fn get_signal(&self, rsi: f32) -> Option<bool>{
 
         let thresh = self.get_rsi().await;
@@ -209,13 +212,13 @@ impl Bot{
     }
 
     pub fn is_active(&self) -> bool{
-        self.trade_active.load(Ordering::SeqCst)
+        self.trade_active.load(Ordering::Relaxed)
     }
 
 
 
     pub async fn bot_event_loop(mut self, mut rx: Receiver<BotCommand>) {
-        println!("hey");
+        
         while let Some(cmd) = rx.recv().await {
             match cmd {
                 BotCommand::ExecuteTrade { size, rsi} => {

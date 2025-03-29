@@ -24,9 +24,9 @@ use hyperliquid_rust_bot::bot::{Bot, BotCommand};
 use hyperliquid_rust_bot::trade_setup::{TradeParams, Strategy, Risk};
 
 
-const SIZE: f32 = 50.0;
+const SIZE: f32 = 1.0;
 const COIN: &str = "SOL";
-const TF: &str = "5m";
+const TF: &str = "1m";
 
 #[tokio::main]
 async fn main(){
@@ -38,17 +38,17 @@ async fn main(){
         .unwrap();
 
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
-    let mut info_client = InfoClient::new(None, Some(BaseUrl::Testnet)).await.unwrap();
-    let  mut info_client2 = InfoClient::new(None, Some(BaseUrl::Testnet)).await.unwrap();
-    let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Testnet), None, None)
+    let mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    let  mut info_client2 = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None)
         .await
         .unwrap();
 
     let trade_params = TradeParams {
         strategy: Strategy::Neutral,
-        risk: Risk::Medium,
-        lev: 20,
-        trade_time: 600,
+        risk: Risk::High,
+        lev: 8,
+        trade_time: 240,
         asset: COIN.to_string(),        
         time_frame: TF.to_string(),    
     };
@@ -65,20 +65,20 @@ async fn main(){
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
         tokio::spawn(async move{
             while let Some(cmd) = rx.recv().await {
-                println!("HEY");
+                
             match cmd {
                 BotCommand::ExecuteTrade { size, rsi } => {
-                    
-                    let signal = bot.get_signal(rsi).await;
-                    bot.trade_exec(size, signal).await;
+                    if !bot.is_active(){
+                        let signal = bot.get_signal(rsi).await;
+                        bot.trade_exec(size, signal).await;
+                    };
                 }
             }
         }
         });
-    
-    let mut rsi = Rsi::new(12, 10);
-    
-    
+        
+    let mut rsi = Rsi::new(14, 10);
+
     let (sender, mut receiver) = unbounded_channel();
 
     let subscription_id = info_client2
@@ -105,6 +105,8 @@ async fn main(){
         
         let price = candle.data.close.parse::<f32>().ok();
         let next_close =  candle.data.time_close;
+        println!("\nCandle => {}", candle_count);
+        println!("Price: {}$", price.unwrap());
         if let Some(close) = price{
 
             if time != next_close {
@@ -116,16 +118,16 @@ async fn main(){
                     rsi.update_before_close(close);
                 }
             }
-
+            
             if let Some(rsi_value) = rsi.get_last(){
-                println!("Price: {}\nRSI: {}", &close, &rsi_value);
-                let _ = tx.send(BotCommand::ExecuteTrade { size: SIZE, rsi: rsi_value}).await;
-            }
+                println!("RSI: {}",&rsi_value);
+                let _ = tx.try_send(BotCommand::ExecuteTrade { size: SIZE, rsi: rsi_value });
+                
+            };
 
         }
 
-        println!("\nCandle => {}", candle_count);
-        println!("{:?}", price);
+        
 
     }
 
