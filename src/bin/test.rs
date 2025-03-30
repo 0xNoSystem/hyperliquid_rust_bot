@@ -22,6 +22,7 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use indicators::rsi2::Rsi;
 use hyperliquid_rust_bot::bot::{Bot, BotCommand};
 use hyperliquid_rust_bot::trade_setup::{TradeParams, Strategy, Risk};
+use hyperliquid_rust_bot::helper::subscribe_candles;
 
 use flume::{bounded, TrySendError};
 
@@ -79,7 +80,6 @@ async fn main(){
     let mut rsi = Rsi::new(12, 10);
     let (mut receiver, _subscription_id) = subscribe_candles(30000,COIN, TF).await;
 
-
     let mut time = 0;
     let mut candle_count = 0;
     while let Some(Message::Candle(candle)) = receiver.recv().await {
@@ -113,39 +113,4 @@ async fn main(){
         }
 
     }
-
-
-}
-
-
-
-pub async fn subscribe_candles(
-    session_time_secs: u64,
-    coin: &str,
-    tf: &str,
-) -> (UnboundedReceiver<Message>, u32) {
-    let  mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
-    
-    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-
-    let subscription_id = info_client
-        .subscribe(
-            Subscription::Candle {
-                coin: coin.to_string(),
-                interval: tf.to_string(),
-            },
-            sender,
-        )
-        .await
-        .unwrap();
-        println!("Subscribed to candle data: {:?}", subscription_id);
-    // Auto-unsubscribe
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(session_time_secs)).await;
-        println!("Unsubscribing from candle data");
-        let _ = info_client.unsubscribe(subscription_id).await;
-    });
-
-
-    (receiver, subscription_id)
 }
