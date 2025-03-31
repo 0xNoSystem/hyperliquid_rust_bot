@@ -1,3 +1,3 @@
-pub mod bot;
+pub mod market;
 pub mod trade_setup;
 pub mod helper;

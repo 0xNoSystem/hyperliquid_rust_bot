@@ -19,8 +19,8 @@ use tokio::{
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
-use indicators::rsi2::Rsi;
-use hyperliquid_rust_bot::bot::{Bot, BotCommand};
+use kwant::indicators::{Rsi,Price, Indicator};
+use hyperliquid_rust_bot::market::{Market, MarketCommand};
 use hyperliquid_rust_bot::trade_setup::{TradeParams, Strategy, Risk};
 use hyperliquid_rust_bot::helper::subscribe_candles;
 
@@ -40,7 +40,7 @@ async fn main(){
         .unwrap();
 
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
-    let mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    let mut info_client = InfoClient::with_reconnect(None, Some(BaseUrl::Mainnet)).await.unwrap();
     
     let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None)
         .await
@@ -55,23 +55,23 @@ async fn main(){
         time_frame: TF.to_string(),    
     };
 
-    let mut bot = Bot::new(
+    let mut market = Market::new(
         wallet,
         pubkey,
         info_client,
         exchange_client,
         trade_params,
     );
-    bot.init().await;
+    market.init().await;
  
-    let (tx, rx) = bounded::<BotCommand>(0);
+    let (tx, rx) = bounded::<MarketCommand>(0);
    
     tokio::spawn(async move {
     while let Ok(cmd) = rx.recv_async().await {
         match cmd {
-            BotCommand::ExecuteTrade { size, rsi } => {
-                let signal = bot.get_signal(rsi).await;
-                bot.trade_exec(size, signal).await;
+            MarketCommand::ExecuteTrade { size, rsi } => {
+                let signal = market.get_signal(rsi).await;
+                market.market_trade_exec(size, signal).await;
             }
         }
     }
@@ -84,19 +84,25 @@ async fn main(){
     let mut candle_count = 0;
     while let Some(Message::Candle(candle)) = receiver.recv().await {
         
-        let price = candle.data.close.parse::<f32>().ok();
+        let close = candle.data.close.parse::<f32>().ok().unwrap();
+        let high = candle.data.high.parse::<f32>().ok().unwrap();
+        let low = candle.data.low.parse::<f32>().ok().unwrap();
+        let open = candle.data.open.parse::<f32>().ok().unwrap();
+
+        let price = Price {open, high, low, close};
+
         let next_close =  candle.data.time_close;
         println!("\nCandle => {}", candle_count);
-        println!("Price: {}$", price.unwrap());
-        if let Some(close) = price{
+        println!("Price: {}$", close);
+        {
 
             if time != next_close {
                 candle_count += 1;
-                rsi.update_after_close(close);
+                rsi.update_after_close(price);
                 time = next_close;
             }else{
                 if rsi.is_ready(){
-                    rsi.update_before_close(close);
+                    rsi.update_before_close(price);
                 }
             }
             
@@ -106,7 +112,7 @@ async fn main(){
             
             if let Some(rsi_value) = rsi.get_last(){
                 println!("RSI: {}",&rsi_value);
-                let _ = tx.try_send(BotCommand::ExecuteTrade { size: SIZE, rsi: rsi_value});
+                let _ = tx.try_send(MarketCommand::ExecuteTrade { size: SIZE, rsi: rsi_value});
                     
             };
 

@@ -11,7 +11,7 @@ use tokio::{
 
 
 
-pub struct Bot {
+pub struct Market {
     wallet: LocalWallet,
     public_key: String,
     exchange_client: ExchangeClient,
@@ -24,7 +24,7 @@ pub struct Bot {
 
 
 
-impl Bot {
+impl Market {
 
     pub fn new(
         wallet: LocalWallet,
@@ -35,7 +35,7 @@ impl Bot {
         
     ) -> Self {
         
-        Bot{
+        Market{
             wallet: wallet,
             public_key: public_key,
             info_client: info_client,
@@ -61,13 +61,8 @@ impl Bot {
     pub fn get_pnl_history(&self) -> &Vec<f32>{
 
         &self.pnl_history
-    }
-    
-    }
+    } 
 
-
-
-impl Bot{
 
     pub async fn open_order(&mut self, size: f32, is_long: bool){
 
@@ -130,8 +125,7 @@ impl Bot{
 
 
 
-
-    pub async fn trade_exec(&mut self, size: f32, signal: Option<bool>){
+    pub async fn market_trade_exec(&mut self, size: f32, signal: Option<bool>){
         
         if let Some(pos)  = signal{
                 if !self.is_active(){
@@ -223,7 +217,7 @@ impl Bot{
 }
 
 #[derive(Debug)]
-pub enum BotCommand {
+pub enum MarketCommand {
     ExecuteTrade { size: f32, rsi: f32 },
 }
 
