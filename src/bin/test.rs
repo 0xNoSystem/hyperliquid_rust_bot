@@ -22,7 +22,7 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use kwant::indicators::{Rsi,Price, Indicator};
 use hyperliquid_rust_bot::market::{Market, MarketCommand};
 use hyperliquid_rust_bot::trade_setup::{TradeParams, Strategy, Risk};
-use hyperliquid_rust_bot::helper::subscribe_candles;
+use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
 
 use flume::{bounded, TrySendError};
 
@@ -45,6 +45,9 @@ async fn main(){
     let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None)
         .await
         .unwrap();
+
+    let mut rsi = Rsi::new(14, 14, None);
+    rsi.load(&load_candles(&info_client, COIN, TF, rsi.period() as u64 *3).await);
 
     let trade_params = TradeParams {
         strategy: Strategy::Neutral,
@@ -77,7 +80,8 @@ async fn main(){
     }
     });
         
-    let mut rsi = Rsi::new(12, 10);
+    
+
     let (mut receiver, _subscription_id) = subscribe_candles(30000,COIN, TF).await;
 
     let mut time = 0;
@@ -106,10 +110,13 @@ async fn main(){
                 }
             }
             
-            if let Some(sma_on_rsi) = rsi.get_sma_rsi(){
-                println!("SMA_ON_RSI: {}", sma_on_rsi);
+            if let Some(stoch_rsi) = rsi.get_stoch_rsi(){
+                println!("STOCH-K: {}", stoch_rsi);
             }
             
+            if let Some(stoch_rsi) = rsi.get_stoch_signal(){
+                println!("STOCH-D: {}", stoch_rsi);
+            }
             if let Some(rsi_value) = rsi.get_last(){
                 println!("RSI: {}",&rsi_value);
                 let _ = tx.try_send(MarketCommand::ExecuteTrade { size: SIZE, rsi: rsi_value});

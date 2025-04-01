@@ -60,7 +60,7 @@ pub async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: &s
             .candles_snapshot(coin.to_string(), interval.to_string(), start_timestamp, end_timestamp)
             .await
             .unwrap();
-    println!("{:?}", vec);
+    
     for candle in vec.iter().take(vec.len() - 1) {
         let h = candle.high.parse::<f32>().unwrap();
         let l = candle.low.parse::<f32>().unwrap();
