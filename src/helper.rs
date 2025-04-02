@@ -1,6 +1,6 @@
 use hyperliquid_rust_sdk::{BaseUrl, InfoClient, Message, Subscription};
 use tokio::sync::mpsc::UnboundedReceiver;
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::time::{SystemTime, UNIX_EPOCH};
 use kwant::indicators::{Price};
 
 pub async fn subscribe_candles(
@@ -61,7 +61,7 @@ pub async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: &s
             .await
             .unwrap();
     
-    for candle in vec.iter().take(vec.len() - 1) {
+    for candle in vec {
         let h = candle.high.parse::<f32>().unwrap();
         let l = candle.low.parse::<f32>().unwrap();
         let o = candle.open.parse::<f32>().unwrap();
@@ -91,8 +91,8 @@ pub fn tf_to_minutes(tf: &str) -> u64 {
         "12h" => 720,
         "1d" => 1440,
         "3d" => 4320,
-        "1w" => 10080,
-        "1mo" => 43200,
+        "w" => 10080,
+        "m" => 43200,
         _ => panic!("Unsupported timeframe: {}", tf),
     }
 }

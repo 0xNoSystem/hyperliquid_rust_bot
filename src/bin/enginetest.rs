@@ -23,12 +23,13 @@ use kwant::indicators::{Rsi,Price, Indicator};
 use hyperliquid_rust_bot::market::{Market, MarketCommand};
 use hyperliquid_rust_bot::trade_setup::{TradeParams, Strategy, Risk};
 use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
+use hyperliquid_rust_bot::signal::{SignalEngine, IndicatorsConfig};
 
 use flume::{bounded, TrySendError};
 
 const SIZE: f32 = 1.0;
 const COIN: &str = "SOL";
-const TF: &str = "5m";
+const TF: &str = "1m";
 
 #[tokio::main]
 async fn main(){
@@ -41,13 +42,20 @@ async fn main(){
 
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
     let mut info_client = InfoClient::with_reconnect(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    let mut info_client2 = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
     
     let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None)
         .await
         .unwrap();
 
-    let mut rsi = Rsi::new(14, 14, Some(10));
-    rsi.load(&load_candles(&info_client, COIN, TF, rsi.period() as u64 *3).await);
+    let indicators_config = IndicatorsConfig::default();
+
+    let mut signal_engine = SignalEngine::new(
+        indicators_config,
+        Strategy::Neutral,
+    ).await;
+
+    signal_engine.load(&load_candles(&info_client, COIN, TF, 5000).await);
 
     let trade_params = TradeParams {
         strategy: Strategy::Neutral,
@@ -98,38 +106,61 @@ async fn main(){
         let next_close =  candle.data.time_close;
         println!("\nCandle => {}", candle_count);
         println!("Price: {}$", close);
-        {
-
-            if time != next_close {
+        {   
+            
+            if time != next_close{
+                if candle_count == 0{
+                    signal_engine.update(price, false);
+                }
                 candle_count += 1;
-                rsi.update_after_close(price);
+                signal_engine.update(price, true);
                 time = next_close;
             }else{
-                if rsi.is_ready(){
-                    rsi.update_before_close(price);
-                }
+                signal_engine.update(price, false);    
             }
             
-            if let Some(stoch_rsi) = rsi.get_stoch_rsi(){
+
+            if let Some(stoch_rsi) = signal_engine.get_stoch_rsi(){
                 println!("🔵STOCH-K: {}", stoch_rsi);
             }
             
-            if let Some(stoch_rsi) = rsi.get_stoch_signal(){
+            if let Some(stoch_rsi) = signal_engine.get_stoch_signal(){
                 println!("🟠STOCH-D: {}", stoch_rsi);
             }
 
-            if let Some(rsi_value) = rsi.get_last(){
+            if let Some(rsi_value) = signal_engine.get_rsi(){
                 println!("🟣RSI: {}",&rsi_value);
                 let _ = tx.try_send(MarketCommand::ExecuteTrade { size: SIZE, rsi: rsi_value});
                     
             };
 
-            if let Some(sma_rsi) = rsi.get_sma_rsi(){
-                println!("🟢SMA: {}", sma_rsi);
+            if let Some(sma_rsi) = signal_engine.get_sma_rsi(){
+                println!("🟢SMA-RSI: {}", sma_rsi);
             }
             
+            if let Some(atr_value) = signal_engine.get_atr(){
+                println!("🔴ATR : {}", atr_value);
+            }
+
+            if let Some(adx_value) = signal_engine.get_adx(){
+                println!("🟡ADX : {}", adx_value);
+            }
+
+            if let Some(ema) = signal_engine.get_ema(){
+                println!("🟠EMA: {}", ema);
+            }
+
+            if let Some(trend) = signal_engine.get_ema_cross_trend(){
+                println!("EMA CROSS UPTREND: {}", trend );
+            }
+
+            if let Some(ema_slope) = signal_engine.get_ema_slope(){
+                println!("EMA SLOPE: {}", ema_slope);
+            }
+
 
         }
 
     }
+
 }
