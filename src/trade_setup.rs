@@ -20,7 +20,7 @@ pub enum Style{
 }
 
 #[derive(Clone, Debug, Copy)]
-pub enum Direction{
+pub enum Stance{
     Bull,
     Bear,
     Neutral,
@@ -31,14 +31,24 @@ pub enum Direction{
 pub struct Strategy {
    pub risk: Risk,
    pub style: Style,    
-   pub direction: Direction,
+   pub stance: Stance,
    pub follow_trend: bool,
 }
 
+pub struct RsiRange{
+    pub low: f32,
+    pub high: f32,
+}
 
+pub struct AtrRange{
+    pub low: f32,
+    pub high: f32,
+}
 
-
-
+pub struct StochRange{
+    pub low: f32,
+    pub high: f32,
+}
 
 
 impl Strategy{
@@ -48,21 +58,32 @@ impl Strategy{
     }
 
     
-    pub fn get_rsi_threshold(&self) -> (f32, f32){
+    pub fn get_rsi_threshold(&self) -> RsiRange{
         match self.risk{
-            Risk::Low => (25.0, 78.0),
-            Risk::Medium => (30.0, 70.0),
-            Risk::High => (33.0, 68.0),
+            Risk::Low => RsiRange{low: 25.0, high: 78.0},
+            Risk::Medium => RsiRange{low: 30.0, high: 70.0},
+            Risk::High => RsiRange{low: 33.0, high: 68.0},
         }
     }
 
-    pub fn get_atr_threshold(&self) -> f32{
+    pub fn get_stoch_threshold(&self) -> StochRange{
         match self.risk{
-            Risk::Low => 0.001,
-            Risk::Medium => 0.002,
-            Risk::High => 0.003,
+            Risk::Low => StochRange{low: 2.0., high: 95.0},
+            Risk::Medium => StochRange{low: 15.0, high: 85.0},
+            Risk::High => StochRange{low:20.0, high: 80.0},
         }
     }
+
+
+    pub fn get_atr_threshold(&self) -> AtrRange{
+        match self.risk{
+            Risk::Low => AtrRange{low: 0.2, high: 1.0},
+            Risk::Medium => AtrRange{low: 0.5, high: 3.0},
+            Risk::High => AtrRange{low: 0.8, high: f32::INFINITY},
+        }
+    }
+
+    
 
 
 

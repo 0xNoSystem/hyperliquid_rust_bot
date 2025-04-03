@@ -27,4 +27,16 @@ dotenv = "0.15.0"
 flume = "0.11.1"
 
 
+[strategy]
+#Three trading styles: Scalp - Swing - build_position
+Style = "Scalp"
+
+#Risk: Low - Normal - High
+Risk = "Neutral"
+
+#Stance: Bull - Neutral - Bear
+Stance = "Neutral"
+
+#Follow trend: true - false
+Follow_trend= false
 
