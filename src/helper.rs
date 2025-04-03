@@ -49,23 +49,24 @@ fn get_time_now_and_candles_ago(candle_count: u64, tf: u64) -> (u64, u64) {
     (end, start)
 }
 
-pub async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: &str, start: u64, end: u64) -> Vec<Price>{
-    let coin = coin;
-    let start_timestamp = start;
-    let end_timestamp = end;
-    let interval = time_frame;
-
-    let mut res: Vec<Price> = Vec::new();
-    let vec = info_client
-            .candles_snapshot(coin.to_string(), interval.to_string(), start_timestamp, end_timestamp)
-            .await
-            .unwrap();
+pub async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: &str, start: u64, end: u64) -> Result<Vec<Price>, String>{
     
+    let vec = match info_client
+    .candles_snapshot(coin.to_string(), time_frame.to_string(), start, end)
+    .await
+    {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Failed to fetch candles: {}", e);
+            return Err("Candles Snapshot Failed".to_string());
+        }
+    };
+    let mut res = Vec::new();
     for candle in vec {
-        let h = candle.high.parse::<f32>().unwrap();
-        let l = candle.low.parse::<f32>().unwrap();
-        let o = candle.open.parse::<f32>().unwrap();
-        let c = candle.close.parse::<f32>().unwrap();
+        let h = candle.high.parse::<f32>().map_err(|e| e.to_string())?;
+        let l = candle.low.parse::<f32>().map_err(|e| e.to_string())?;
+        let o = candle.open.parse::<f32>().map_err(|e| e.to_string())?;
+        let c = candle.close.parse::<f32>().map_err(|e| e.to_string())?;
 
         res.push(Price {
             high: h,
@@ -74,37 +75,39 @@ pub async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: &s
             close: c,
     });
     }
-    res
+    Ok(res)
 }
 
-pub fn tf_to_minutes(tf: &str) -> u64 {
+pub fn tf_to_minutes(tf: &str) -> Result<u64, String> {
     match tf {
-        "1m" => 1,
-        "3m" => 3,
-        "5m" => 5,
-        "15m" => 15,
-        "30m" => 30,
-        "1h" => 60,
-        "2h" => 120,
-        "4h" => 240,
-        "8h" => 480,
-        "12h" => 720,
-        "1d" => 1440,
-        "3d" => 4320,
-        "w" => 10080,
-        "m" => 43200,
-        _ => panic!("Unsupported timeframe: {}", tf),
+        "1m" => Ok(1),
+        "3m" => Ok(3),
+        "5m" => Ok(5),
+        "15m" => Ok(15),
+        "30m" => Ok(30),
+        "1h" => Ok(60),
+        "2h" => Ok(120),
+        "4h" => Ok(240),
+        "8h" => Ok(480),
+        "12h" => Ok(720),
+        "1d" => Ok(1440),
+        "3d" => Ok(4320),
+        "w" => Ok(10080),
+        "m" => Ok(43200),
+        _ => Err(format!("Unsupported timeframe: {}", tf)),
     }
 }
 
 
-pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: &str, candle_count: u64) -> Vec<Price> {
+pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: &str, candle_count: u64) -> Result<Vec<Price>, String> {
 
-    let (end,start) = get_time_now_and_candles_ago(candle_count + 1, tf_to_minutes(tf));
+    let tf_u64 = tf_to_minutes(tf)?;
 
-    let price_data = candles_snapshot(info_client, coin, tf, start, end).await;
+    let (end,start) = get_time_now_and_candles_ago(candle_count + 1, tf_u64);
 
-    price_data
+    let price_data = candles_snapshot(info_client, coin, tf, start, end).await?;
+
+    Ok(price_data)
 }
 
 

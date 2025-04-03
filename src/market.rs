@@ -21,7 +21,7 @@ pub struct Market {
     pub trade_params: TradeParams,
 }
 
-
+/////   CHANGE NAME TO EXECUTOR AND ADD IN MARKET TO MANAGE TRADES
 
 
 impl Market {
@@ -45,24 +45,6 @@ impl Market {
             trade_active: Arc::new(AtomicBool::new(false)),
         }
     }
-
-    pub async fn init(&mut self){
-
-        self.update_lev(self.trade_params.lev).await;
-        println!("\nBot init: SUCCESS\n");
-        println!("Trade settings:\n\n{}", &self.trade_params);
-    }
-
-    pub async fn update_lev(&mut self, lev: u32){
-        
-        self.trade_params.update_lev(lev, &self.exchange_client).await;
-    }
-
-    pub fn get_pnl_history(&self) -> &Vec<f32>{
-
-        &self.pnl_history
-    } 
-
 
     pub async fn open_order(&mut self, size: f32, is_long: bool){
 
@@ -191,28 +173,10 @@ impl Market {
     }
 
 
-    async fn get_last_pnl(&self) -> f32{
+    
 
-        let user =   self.public_key.parse().unwrap();
 
-        let fills = self.info_client.user_fills(user).await.unwrap();
-        
-        let close_fee = fills[0].fee.parse::<f32>().unwrap();
-        let open_fee = fills[1].fee.parse::<f32>().unwrap();
-
-        let pnl = fills[0].closed_pnl.parse::<f32>().unwrap();
-
-        return pnl - open_fee - close_fee;
-    }
-
-    fn get_session_pnl(&self) -> f32{
-
-        self.pnl_history.iter().sum()
-    }
-
-    pub fn is_active(&self) -> bool{
-        self.trade_active.load(Ordering::SeqCst)
-    }
+    
 
 }
 

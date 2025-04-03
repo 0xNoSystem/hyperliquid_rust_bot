@@ -53,8 +53,8 @@ pub struct StochRange{
 
 impl Strategy{
 
-    pub fn new(risk: Risk, style: Style, trend: Direction, follow_trend: bool) -> Self{
-        Self { risk, style, trend, follow_trend }
+    pub fn new(risk: Risk, style: Style, stance: Stance, follow_trend: bool) -> Self{
+        Self { risk, style, stance, follow_trend }
     }
 
     
@@ -68,7 +68,7 @@ impl Strategy{
 
     pub fn get_stoch_threshold(&self) -> StochRange{
         match self.risk{
-            Risk::Low => StochRange{low: 2.0., high: 95.0},
+            Risk::Low => StochRange{low: 2.0, high: 95.0},
             Risk::Medium => StochRange{low: 15.0, high: 85.0},
             Risk::High => StochRange{low:20.0, high: 80.0},
         }
@@ -85,9 +85,6 @@ impl Strategy{
 
     
 
-
-
-
     pub fn update_risk(&mut self, risk: Risk){
         self.risk = risk;
     }
@@ -96,8 +93,8 @@ impl Strategy{
         self.style = style;
     }
 
-    pub fn update_direction(&mut self, direction: Direction){
-        self.direction = direction;
+    pub fn update_direction(&mut self, stance: Stance){
+        self.stance = stance;
     }
     
     pub fn update_follow_trend(&mut self, follow_trend: bool){
@@ -108,7 +105,7 @@ impl Strategy{
 
 impl Default for Strategy{
     fn default() -> Self {
-        Self { risk: Risk::Medium, style: Style::Scalp, direction: Direction::Neutral, follow_trend: true }
+        Self { risk: Risk::Medium, style: Style::Scalp, stance: Stance::Neutral, follow_trend: true }
     }
 }
 
@@ -124,8 +121,7 @@ impl Default for Strategy{
 pub struct TradeParams {
     pub strategy: Strategy, 
     pub lev: u32,
-    pub trade_time: u64, // in seconds
-    pub asset: String,
+    pub trade_time: u64,  
     pub time_frame: String,
 }
 
@@ -133,10 +129,10 @@ pub struct TradeParams {
 
 impl TradeParams{
 
-    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient){    
+    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient, asset: String){    
         
             let response = client
-            .update_leverage(lev, self.asset.as_str() , false, None)
+            .update_leverage(lev, asset.as_str() , false, None)
             .await
             .unwrap();
         
@@ -148,18 +144,12 @@ impl TradeParams{
 
 
 
-
-
-
-
 impl Default for TradeParams {
     fn default() -> Self {
         Self {
-            strategy: Strategy::Neutral,
-            risk: Risk::Medium,
+            strategy: Strategy::default(),
             lev: 20,
             trade_time: 300,
-            asset: String::from("SOL"),
             time_frame: String::from("5m"),
         }
     }
@@ -169,13 +159,18 @@ impl fmt::Display for TradeParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "leverage: {}\nStrategy: {:?}\nRisk: {:?},\nTrade time: {} s\nasset: {}\ntime_frame: {}",
+            "leverage: {}\nStrategy: {:?}\nTrade time: {} s\ntime_frame: {}",
             self.lev,
             self.strategy,
-            self.risk,
             self.trade_time,
-            self.asset,
             self.time_frame
         )
     }
+}
+
+
+
+pub struct Trade{
+    size: f32,
+    is_long: bool,
 }

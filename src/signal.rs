@@ -1,11 +1,9 @@
-use hyperliquid_rust_sdk::{InfoClient, BaseUrl};
 use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
 use crate::trade_setup::Strategy;
 use crate::{MAX_HISTORY};
 
 #[derive(Debug)]
 pub struct SignalEngine{
-    info_client: InfoClient,
     indicators_config: IndicatorsConfig,
     rsi: Rsi,
     atr: Atr,
@@ -50,13 +48,17 @@ impl Default for IndicatorsConfig{
 
 impl SignalEngine{
 
-    pub async fn new(config: IndicatorsConfig, strategy: Strategy) -> Self{
-        
+    pub async fn new(config: Option<IndicatorsConfig>, strategy: Strategy) -> Self{
+       
+        let config: IndicatorsConfig = match config{
+            Some(cfg) => cfg,
+            None => IndicatorsConfig::default(),
+        };
+
         let ema_cross = config.ema_cross_short_long_lenghts
         .map(|(short, long)| EmaCross::new(short, long));
 
         SignalEngine{
-            info_client: InfoClient::with_reconnect(None, Some(BaseUrl::Mainnet)).await.unwrap(),
             indicators_config: config.clone(),
             rsi: Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing),
             atr: Atr::new(config.atr_length),
