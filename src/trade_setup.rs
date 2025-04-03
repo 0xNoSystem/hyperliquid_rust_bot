@@ -56,6 +56,14 @@ impl Strategy{
         }
     }
 
+    pub fn get_atr_threshold(&self) -> f32{
+        match self.risk{
+            Risk::Low => 0.001,
+            Risk::Medium => 0.002,
+            Risk::High => 0.003,
+        }
+    }
+
 
 
 
