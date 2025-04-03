@@ -27,9 +27,9 @@ use hyperliquid_rust_bot::signal::{SignalEngine, IndicatorsConfig};
 
 use flume::{bounded, TrySendError};
 
-const SIZE: f32 = 1.0;
-const COIN: &str = "SOL";
-const TF: &str = "1m";
+const SIZE: f32 = 100.0;
+const COIN: &str = "SUI";
+const TF: &str = "15m";
 
 #[tokio::main]
 async fn main(){
@@ -141,7 +141,7 @@ async fn main(){
                 
             }
             
-            if let Some(atr_value) = signal_engine.get_atr(){
+            if let Some(atr_value) = signal_engine.get_atr_normalized(close){
                 println!("🔴ATR : {}", atr_value);
             }
 

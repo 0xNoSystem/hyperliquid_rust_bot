@@ -195,6 +195,11 @@ impl SignalEngine{
     pub fn get_atr(&self) -> Option<f32>{
         self.atr.get_last()
     }
+    pub fn get_atr_normalized(&self, close: f32) -> Option<f32>{
+        self.atr.normalized(close)
+    }
+
+
     pub fn get_sma(&self) -> Option<f32>{
         self.sma.get_last()
     }
