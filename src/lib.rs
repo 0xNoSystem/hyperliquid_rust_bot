@@ -1,7 +1,11 @@
-pub mod market2;
+mod market;
+mod executor;
 pub mod trade_setup;
 pub mod helper;
-pub mod signal;
+mod signal;
 mod consts;
 
-pub use consts::{MAX_HISTORY};
+pub use market::Market;
+pub use consts::{MAX_HISTORY, MARKETS};
+pub use executor::Executor;
+pub use signal::{SignalEngine, IndicatorsConfig};
