@@ -48,9 +48,6 @@ impl TradeParams{
 
 
 
-
-
-
 impl Default for TradeParams {
     fn default() -> Self {
         Self {

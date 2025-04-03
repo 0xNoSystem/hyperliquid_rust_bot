@@ -55,7 +55,7 @@ async fn main(){
         Strategy::Neutral,
     ).await;
 
-    signal_engine.load(&load_candles(&info_client, COIN, TF, 5000).await);
+    signal_engine.load(&load_candles(&info_client, COIN, TF, 1000).await);
 
     let trade_params = TradeParams {
         strategy: Strategy::Neutral,
@@ -111,15 +111,17 @@ async fn main(){
             if time != next_close{
                 if candle_count == 0{
                     signal_engine.update(price, false);
+                    time = next_close;
+                    candle_count = 1;
+                    continue;
                 }
-                candle_count += 1;
                 signal_engine.update(price, true);
                 time = next_close;
+                candle_count += 1;
             }else{
-                signal_engine.update(price, false);    
+                signal_engine.update(price, false);   
             }
             
-
             if let Some(stoch_rsi) = signal_engine.get_stoch_rsi(){
                 println!("🔵STOCH-K: {}", stoch_rsi);
             }
@@ -128,14 +130,15 @@ async fn main(){
                 println!("🟠STOCH-D: {}", stoch_rsi);
             }
 
-            if let Some(rsi_value) = signal_engine.get_rsi(){
-                println!("🟣RSI: {}",&rsi_value);
+            if let Some(rsi_value) = signal_engine.get_sma_rsi(){
+                println!("🟢SMA-RSI: {}", &rsi_value);
                 let _ = tx.try_send(MarketCommand::ExecuteTrade { size: SIZE, rsi: rsi_value});
                     
             };
 
-            if let Some(sma_rsi) = signal_engine.get_sma_rsi(){
-                println!("🟢SMA-RSI: {}", sma_rsi);
+            if let Some(rsi_value) = signal_engine.get_rsi(){
+                println!("🟣RSI: {}",&rsi_value);
+                
             }
             
             if let Some(atr_value) = signal_engine.get_atr(){

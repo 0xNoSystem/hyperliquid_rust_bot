@@ -13,7 +13,7 @@ async fn main(){
 
     for i in 0..5{
         
-        let prices = load_candles(&info_client, "SOL", "1m", 300 ).await;
+        let prices = load_candles(&info_client, "SOL", "1m", 1000 ).await;
 
         //let mut ema = Ema::new(9);
         let mut rsi = Rsi::new(14, 14, Some(10));
