@@ -17,16 +17,16 @@ pub struct SignalEngine{
     price_data: Vec<Price>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IndicatorsConfig{
-    rsi_length: usize,
-    rsi_smoothing: Option<usize>,
-    stoch_rsi_length: usize,
-    atr_length: usize,
-    ema_length: usize,
-    ema_cross_short_long_lenghts: Option<(usize, usize)>,
-    adx_length: usize,
-    sma_length: usize,
+    pub rsi_length: usize,
+    pub rsi_smoothing: Option<usize>,
+    pub stoch_rsi_length: usize,
+    pub atr_length: usize,
+    pub ema_length: usize,
+    pub ema_cross_short_long_lenghts: Option<(usize, usize)>,
+    pub adx_length: usize,
+    pub sma_length: usize,
 }
 
 
@@ -65,7 +65,7 @@ impl SignalEngine{
             adx: Adx::new(config.adx_length, config.adx_length),
             sma: Sma::new(config.sma_length),
             strategy,
-            price_data: Vec::new(),
+            price_data: Vec::with_capacity(MAX_HISTORY),
         }
     }
 
@@ -95,6 +95,7 @@ impl SignalEngine{
     }
 
     pub fn update_before_close(&mut self, price: Price){
+        
         self.rsi.update_before_close(price);
         self.ema.update_before_close(price);
         if let Some(ref mut ema_cross) = self.ema_cross{
@@ -104,7 +105,6 @@ impl SignalEngine{
         self.atr.update_before_close(price);
         self.sma.update_before_close(price);
     }
-
     pub fn reset(&mut self){
         self.rsi.reset();
         self.ema.reset();
@@ -117,19 +117,21 @@ impl SignalEngine{
     } 
     
     
-    pub async fn change_indicators_config(&mut self, config: IndicatorsConfig){
-        self.reset();
-        let ema_cross = config.ema_cross_short_long_lenghts
-        .map(|(short, long)| EmaCross::new(short, long));
-        self.rsi = Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing);
-        self.atr = Atr::new(config.atr_length);
-        self.ema = Ema::new(config.ema_length);
-        self.ema_cross = ema_cross;
-        self.adx= Adx::new(config.adx_length, config.adx_length);
-        self.sma = Sma::new(config.sma_length);
-
-        self.indicators_config = config.clone();
-        self.load(&self.price_data.clone());
+    pub fn change_indicators_config(&mut self, config: IndicatorsConfig){
+        if config != self.indicators_config{
+            self.reset();
+            let ema_cross = config.ema_cross_short_long_lenghts
+            .map(|(short, long)| EmaCross::new(short, long));
+            self.rsi = Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing);
+            self.atr = Atr::new(config.atr_length);
+            self.ema = Ema::new(config.ema_length);
+            self.ema_cross = ema_cross;
+            self.adx= Adx::new(config.adx_length, config.adx_length);
+            self.sma = Sma::new(config.sma_length);
+            self.indicators_config = config.clone();
+            self.load(&self.price_data.clone());
+        }
+        
     }
     
     pub fn get_indicators_config(&self) -> &IndicatorsConfig{
@@ -152,15 +154,14 @@ impl SignalEngine{
     }	
 
     pub fn load(&mut self, price_data: &Vec<Price>){
-
-        self.rsi.load(&price_data);
-        self.ema.load(&price_data);
-        self.atr.load(&price_data);
-        self.sma.load(&price_data);
-        if let Some(ref mut ema_cross) = self.ema_cross{
-            ema_cross.load(&price_data);
+        self.price_data.clear();
+        for p in price_data{
+            self.update_after_close(*p);
         }
-        self.adx.load(&price_data);
+    }
+
+    pub fn is_ready(&self) -> bool{
+        self.rsi.is_ready() && self.ema.is_ready() && self.atr.is_ready() && self.sma.is_ready() && (self.ema_cross.is_none() || self.ema_cross.clone().unwrap().is_ready())
     }
 
     pub fn get_rsi(&self) -> Option<f32>{
@@ -189,14 +190,23 @@ impl SignalEngine{
             return None;
         }
     }   
+
+    pub fn check_ema_cross(&mut self) -> Option<bool>{
+        if let Some(ref mut ema_cross) = self.ema_cross{
+            ema_cross.check_for_cross()
+        }else{
+            None
+        }
+    }
+
     pub fn get_adx(&self) -> Option<f32>{
         self.adx.get_last()
     }
     pub fn get_atr(&self) -> Option<f32>{
         self.atr.get_last()
     }
-    pub fn get_atr_normalized(&self, close: f32) -> Option<f32>{
-        self.atr.normalized(close)
+    pub fn get_atr_normalized(&self, price: f32) -> Option<f32>{
+        self.atr.normalized(price)
     }
 
 
@@ -204,9 +214,11 @@ impl SignalEngine{
         self.sma.get_last()
     }
     
-    pub fn get_last_price(&self) -> Option<Price>{
+    pub fn get_last_close(&self) -> Option<Price>{
         self.price_data.last().cloned()
     }
+
+    
 }
 
 

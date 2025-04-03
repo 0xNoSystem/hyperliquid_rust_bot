@@ -27,8 +27,8 @@ use hyperliquid_rust_bot::signal::{SignalEngine, IndicatorsConfig};
 
 use flume::{bounded, TrySendError};
 
-const SIZE: f32 = 100.0;
-const COIN: &str = "SUI";
+const SIZE: f32 = 1.0;
+const COIN: &str = "SOL";
 const TF: &str = "15m";
 
 #[tokio::main]
@@ -55,7 +55,7 @@ async fn main(){
         Strategy::Neutral,
     ).await;
 
-    signal_engine.load(&load_candles(&info_client, COIN, TF, 1000).await);
+    signal_engine.load(&load_candles(&info_client, COIN, TF, 500).await);
 
     let trade_params = TradeParams {
         strategy: Strategy::Neutral,
@@ -87,9 +87,6 @@ async fn main(){
         }
     }
     });
-        
-    
-
     let (mut receiver, _subscription_id) = subscribe_candles(30000,COIN, TF).await;
 
     let mut time = 0;
@@ -110,11 +107,26 @@ async fn main(){
             
             if time != next_close{
                 if candle_count == 0{
+                    println!("{:?}", signal_engine.get_indicators_config());
                     signal_engine.update(price, false);
                     time = next_close;
                     candle_count = 1;
                     continue;
                 }
+                if candle_count ==  4{
+                    let new_config = IndicatorsConfig {
+                        rsi_length: 12,
+                        rsi_smoothing: Some(8),
+                        stoch_rsi_length: 12,
+                        atr_length: 10,
+                        ema_length: 7,
+                        ema_cross_short_long_lenghts: Some((9, 21)),
+                        adx_length: 8,
+                        sma_length: 11 };
+                    signal_engine.change_indicators_config(new_config);
+                    println!("\n\nNEW CONFIG ==> {:?}\n\n", signal_engine.get_indicators_config());
+                };
+                //main part
                 signal_engine.update(price, true);
                 time = next_close;
                 candle_count += 1;
@@ -130,19 +142,20 @@ async fn main(){
                 println!("🟠STOCH-D: {}", stoch_rsi);
             }
 
-            if let Some(rsi_value) = signal_engine.get_sma_rsi(){
-                println!("🟢SMA-RSI: {}", &rsi_value);
+            if let Some(rsi_value) = signal_engine.get_rsi(){
+                println!("🟢RSI: {}", &rsi_value);
                 let _ = tx.try_send(MarketCommand::ExecuteTrade { size: SIZE, rsi: rsi_value});
                     
             };
 
-            if let Some(rsi_value) = signal_engine.get_rsi(){
-                println!("🟣RSI: {}",&rsi_value);
+            if let Some(rsi_value) = signal_engine.get_sma_rsi(){
+                println!("🟣SMA-RSI: {}",&rsi_value);
                 
             }
             
             if let Some(atr_value) = signal_engine.get_atr_normalized(close){
-                println!("🔴ATR : {}", atr_value);
+                println!("🔴ATR (NORMALIZED) : {}", atr_value);
+                println!("🔴ATR (RAW) : {}", signal_engine.get_atr().unwrap());
             }
 
             if let Some(adx_value) = signal_engine.get_adx(){
@@ -154,14 +167,21 @@ async fn main(){
             }
 
             if let Some(trend) = signal_engine.get_ema_cross_trend(){
-                println!("EMA CROSS UPTREND: {}", trend );
+                println!("DOUBLE EMA uptrend: {}", trend );
+            }
+
+            if let Some(ema_cross) = signal_engine.check_ema_cross(){
+                if ema_cross{
+                    println!("*****EMA CROSS UP*****");
+                }else{
+                    println!("*****EMA CROSS DOWN*****");
+                }
             }
 
             if let Some(ema_slope) = signal_engine.get_ema_slope(){
                 println!("EMA SLOPE: {}", ema_slope);
             }
-
-
+            
         }
 
     }
