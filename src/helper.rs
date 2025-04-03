@@ -4,10 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use kwant::indicators::{Price};
 
 pub async fn subscribe_candles(
-    session_time_secs: u64,
     coin: &str,
     tf: &str,
-) -> (UnboundedReceiver<Message>, u32) {
+) -> UnboundedReceiver<Message> {
     let mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
     
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -26,12 +25,12 @@ pub async fn subscribe_candles(
     
     // Auto-unsubscribe
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(session_time_secs)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(99999999)).await;
         println!("Unsubscribing from candle data");
         let _ = info_client.unsubscribe(subscription_id).await;
     });
 
-    (receiver, subscription_id)
+    receiver
 }
 
 

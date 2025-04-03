@@ -5,17 +5,19 @@
 use log::info;
 use ethers::signers::LocalWallet;
 use hyperliquid_rust_sdk::{ExchangeClient, InfoClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, BaseUrl};
-use crate::trade_setup::{Strategy, Risk, TradeParams};
+use crate::trade_setup::{Strategy, Risk, TradeParams, TradeCommand};
 use crate::{MAX_HISTORY, MARKETS};
 use crate::{Executor, SignalEngine, IndicatorsConfig};
-use crate::helper::load_candles;
+use crate::helper::{load_candles, subscribe_candles};
 use kwant::indicators::{Price};
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use tokio::{
+    sync::mpsc::{unbounded_channel,UnboundedReceiver},
     time::{sleep, Duration},
 };
+use flume::{bounded, TrySendError};
 
 
 pub struct Market {
@@ -128,5 +130,30 @@ impl Market{
     fn get_session_pnl(&self) -> f32{
 
         self.pnl_history.iter().sum()
+    }
+}
+
+
+impl Market{
+
+    pub async fn start(&mut self) -> Result<(), String>{
+        self.init().await?;
+
+        //Setup channels
+        let (tx_exec, mut rv_exec) = bounded::<TradeCommand>(0);
+        let (tx_signal, mut rv_signal) = unbounded_channel::<Price>();
+
+        //Subscribe candles
+        let mut recv = subscribe_candles(self.asset.as_str(), self.trade_params.time_frame.as_str());
+
+        //Start engine
+        
+
+        //Start exucutor
+
+
+        //main loop
+
+        Ok(())
     }
 }

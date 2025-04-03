@@ -170,7 +170,7 @@ impl fmt::Display for TradeParams {
 
 
 
-pub struct Trade{
+pub struct TradeCommand{
     size: f32,
     is_long: bool,
 }
