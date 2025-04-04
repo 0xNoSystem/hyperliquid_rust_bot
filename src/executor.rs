@@ -19,8 +19,6 @@ pub struct Executor {
 use tokio::sync::mpsc::UnboundedSender;
 use flume::Receiver;
 
-/////   CHANGE NAME TO EXECUTOR AND ADD IN MARKET TO MANAGE TRADES
-
 
 impl Executor {
 
@@ -40,12 +38,13 @@ impl Executor {
         }
     }
 
-    pub async fn open_order(&mut self,size: f32, is_long: bool){
+    pub async fn open_order(&mut self,trade: TradeCommand){
+        
 
         let market_open_params = MarketOrderParams {
             asset: self.asset.as_str(),
-            is_buy: is_long,
-            sz: size as f64,
+            is_buy: trade.is_long,
+            sz: trade.size as f64,
             px: None,
             slippage: Some(0.01), // 1% slippage
             cloid: None,
@@ -56,6 +55,7 @@ impl Executor {
             .market_open(market_open_params)
             .await
             .unwrap();
+
         info!("Market open order placed: {response:?}");
 
         let response = match response {
@@ -69,12 +69,12 @@ impl Executor {
             _ => panic!("Unexpected status: {status:?}"),
         };
     }
-    async fn close_order(&mut self, size: f32, is_long: bool)   {
+    async fn close_order(&mut self, trade: TradeCommand)   {
 
         let market_close_params = MarketOrderParams {
             asset: self.asset.as_str(),
-            is_buy: !is_long,
-            sz: size as f64,
+            is_buy: !trade.is_long,
+            sz: trade.size as f64,
             px: None,
             slippage: Some(0.01), // 1% slippage
             cloid: None,
@@ -101,21 +101,22 @@ impl Executor {
 
 
 
-    pub async fn market_trade_exec(&mut self, size: f32, is_long: bool, time: u64){
+    /*pub async fn market_trade_exec(&mut self,trade: TradeCommand){
         
             if !self.is_active(){
                 
                 self.trade_active.store(true, Ordering::SeqCst);
 
                 self.open_order(size, is_long).await;
-                let _ = sleep(Duration::from_secs(time)).await;
+                let _ = sleep(Duration::from_secs(trade.duration)).await;
 
                 self.close_order(size, is_long).await;
 
                 self.trade_active.store(false, Ordering::SeqCst);
         };
     }
-        
+     */
+
     pub fn is_active(&self) -> bool{
         self.trade_active.load(Ordering::SeqCst)
     }
@@ -135,7 +136,20 @@ impl Executor {
         self.trade_rv.is_some() && self.info_tx.is_some()
     }
 
+    
+    pub async fn start(&mut self){
 
+        if self.is_connected(){
+            
+            while let Ok(trade_signal) = self.trade_rv.as_mut().unwrap().recv_async().await{
+                 
+             
+
+        }  
+   
+    }
+
+    }
 
 
 

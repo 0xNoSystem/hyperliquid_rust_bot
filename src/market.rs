@@ -158,7 +158,7 @@ impl Market{
         self.executor.connect_market(rv_exec, info_tx);
 
         //main loop
-
+        
         Ok(())
     }
 }

@@ -171,29 +171,34 @@ impl fmt::Display for TradeParams {
 
 #[derive(Clone, Debug, Copy)]
 pub struct TradeCommand{
-    size: f32,
-    is_long: bool,
+    pub size: f64,
+    pub is_long: bool,
+    pub duration: u64,
 }
 
 #[derive(Clone, Debug, Copy)]
 pub struct PriceData{
-    price: Price,
-    time: u64,
+    pub price: Price,
+    pub time: u64,
 }
 
 #[derive(Clone, Debug, Copy)]
 pub struct TradeInfo{
-    open: f32,
-    close: f32,
-    pnl: f32,
-    fee: f32,
-    is_long: bool,
-    duration: u64,
-    oid: u64,
+    pub open: f32,
+    pub close: f32,
+    pub pnl: f32,
+    pub fee: f32,
+    pub is_long: bool,
+    pub duration: u64,
+    pub oid: u64,
 }
 
 
-
+#[derive(Clone, Debug, Copy)]
+pub struct TradeFillInfo{
+    price: f32,
+    //rest
+}
 
 
 

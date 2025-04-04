@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 hyperliquid_rust_sdk = { git = "https://github.com/0xNoSystem/hyperliquid-rust-sdk.git", branch = "master" }
-kwant = { git = "https://github.com/0xNoSystem/Indicators_rs.git", branch = "test" }
+kwant = { git = "https://github.com/0xNoSystem/Indicators_rs.git", branch = "main" }
 chrono = "0.4.26"
 env_logger = "0.10.0"
 ethers = {version = "2.0.14", features = ["eip712", "abigen"]}

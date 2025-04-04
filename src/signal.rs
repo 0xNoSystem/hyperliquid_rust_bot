@@ -214,7 +214,11 @@ impl SignalEngine{
 
 impl SignalEngine{
 
-    pub fn connect_market(&mut self, receiver: UnboundedReceiver<PriceData>, sender: Sender<TradeCommand>){
+    pub fn connect_market(
+        &mut self,
+        receiver: UnboundedReceiver<PriceData>,
+        sender: Sender<TradeCommand>)
+    {
         
         self.price_rv = Some(receiver);
         self.trade_tx = Some(sender); 
@@ -225,20 +229,28 @@ impl SignalEngine{
     }
     pub async fn start(&mut self){
         let mut time = 0;
+        let mut init = false;
+
         if self.is_connected(){
             while let Some(price_data) = self.price_rv.as_mut().unwrap().recv().await{
-            
-                let close_time = price_data.time;
-                if time != close_time{
-                   self.update(price_data.price, true); 
-                }else{
+            let close_time = price_data.time;
+            if !init{
                     self.update(price_data.price, false);
+                    time = close_time;
+                    init = true;
+                    continue;
                 }
 
-        
+            if time != close_time{
+                     self.update(price_data.price, true); 
+            }else{
+                    self.update(price_data.price, false);
+            }
+                
+            //signal logic
+             
 
-        }
-    }
+        }}
     }
 
 
