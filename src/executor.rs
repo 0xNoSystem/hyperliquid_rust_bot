@@ -7,11 +7,17 @@ use tokio::{
     time::{sleep, Duration},
 };
 
+use crate::trade_setup::{TradeCommand, TradeInfo};
+
 pub struct Executor {
+    trade_rv: Option<Receiver<TradeCommand>>,
+    info_tx: Option<UnboundedSender<TradeInfo>>,
     asset: String,
     exchange_client: ExchangeClient,
     trade_active: Arc<AtomicBool>,
 }
+use tokio::sync::mpsc::UnboundedSender;
+use flume::Receiver;
 
 /////   CHANGE NAME TO EXECUTOR AND ADD IN MARKET TO MANAGE TRADES
 
@@ -26,6 +32,8 @@ impl Executor {
     ) -> Self {
         
         Executor{
+            trade_rv: None,
+            info_tx: None,
             asset,
             exchange_client: exchange_client,
             trade_active: Arc::new(AtomicBool::new(false)),
@@ -112,4 +120,25 @@ impl Executor {
         self.trade_active.load(Ordering::SeqCst)
     }
     
+
+    pub fn connect_market(
+        &mut self,
+        receiver: Receiver<TradeCommand>,
+        sender: UnboundedSender<TradeInfo>)
+    {
+        self.trade_rv = Some(receiver);
+        self.info_tx = Some(sender);
+    }
+
+
+    pub fn is_connected(&self) -> bool{
+        self.trade_rv.is_some() && self.info_tx.is_some()
+    }
+
+
+
+
+
+
+
 }

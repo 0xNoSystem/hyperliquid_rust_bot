@@ -5,7 +5,7 @@
 use log::info;
 use ethers::signers::LocalWallet;
 use hyperliquid_rust_sdk::{ExchangeClient, InfoClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, BaseUrl};
-use crate::trade_setup::{Strategy, Risk, TradeParams, TradeCommand};
+use crate::trade_setup::{Strategy, Risk, TradeParams, TradeCommand, PriceData, TradeInfo};
 use crate::{MAX_HISTORY, MARKETS};
 use crate::{Executor, SignalEngine, IndicatorsConfig};
 use crate::helper::{load_candles, subscribe_candles};
@@ -17,7 +17,7 @@ use tokio::{
     sync::mpsc::{unbounded_channel,UnboundedReceiver},
     time::{sleep, Duration},
 };
-use flume::{bounded, TrySendError};
+use flume::{bounded, TrySendError, Sender, Receiver};
 
 
 pub struct Market {
@@ -87,7 +87,8 @@ impl Market{
 
     async fn load_engine(&mut self, candle_count: u64) -> Result<(), String>{
 
-        let price_data = load_candles(&self.info_client, self.asset.as_str(), self.trade_params.time_frame.as_str(), candle_count).await?;
+        let price_data = load_candles(&self.info_client, self.asset.as_str(), self.trade_params.time_frame.as_str(), candle_count)
+        .await?;
 
         self.signal_engine.load(&price_data);
         Ok(())
@@ -140,17 +141,21 @@ impl Market{
         self.init().await?;
 
         //Setup channels
+        let (tx_info, mut rv_info) = unbounded_channel::<TradeInfo>();
         let (tx_exec, mut rv_exec) = bounded::<TradeCommand>(0);
-        let (tx_signal, mut rv_signal) = unbounded_channel::<Price>();
+        let (tx_signal, mut rv_signal) = unbounded_channel::<PriceData>();
 
         //Subscribe candles
         let mut recv = subscribe_candles(self.asset.as_str(), self.trade_params.time_frame.as_str());
 
-        //Start engine
+        //Start engine 
+        let trade_tx = tx_exec.clone();
+        self.signal_engine.connect_market(rv_signal, trade_tx);
         
 
         //Start exucutor
-
+        let info_tx = tx_info.clone();  
+        self.executor.connect_market(rv_exec, info_tx);
 
         //main loop
 

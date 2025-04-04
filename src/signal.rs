@@ -1,9 +1,13 @@
 use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
-use crate::trade_setup::Strategy;
+use crate::trade_setup::{PriceData, Strategy, TradeCommand};
 use crate::{MAX_HISTORY};
+use flume::Sender;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 #[derive(Debug)]
 pub struct SignalEngine{
+    price_rv: Option<UnboundedReceiver<PriceData>>,
+    trade_tx: Option<Sender<TradeCommand>>,
     indicators_config: IndicatorsConfig,
     rsi: Rsi,
     atr: Atr,
@@ -59,6 +63,8 @@ impl SignalEngine{
         .map(|(short, long)| EmaCross::new(short, long));
 
         SignalEngine{
+            price_rv: None,
+            trade_tx: None,
             indicators_config: config.clone(),
             rsi: Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing),
             atr: Atr::new(config.atr_length),
@@ -206,4 +212,44 @@ impl SignalEngine{
     }
 }
 
+impl SignalEngine{
 
+    pub fn connect_market(&mut self, receiver: UnboundedReceiver<PriceData>, sender: Sender<TradeCommand>){
+        
+        self.price_rv = Some(receiver);
+        self.trade_tx = Some(sender); 
+    }
+
+    pub fn is_connected(&self) -> bool{
+        self.price_rv.is_some() && self.trade_tx.is_some()
+    }
+    pub async fn start(&mut self){
+        let mut time = 0;
+        if self.is_connected(){
+            while let Some(price_data) = self.price_rv.as_mut().unwrap().recv().await{
+            
+                let close_time = price_data.time;
+                if time != close_time{
+                   self.update(price_data.price, true); 
+                }else{
+                    self.update(price_data.price, false);
+                }
+
+        
+
+        }
+    }
+    }
+
+
+
+
+
+    
+}
+
+
+
+
+
+    

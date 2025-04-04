@@ -2,7 +2,7 @@ use hyperliquid_rust_sdk::{ExchangeClient};
 //use kwant::indicators::{Rsi, StochRsi, Atr, Adx, Ema, EmaCross, Sma};
 use log::info;
 use std::fmt;
-
+use kwant::indicators::Price;
 
 
 
@@ -169,8 +169,35 @@ impl fmt::Display for TradeParams {
 }
 
 
-
+#[derive(Clone, Debug, Copy)]
 pub struct TradeCommand{
     size: f32,
     is_long: bool,
 }
+
+#[derive(Clone, Debug, Copy)]
+pub struct PriceData{
+    price: Price,
+    time: u64,
+}
+
+#[derive(Clone, Debug, Copy)]
+pub struct TradeInfo{
+    open: f32,
+    close: f32,
+    pnl: f32,
+    fee: f32,
+    is_long: bool,
+    duration: u64,
+    oid: u64,
+}
+
+
+
+
+
+
+
+
+
+
