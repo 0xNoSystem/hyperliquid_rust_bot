@@ -1,7 +1,8 @@
-use hyperliquid_rust_sdk::{BaseUrl, InfoClient, Message, Subscription};
+use hyperliquid_rust_sdk::{BaseUrl, InfoClient, Message, Subscription, UserFillsResponse};
 use tokio::sync::mpsc::UnboundedReceiver;
 use std::time::{SystemTime, UNIX_EPOCH};
 use kwant::indicators::{Price};
+use ethers::types::H160;
 
 pub async fn subscribe_candles(
     coin: &str,
@@ -108,5 +109,38 @@ pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: &str, candle_c
 
     Ok(price_data)
 }
+
+
+
+
+pub async fn user_fills(info_client: &InfoClient, user: String) -> Vec<UserFillsResponse>{
+
+    let user = address(user);
+
+    return info_client.user_fills(user).await.unwrap();
+    
+}
+
+pub fn address(address: String) -> H160 {
+    address.parse().unwrap()
+}
+
+
+
+
+
+pub async fn get_user_fees(info_client: &InfoClient, user: String) -> (f32, f32) {
+    let user = address(user);
+    let user_fees = info_client.user_fees(user).await.unwrap();
+    let add_fee: f32 = user_fees.user_add_rate.parse().unwrap();
+    let cross_fee: f32 = user_fees.user_cross_rate.parse().unwrap();
+    
+    (add_fee, cross_fee)
+}
+
+
+
+
+
 
 

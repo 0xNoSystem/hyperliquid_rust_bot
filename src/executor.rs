@@ -7,7 +7,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-use crate::trade_setup::{TradeCommand, TradeInfo};
+use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo};
 
 pub struct Executor {
     trade_rv: Option<Receiver<TradeCommand>>,
@@ -15,6 +15,7 @@ pub struct Executor {
     asset: String,
     exchange_client: ExchangeClient,
     trade_active: Arc<AtomicBool>,
+    fees: (f32, f32),
 }
 use tokio::sync::mpsc::UnboundedSender;
 use flume::Receiver;
@@ -25,7 +26,7 @@ impl Executor {
     pub fn new(
         asset: String,
         exchange_client: ExchangeClient,
-        
+        fees: (f32, f32),
         
     ) -> Self {
         
@@ -35,11 +36,13 @@ impl Executor {
             asset,
             exchange_client: exchange_client,
             trade_active: Arc::new(AtomicBool::new(false)),
+            fees,
         }
     }
 
-    pub async fn open_order(&mut self,trade: TradeCommand){
+    pub async fn open_order(&mut self,trade: TradeCommand) -> Option<TradeFillInfo>{
         
+        self.trade_active.store(true, Ordering::SeqCst);
 
         let market_open_params = MarketOrderParams {
             asset: self.asset.as_str(),
@@ -62,14 +65,27 @@ impl Executor {
             ExchangeResponseStatus::Ok(exchange_response) => exchange_response,
             ExchangeResponseStatus::Err(e) => panic!("Error with exchange response: {e}"),
         };
+     
         let status = response.data.unwrap().statuses[0].clone();
-        match status {
-            ExchangeDataStatus::Filled(order) => info!("Order filled: {order:?}"),
-            ExchangeDataStatus::Resting(order) => info!("Order resting: {order:?}"),
-            _ => panic!("Unexpected status: {status:?}"),
-        };
+
+         match status{
+            
+            ExchangeDataStatus::Filled(ref order) =>  {
+            
+                println!("Open order filled: {order:?}");
+                let sz: f32 = order.total_sz.parse::<f32>().unwrap();
+                let price: f32 = order.avg_px.parse::<f32>().unwrap(); 
+                let fill_info = TradeFillInfo{fill_type: "Open".to_string(),sz, price, oid: order.oid};
+            
+                return Some(fill_info);
+            },
+
+            _ => None,
+            }
+
+
     }
-    async fn close_order(&mut self, trade: TradeCommand)   {
+    pub async fn close_order(&mut self, trade: TradeCommand) -> Option<TradeFillInfo>   {
 
         let market_close_params = MarketOrderParams {
             asset: self.asset.as_str(),
@@ -91,12 +107,22 @@ impl Executor {
             ExchangeResponseStatus::Ok(exchange_response) => exchange_response,
             ExchangeResponseStatus::Err(e) => panic!("Error with exchange response: {e}"),
         };
+
         let status = response.data.unwrap().statuses[0].clone();
-        match status {
-            ExchangeDataStatus::Filled(order) => info!("Close order filled: {order:?}"),
-            ExchangeDataStatus::Resting(order) => info!("Close order resting: {order:?}"),
-            _ => panic!("Unexpected status: {status:?}"),
-        };
+        match status{
+
+            ExchangeDataStatus::Filled(ref order) =>  {
+
+                println!("Close order filled: {order:?}");
+                let sz: f32 = order.total_sz.parse::<f32>().unwrap();
+                let price: f32 = order.avg_px.parse::<f32>().unwrap(); 
+                let fill_info = TradeFillInfo{fill_type: "Close".to_string(),sz, price, oid: order.oid};
+                self.trade_active.store(false, Ordering::SeqCst);
+                return Some(fill_info);
+            },
+
+            _ => None,
+    }
     }
 
 
@@ -116,6 +142,20 @@ impl Executor {
         };
     }
      */
+
+
+    fn calculate_pnl(&self,is_long: bool, trade_fill_open: &TradeFillInfo, trade_fill_close: &TradeFillInfo) -> (f32, f32){
+        let fee_open = trade_fill_open.sz * trade_fill_open.price * self.fees.1;
+        let fee_close = trade_fill_close.sz * trade_fill_close.price * self.fees.1;
+        
+        let pnl = if is_long{
+            trade_fill_close.sz * (trade_fill_close.price - trade_fill_open.price) - fee_open - fee_close
+        }else{
+            trade_fill_close.sz * (trade_fill_open.price - trade_fill_close.price) - fee_open - fee_close
+        };
+
+        (fee_open + fee_close, pnl)
+    }
 
     pub fn is_active(&self) -> bool{
         self.trade_active.load(Ordering::SeqCst)
@@ -138,19 +178,35 @@ impl Executor {
 
     
     pub async fn start(&mut self){
-
+        println!("EXECUTOR STARTED");
         if self.is_connected(){
-            
+            let info_sender = self.info_tx.clone().unwrap();
             while let Ok(trade_signal) = self.trade_rv.as_mut().unwrap().recv_async().await{
                  
-             
+        
+                let trade_fill_open = self.open_order(trade_signal).await.unwrap();
+                let _ = sleep(Duration::from_secs(trade_signal.duration)).await;
 
+                let trade_fill_close = self.close_order(trade_signal).await.unwrap();
+        
+                let (fees, pnl) = self.calculate_pnl(trade_signal.is_long, &trade_fill_open, &trade_fill_close);
+
+                let trade_info = TradeInfo{
+                    open: trade_fill_open.price,
+                    close: trade_fill_close.price,
+                    pnl,
+                    fee: fees,
+                    is_long: trade_signal.is_long,
+                    duration: trade_signal.duration,
+                    oid: (trade_fill_open.oid, trade_fill_close.oid)
+                };
+
+                let _ = info_sender.send(trade_info);
         }  
    
     }
 
     }
-
 
 
 

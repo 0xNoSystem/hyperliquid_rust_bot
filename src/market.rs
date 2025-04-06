@@ -4,11 +4,11 @@
 #![allow(dead_code)]
 use log::info;
 use ethers::signers::LocalWallet;
-use hyperliquid_rust_sdk::{ExchangeClient, InfoClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, BaseUrl};
+use hyperliquid_rust_sdk::{Subscription,Message,ExchangeClient, InfoClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, BaseUrl};
 use crate::trade_setup::{Strategy, Risk, TradeParams, TradeCommand, PriceData, TradeInfo};
 use crate::{MAX_HISTORY, MARKETS};
 use crate::{Executor, SignalEngine, IndicatorsConfig};
-use crate::helper::{load_candles, subscribe_candles};
+use crate::helper::{load_candles, subscribe_candles, get_user_fees};
 use kwant::indicators::{Price};
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -45,7 +45,7 @@ impl Market{
         let mut info_client = InfoClient::with_reconnect(None, Some(BaseUrl::Mainnet)).await.unwrap();
         let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
         let exchange_client_exec = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
-
+        let fees = get_user_fees(&info_client, public_key.clone()).await;
         Ok(Market{
             wallet, 
             public_key,
@@ -56,7 +56,7 @@ impl Market{
             trade_params : trade_params.clone(),
             asset: asset.clone(), 
             signal_engine: SignalEngine::new(indicators_config, trade_params.strategy).await,
-            executor: Executor::new(asset, exchange_client_exec),
+            executor: Executor::new(asset, exchange_client_exec, fees),
         })
     }
     
@@ -132,33 +132,63 @@ impl Market{
 
         self.pnl_history.iter().sum()
     }
+
+    
 }
 
 
 impl Market{
 
-    pub async fn start(&mut self) -> Result<(), String>{
+    pub async fn start(mut self) -> Result<(), String>{
         self.init().await?;
-
+        let mut signal_engine = self.signal_engine;
+        let mut executor = self.executor;
         //Setup channels
         let (tx_info, mut rv_info) = unbounded_channel::<TradeInfo>();
         let (tx_exec, mut rv_exec) = bounded::<TradeCommand>(0);
         let (tx_signal, mut rv_signal) = unbounded_channel::<PriceData>();
 
         //Subscribe candles
-        let mut recv = subscribe_candles(self.asset.as_str(), self.trade_params.time_frame.as_str());
+        let mut receiver = subscribe_candles(self.asset.as_str(), self.trade_params.time_frame.as_str()).await;
 
         //Start engine 
         let trade_tx = tx_exec.clone();
-        self.signal_engine.connect_market(rv_signal, trade_tx);
-        
+        signal_engine.connect_market(rv_signal, trade_tx);
 
         //Start exucutor
         let info_tx = tx_info.clone();  
-        self.executor.connect_market(rv_exec, info_tx);
-
+        executor.connect_market(rv_exec, info_tx);
         //main loop
-        
+        tokio::spawn(async move {
+            signal_engine.start().await;
+        });
+
+        tokio::spawn(async move {
+            executor.start().await;
+        });
+
+        tokio::spawn(async move {
+            while let Some(Message::Candle(candle)) = receiver.recv().await{
+                let timestamp = candle.data.time_close;
+                let close = candle.data.close.parse::<f32>().ok().unwrap();
+                let high = candle.data.high.parse::<f32>().ok().unwrap();
+                let low = candle.data.low.parse::<f32>().ok().unwrap();            
+                let open = candle.data.open.parse::<f32>().ok().unwrap();
+                let price = Price{open,high, low, close};
+                let price_data = PriceData{price, time: timestamp};
+
+                    let _ = tx_signal.send(price_data);
+                }
+        });
+
+        while let Some(trade_info) = rv_info.recv().await{
+            println!("Trade info received: {trade_info:?}");
+            self.pnl_history.push(trade_info.pnl);
+        }
+
+
+
+
         Ok(())
     }
 }

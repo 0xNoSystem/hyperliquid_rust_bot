@@ -1,5 +1,5 @@
 use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
-use crate::trade_setup::{PriceData, Strategy, TradeCommand};
+use crate::trade_setup::{PriceData, Strategy, TradeCommand, Style, Stance};
 use crate::{MAX_HISTORY};
 use flume::Sender;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -19,7 +19,7 @@ pub struct SignalEngine{
     price_data: Vec<Price>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IndicatorsConfig{
     rsi_length: usize,
     rsi_smoothing: Option<usize>,
@@ -125,21 +125,21 @@ impl SignalEngine{
     } 
     
     
-    pub async fn change_indicators_config(&mut self, config: IndicatorsConfig){
-        self.reset();
-        let ema_cross = config.ema_cross_short_long_lenghts
-        .map(|(short, long)| EmaCross::new(short, long));
-        self.rsi = Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing);
-        self.atr = Atr::new(config.atr_length);
-        self.ema = Ema::new(config.ema_length);
-        self.ema_cross = ema_cross;
-        self.adx= Adx::new(config.adx_length, config.adx_length);
-        self.sma = Sma::new(config.sma_length);
-
-        self.indicators_config = config.clone();
-        self.load(&self.price_data.clone());
-    }
-    
+     pub fn change_indicators_config(&mut self, config: IndicatorsConfig){
+        if config != self.indicators_config{
+            self.reset();
+            let ema_cross = config.ema_cross_short_long_lenghts
+            .map(|(short, long)| EmaCross::new(short, long));
+            self.rsi = Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing);
+            self.atr = Atr::new(config.atr_length);
+            self.ema = Ema::new(config.ema_length);
+            self.ema_cross = ema_cross;
+            self.adx= Adx::new(config.adx_length, config.adx_length);
+            self.sma = Sma::new(config.sma_length);
+            self.indicators_config = config.clone();
+            self.load(&self.price_data.clone());
+        }
+     }
     pub fn get_indicators_config(&self) -> &IndicatorsConfig{
         &self.indicators_config
     }
@@ -159,16 +159,15 @@ impl SignalEngine{
         &self.price_data
     }	
 
-    pub fn load(&mut self, price_data: &Vec<Price>){
-
-        self.rsi.load(&price_data);
-        self.ema.load(&price_data);
-        self.atr.load(&price_data);
-        self.sma.load(&price_data);
-        if let Some(ref mut ema_cross) = self.ema_cross{
-            ema_cross.load(&price_data);
+     pub fn load(&mut self, price_data: &Vec<Price>){
+        self.price_data.clear();
+        for p in price_data{
+            self.update_after_close(*p);
         }
-        self.adx.load(&price_data);
+    }
+
+    pub fn is_ready(&self) -> bool{
+        self.rsi.is_ready() && self.ema.is_ready() && self.atr.is_ready() && self.sma.is_ready() && (self.ema_cross.is_none() || self.ema_cross.clone().unwrap().is_ready())
     }
 
     pub fn get_rsi(&self) -> Option<f32>{
@@ -197,11 +196,22 @@ impl SignalEngine{
             return None;
         }
     }   
+
+     pub fn check_ema_cross(&mut self) -> Option<bool>{
+        if let Some(ref mut ema_cross) = self.ema_cross{
+            ema_cross.check_for_cross()
+        }else{
+            None
+        }
+    }
     pub fn get_adx(&self) -> Option<f32>{
         self.adx.get_last()
     }
     pub fn get_atr(&self) -> Option<f32>{
         self.atr.get_last()
+    }
+    pub fn get_atr_normalized(&self, price: f32) -> Option<f32>{
+        self.atr.normalized(price)
     }
     pub fn get_sma(&self) -> Option<f32>{
         self.sma.get_last()
@@ -210,8 +220,45 @@ impl SignalEngine{
     pub fn get_last_price(&self) -> Option<Price>{
         self.price_data.last().cloned()
     }
-}
 
+    fn get_signal(&self) -> Option<TradeCommand>{
+
+        if !self.is_ready(){
+            return None;
+        }
+
+        let rsi_range = self.strategy.get_rsi_threshold();
+        let stoch_range = self.strategy.get_stoch_threshold();
+        
+
+        let rsi = self.get_rsi().unwrap();
+        let stoch = self.get_stoch_rsi().unwrap();
+        
+        match self.strategy.style{
+            Style::Scalp => {
+                if rsi < rsi_range.low && stoch < stoch_range.low{
+                    if self.strategy.stance == Stance::Bear{
+                        return None;
+                    }else{
+                        return Some(TradeCommand{size: 1.0, is_long: true, duration: 100});
+                    }
+                }else if rsi > rsi_range.high && stoch > stoch_range.high{
+                    if self.strategy.stance == Stance::Bull{
+                        return None;
+                    }else{
+                        return Some(TradeCommand{size: 1.0, is_long: false, duration: 100});
+                    }
+                }else{
+                    return None;
+                }
+            },
+
+            _ => {
+                return None;
+            }
+        }
+    }
+}
 impl SignalEngine{
 
     pub fn connect_market(
@@ -230,10 +277,13 @@ impl SignalEngine{
     pub async fn start(&mut self){
         let mut time = 0;
         let mut init = false;
-
         if self.is_connected(){
+            
+        let tx_sender = self.trade_tx.clone().unwrap();
             while let Some(price_data) = self.price_rv.as_mut().unwrap().recv().await{
             let close_time = price_data.time;
+            let price = price_data.price.close;
+            println!("\n\nPRICE => {}$", price);
             if !init{
                     self.update(price_data.price, false);
                     time = close_time;
@@ -241,15 +291,60 @@ impl SignalEngine{
                     continue;
                 }
 
+
             if time != close_time{
                      self.update(price_data.price, true); 
+                     time = close_time;
             }else{
                     self.update(price_data.price, false);
             }
-                
-            //signal logic
-             
 
+            if let Some(stoch_rsi) = self.get_stoch_rsi(){
+                println!("🔵STOCH-K: {}", stoch_rsi);
+            }
+            
+            if let Some(stoch_rsi) = self.get_stoch_signal(){
+                println!("🟠STOCH-D: {}", stoch_rsi);
+            }
+
+            if let Some(rsi_value) = self.get_rsi(){
+                println!("🟢RSI: {}", &rsi_value);
+                    
+            };
+
+            if let Some(rsi_value) = self.get_sma_rsi(){
+                println!("🟣SMA-RSI: {}",&rsi_value);
+                
+            }
+            
+            if let Some(atr_value) = self.get_atr_normalized(price){
+                println!("🔴ATR (NORMALIZED) : {}", atr_value);
+                println!("🔴ATR (RAW) : {}", self.get_atr().unwrap());
+            }
+
+            if let Some(adx_value) = self.get_adx(){
+                println!("🟡ADX : {}", adx_value);
+            }
+
+            if let Some(ema) = self.get_ema(){
+                println!("🟠EMA: {}", ema);
+            }
+
+            if let Some(trend) = self.get_ema_cross_trend(){
+                println!("DOUBLE EMA uptrend: {}", trend );
+            }
+
+            if let Some(ema_cross) = self.check_ema_cross(){
+                if ema_cross{
+                    println!("*****EMA CROSS UP*****");
+                }else{
+                    println!("*****EMA CROSS DOWN*****");
+                }
+            }
+
+            if let Some(trade_command) = self.get_signal(){
+                let _ = tx_sender.try_send(trade_command);
+            }
         }}
     }
 

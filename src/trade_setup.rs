@@ -6,20 +6,20 @@ use kwant::indicators::Price;
 
 
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub enum Risk {
     Low,
     Medium,
     High,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub enum Style{
     Scalp,
     Swing,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub enum Stance{
     Bull,
     Bear,
@@ -27,7 +27,7 @@ pub enum Stance{
 }
 
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub struct Strategy {
    pub risk: Risk,
    pub style: Style,    
@@ -62,7 +62,7 @@ impl Strategy{
         match self.risk{
             Risk::Low => RsiRange{low: 25.0, high: 78.0},
             Risk::Medium => RsiRange{low: 30.0, high: 70.0},
-            Risk::High => RsiRange{low: 33.0, high: 68.0},
+            Risk::High => RsiRange{low: 33.0, high: 67.0},
         }
     }
 
@@ -150,7 +150,7 @@ impl Default for TradeParams {
             strategy: Strategy::default(),
             lev: 20,
             trade_time: 300,
-            time_frame: String::from("5m"),
+            time_frame: String::from("1m"),
         }
     }
 }
@@ -190,14 +190,18 @@ pub struct TradeInfo{
     pub fee: f32,
     pub is_long: bool,
     pub duration: u64,
-    pub oid: u64,
+    pub oid: (u64, u64),
 }
 
 
-#[derive(Clone, Debug, Copy)]
+
+
+#[derive(Clone, Debug)]
 pub struct TradeFillInfo{
-    price: f32,
-    //rest
+    pub price: f32,
+    pub fill_type: String,
+    pub sz: f32,
+    pub oid: u64,  
 }
 
 
