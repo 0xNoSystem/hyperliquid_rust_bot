@@ -1,11 +1,7 @@
-#![allow(unused_imports)]
-#![allow(unused_mut)]
-#![allow(unused_variables)]
-#![allow(dead_code)]
 use log::info;
 use ethers::signers::LocalWallet;
-use hyperliquid_rust_sdk::{Subscription,Message,ExchangeClient, InfoClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, BaseUrl};
-use crate::trade_setup::{Strategy,Style,Stance, Risk, TradeParams, TradeCommand, PriceData, TradeInfo};
+use hyperliquid_rust_sdk::{Message,ExchangeClient, InfoClient, BaseUrl};
+use crate::trade_setup::{Strategy, TradeParams, TradeCommand, PriceData, TradeInfo};
 use crate::{MAX_HISTORY, MARKETS};
 use crate::{Executor, SignalEngine, IndicatorsConfig, EngineCommand};
 use crate::helper::{load_candles, subscribe_candles, get_user_fees};
@@ -17,7 +13,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender, unbounded_channel,UnboundedReceiver},
     time::{sleep, Duration},
 };
-use flume::{bounded, TrySendError};
+use flume::{bounded};
 
 
 pub struct Market {
@@ -46,7 +42,6 @@ impl Market{
 
         let mut info_client = InfoClient::with_reconnect(None, Some(BaseUrl::Mainnet)).await.unwrap();
         let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
-        let exchange_client_exec = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
         let fees = get_user_fees(&info_client, public_key.clone()).await;
     
         let (market_tx, mut market_rv) = channel::<MarketCommand>(4);
@@ -63,7 +58,7 @@ impl Market{
             trade_params : trade_params.clone(),
             asset: asset.clone(), 
             signal_engine: SignalEngine::new(indicators_config, trade_params.strategy).await,
-            executor: Executor::new(wallet, asset, exchange_client_exec, fees),
+            executor: Executor::new(wallet, asset, fees).await,
             market_rv_tx: (market_tx.clone(), market_rv), 
         }, market_tx.clone()))
     }
@@ -93,11 +88,7 @@ impl Market{
         self.trade_params.strategy = strategy.clone();
         
     }
-
-    pub async fn update_lev(&mut self, lev: u32){
         
-    }
-
 
     async fn load_engine(&mut self, candle_count: u64) -> Result<(), String>{
 
@@ -179,28 +170,45 @@ impl Market{
         let info_tx = market_tx.clone();  
         executor.connect_market(rv_exec, info_tx);
         //main loop
-        tokio::spawn(async move {
+        let engine_handle = tokio::spawn(async move {
             signal_engine.start().await;
         });
 
-        tokio::spawn(async move {
+        let executor_handle = tokio::spawn(async move {
             executor.start().await;
         });
         
         //Candle Stream
         let engine_price_tx = engine_tx.clone();
-        tokio::spawn(async move {
-            while let Some(Message::Candle(candle)) = receiver.recv().await{
-                let timestamp = candle.data.time_close;
-                let close = candle.data.close.parse::<f32>().ok().unwrap();
-                let high = candle.data.high.parse::<f32>().ok().unwrap();
-                let low = candle.data.low.parse::<f32>().ok().unwrap();            
-                let open = candle.data.open.parse::<f32>().ok().unwrap();
-                let price = Price{open,high, low, close};
-                let price_data = PriceData{price, time: timestamp};
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
-                let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price_data));
-                }
+        let candle_stream_handle = tokio::spawn(async move {
+            loop{
+
+                tokio::select!{
+                    _ = shutdown_rx.changed() =>{
+                            if *shutdown_rx.borrow() == true{
+                            break;
+                        }
+                    }
+
+            maybe_msg = receiver.recv() =>{
+                if let Some(Message::Candle(candle)) = maybe_msg{
+                    let timestamp = candle.data.time_close;
+                    let close = candle.data.close.parse::<f32>().ok().unwrap();
+                    let high = candle.data.high.parse::<f32>().ok().unwrap();
+                    let low = candle.data.low.parse::<f32>().ok().unwrap();            
+                    let open = candle.data.open.parse::<f32>().ok().unwrap();
+                    let price = Price{open,high, low, close};
+                    let price_data = PriceData{price, time: timestamp};
+
+                    let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price_data));
+                }else{
+                        break;
+                    }
+                                            }
+                            }
+            }
         });
 
         //listen to edits (exemple: change strategy)
@@ -236,15 +244,18 @@ impl Market{
                             let _ = engine_update_tx.send(EngineCommand::Reload(price_data));
                         };
                     },
-                    MarketCommand::Close=>{println!("Close {} Market.", self.asset);} 
+                    MarketCommand::Close=>{
+                    info!("Closing {} Market...", self.asset);
+                    let _ = shutdown_tx.send(true);
+                    let _ = engine_update_tx.send(EngineCommand::Stop);
+                    break;
+                    }, 
+                };
 
-                 
-                }
-        };
-
-
-
-
+                };
+        let _ = engine_handle.await;
+        let _ = executor_handle.await;
+        let _ = candle_stream_handle.await;
         Ok(())
     }
 }

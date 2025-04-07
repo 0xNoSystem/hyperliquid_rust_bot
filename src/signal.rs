@@ -243,11 +243,11 @@ impl SignalEngine{
         
         match self.strategy.style{
             Style::Scalp => {
-                if rsi < rsi_range.low && stoch < stoch_range.low{
+                if rsi > rsi_range.low && stoch > stoch_range.low{
                     if self.strategy.stance == Stance::Bear{
                         return None;
                     }else{
-                        return Some(TradeCommand::ExecuteTrade{size: 2.0, is_long: true, duration: 240});
+                        return Some(TradeCommand::OpenTrade{size: 2.0, is_long: true});
                     }
                 }else if rsi > rsi_range.high && stoch > stoch_range.high{
                     if self.strategy.stance == Stance::Bull{
@@ -332,6 +332,10 @@ impl SignalEngine{
                         self.load(&prices);
                         info!("RELOADED ENGINE WITH NEW TIME FRAME DATA");
                     },
+                    EngineCommand::Stop =>{
+                        let _ = tx_sender.clone().try_send(TradeCommand::CancelTrade); 
+                        return;
+                    },
             }
         }}
     }
@@ -389,6 +393,7 @@ pub enum EngineCommand{
     UpdateStrategy(Strategy),
     UpdateConfig(IndicatorsConfig),
     Reload(Vec<Price>),
+    Stop,
 }
 
 

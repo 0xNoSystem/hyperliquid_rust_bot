@@ -66,7 +66,9 @@ async fn main(){
         let _ = sleep(Duration::from_secs(10)).await;
         sender.send(MarketCommand::Close).await; */
         let _ = sleep(Duration::from_secs(10)).await;
-        sender.send(MarketCommand::UpdateTimeFrame("15m".to_string())).await;
+        let _ = sender.send(MarketCommand::UpdateTimeFrame("15m".to_string())).await;
+        let _ = sleep(Duration::from_secs(20)).await;
+        let _ = sender.send(MarketCommand::Close).await; 
 });
 
 

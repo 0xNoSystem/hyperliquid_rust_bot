@@ -9,7 +9,7 @@ use tokio::{
 };
 
 use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo};
-use flume::{bounded, TrySendError,Receiver};
+use flume::{Receiver};
 use crate::market::MarketCommand;
 
 pub struct Executor {
@@ -20,28 +20,30 @@ pub struct Executor {
     exchange_client: ExchangeClient,
     trade_active: Arc<AtomicBool>,
     fees: (f32, f32),
+    open_position: Option<TradeFillInfo>,
 }
 
 
 
 impl Executor {
 
-    pub fn new(
+    pub async fn new(
         wallet: LocalWallet,
         asset: String,
-        exchange_client: ExchangeClient,
         fees: (f32, f32),
         
     ) -> Self {
         
+        let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
         Executor{
             wallet,
             trade_rv: None,
             market_tx: None,
             asset,
-            exchange_client: exchange_client,
+            exchange_client,
             trade_active: Arc::new(AtomicBool::new(false)),
             fees,
+            open_position: None,
         }
     }
 
@@ -133,9 +135,10 @@ impl Executor {
 
 
 
-    pub async fn market_trade_exec(&self, size: f32, is_long: bool, duration: u64) -> Result<TradeInfo, String>{
+    pub async fn market_trade_exec(&mut self, size: f32, is_long: bool, duration: u64) -> Result<TradeInfo, String>{
         
         let trade_fill_open = self.open_order(size, is_long).await.unwrap();
+        self.open_position = Some(trade_fill_open.clone());
         let _ = sleep(Duration::from_secs(duration)).await;
 
         let trade_fill_close = self.close_order(size, is_long).await.unwrap();
@@ -200,7 +203,6 @@ impl Executor {
                         if !self.is_active(){ 
                                 self.trade_active.store(true, Ordering::SeqCst);
                                 let trade_info = self.market_trade_exec(size, is_long, duration).await;
-                               
                                 if let Ok(trade_info) = trade_info{ 
                                     let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info));
                                     };
@@ -214,10 +216,13 @@ impl Executor {
                         if !self.is_active(){
                             println!("Open trade command received");
                             self.trade_active.store(true, Ordering::SeqCst);
-
                             let trade_fill = self.open_order(size, is_long).await;
 
-                            println!("Trade Opened: {:?}", trade_fill);
+                            if let Ok(trade) = trade_fill{
+                            info!("Trade Opened: {:?}", trade.clone());
+                                self.open_position = Some(trade);
+                            }
+
 
                     }
                 },
@@ -226,12 +231,27 @@ impl Executor {
                         
                         if self.is_active(){
                             let trade_fill = self.close_order(size,is_long).await;
-                            println!("Trade Closed: {:?}", trade_fill);
+                            if trade_fill.is_ok(){
+                                self.open_position = None;
+                            }; 
+                            info!("Trade Closed: {:?}", trade_fill);
                             self.trade_active.store(false, Ordering::SeqCst);                  
                     }
                 },
  
-                _ => {println!("Command not supported {:?}", cmd);} 
+                    TradeCommand::CancelTrade => {
+                        if self.is_active(){
+                            if let Some(ref pos) = self.open_position{
+                                info!("Shutting down executor");
+                                let trade_fill = self.close_order(pos.sz, pos.is_long).await;
+                                self.trade_active.store(false, Ordering::SeqCst);
+                        };};
+
+                        return;
+
+                    },
+
+                    _ => {println!("Command not ready");},
         }
 
 
