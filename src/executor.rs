@@ -4,22 +4,23 @@ use ethers::signers::LocalWallet;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use tokio::{
+    sync::mpsc::{Sender},
     time::{sleep, Duration},
 };
 
 use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo};
-use flume::{bounded, TrySendError, Sender, Receiver};
+use flume::{bounded, TrySendError,Receiver};
+use crate::market::MarketCommand;
 
 pub struct Executor {
     wallet: LocalWallet,
     trade_rv: Option<Receiver<TradeCommand>>,
-    info_tx: Option<UnboundedSender<TradeInfo>>,
+    market_tx: Option<Sender<MarketCommand>>,
     asset: String,
     exchange_client: ExchangeClient,
     trade_active: Arc<AtomicBool>,
     fees: (f32, f32),
 }
-use tokio::sync::mpsc::UnboundedSender;
 
 
 
@@ -36,7 +37,7 @@ impl Executor {
         Executor{
             wallet,
             trade_rv: None,
-            info_tx: None,
+            market_tx: None,
             asset,
             exchange_client: exchange_client,
             trade_active: Arc::new(AtomicBool::new(false)),
@@ -46,12 +47,6 @@ impl Executor {
 
     pub async fn open_order(&self,size: f32, is_long: bool) -> Result<TradeFillInfo, String>{
         
-        if self.is_active(){
-            return Err("Trade already active".to_string());
-        }
-
-        self.trade_active.store(true, Ordering::SeqCst);
-
         let market_open_params = MarketOrderParams {
             asset: self.asset.as_str(),
             is_buy: is_long,
@@ -140,10 +135,6 @@ impl Executor {
 
     pub async fn market_trade_exec(&self, size: f32, is_long: bool, duration: u64) -> Result<TradeInfo, String>{
         
-        if self.is_active(){
-            return Err("Trade already active".to_string());
-        }
-
         let trade_fill_open = self.open_order(size, is_long).await.unwrap();
         let _ = sleep(Duration::from_secs(duration)).await;
 
@@ -186,15 +177,15 @@ impl Executor {
     pub fn connect_market(
         &mut self,
         receiver: Receiver<TradeCommand>,
-        sender: UnboundedSender<TradeInfo>)
+        sender: Sender<MarketCommand>)
     {
         self.trade_rv = Some(receiver);
-        self.info_tx = Some(sender);
+        self.market_tx = Some(sender);
     }
 
 
     pub fn is_connected(&self) -> bool{
-        self.trade_rv.is_some() && self.info_tx.is_some()
+        self.trade_rv.is_some() && self.market_tx.is_some()
     }
 
     
@@ -202,40 +193,50 @@ impl Executor {
         println!("EXECUTOR STARTED");
         if self.is_connected(){
             
-            let info_sender = self.info_tx.clone().unwrap();
+            let info_sender = self.market_tx.clone().unwrap();
             while let Ok(cmd) = self.trade_rv.as_mut().unwrap().recv_async().await{
                 match cmd{
                         TradeCommand::ExecuteTrade {size, is_long, duration} => {
-                        if !self.is_active(){
-                                   
-                                let trade_fill_open = self.open_order(size, is_long).await.unwrap();
-                                
-                                let _ = sleep(Duration::from_secs(duration)).await;
-                                
-                                let trade_fill_close = self.close_order(size, is_long).await.unwrap();
-                                
+                        if !self.is_active(){ 
+                                self.trade_active.store(true, Ordering::SeqCst);
+                                let trade_info = self.market_trade_exec(size, is_long, duration).await;
+                               
+                                if let Ok(trade_info) = trade_info{ 
+                                    let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info));
+                                    };
 
-                                let (fees, pnl) = self.calculate_pnl(is_long, &trade_fill_open, &trade_fill_close);
-                                let trade_info = TradeInfo{
-                                    open: trade_fill_open.price,
-                                    close: trade_fill_close.price,
-                                    pnl,
-                                    fee: fees,
-                                    is_long,
-                                    duration,
-                                    oid: (trade_fill_open.oid, trade_fill_close.oid)
-                                };
-                                
-                                let _ = info_sender.send(trade_info);
                                 self.trade_active.store(false, Ordering::SeqCst);
                             };
                         },
 
-                    _ => {}
-                }
-            }}  
-   
+                    TradeCommand::OpenTrade{size, is_long}=> {
+                        
+                        if !self.is_active(){
+                            println!("Open trade command received");
+                            self.trade_active.store(true, Ordering::SeqCst);
+
+                            let trade_fill = self.open_order(size, is_long).await;
+
+                            println!("Trade Opened: {:?}", trade_fill);
+
+                    }
+                },
+
+                    TradeCommand::CloseTrade{size, is_long} => {
+                        
+                        if self.is_active(){
+                            let trade_fill = self.close_order(size,is_long).await;
+                            println!("Trade Closed: {:?}", trade_fill);
+                            self.trade_active.store(false, Ordering::SeqCst);                  
+                    }
+                },
+ 
+                _ => {println!("Command not supported {:?}", cmd);} 
         }
+
+
+    }}}
+
 
 }
 

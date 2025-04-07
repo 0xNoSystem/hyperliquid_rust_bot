@@ -129,10 +129,10 @@ pub struct TradeParams {
 
 impl TradeParams{
 
-    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient, asset: String){    
+    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient, asset: &str){    
         
             let response = client
-            .update_leverage(lev, asset.as_str() , false, None)
+            .update_leverage(lev, asset, false, None)
             .await
             .unwrap();
         
@@ -150,7 +150,7 @@ impl Default for TradeParams {
             strategy: Strategy::default(),
             lev: 20,
             trade_time: 300,
-            time_frame: String::from("1m"),
+            time_frame: String::from("15m"),
         }
     }
 }
@@ -173,6 +173,7 @@ impl fmt::Display for TradeParams {
 pub enum TradeCommand{
     ExecuteTrade {size: f32, is_long: bool, duration: u64},
     OpenTrade {size: f32, is_long: bool},
+    CloseTrade{size: f32, is_long: bool},
     BuildPosition {size: f32, is_long: bool, interval: u64},
     CancelTrade,
 }

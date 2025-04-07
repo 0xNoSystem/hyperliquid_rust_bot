@@ -1,8 +1,11 @@
+use log::info;
 use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
 use crate::trade_setup::{PriceData, Strategy, TradeCommand, Style, Stance};
 use crate::{MAX_HISTORY};
-use flume::Sender;
 use tokio::sync::mpsc::UnboundedReceiver;
+use flume::Sender;
+ 
+use tokio::time::{sleep, Duration};
 
 #[derive(Debug)]
 pub struct SignalEngine{
@@ -21,14 +24,14 @@ pub struct SignalEngine{
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndicatorsConfig{
-    rsi_length: usize,
-    rsi_smoothing: Option<usize>,
-    stoch_rsi_length: usize,
-    atr_length: usize,
-    ema_length: usize,
-    ema_cross_short_long_lenghts: Option<(usize, usize)>,
-    adx_length: usize,
-    sma_length: usize,
+    pub rsi_length: usize,
+    pub rsi_smoothing: Option<usize>,
+    pub stoch_rsi_length: usize,
+    pub atr_length: usize,
+    pub ema_length: usize,
+    pub ema_cross_short_long_lenghts: Option<(usize, usize)>,
+    pub adx_length: usize,
+    pub sma_length: usize,
 }
 
 
@@ -244,13 +247,13 @@ impl SignalEngine{
                     if self.strategy.stance == Stance::Bear{
                         return None;
                     }else{
-                        return Some(TradeCommand::ExecuteTrade {size: 100.0, is_long: true, duration: 100});
+                        return Some(TradeCommand::ExecuteTrade{size: 2.0, is_long: true, duration: 240});
                     }
                 }else if rsi > rsi_range.high && stoch > stoch_range.high{
                     if self.strategy.stance == Stance::Bull{
                         return None;
                     }else{
-                        return Some(TradeCommand::ExecuteTrade {size: 100.0, is_long: false, duration: 100});
+                        return Some(TradeCommand::ExecuteTrade{size: 2.0, is_long: false,duration: 240});
                     }
                 }else{
                     return None;
@@ -310,7 +313,7 @@ impl SignalEngine{
                         self.display_indicators(price);
                         
                         if let Some(trade_command) = self.get_signal(){
-                            let _ = tx_sender.try_send(trade_command);
+                            let _ = tx_sender.clone().try_send(trade_command);
                         }
             },
 
@@ -320,8 +323,15 @@ impl SignalEngine{
                  },
 
                     EngineCommand::UpdateConfig(new_config) =>{
+                        info!("NEW CONFIG: {:?}", new_config);
                         self.change_indicators_config(new_config);
-                }
+                },
+
+                    EngineCommand::Reload(prices)=>{
+                        self.reset();
+                        self.load(&prices);
+                        info!("RELOADED ENGINE WITH NEW TIME FRAME DATA");
+                    },
             }
         }}
     }
@@ -378,7 +388,7 @@ pub enum EngineCommand{
     UpdatePrice(PriceData),
     UpdateStrategy(Strategy),
     UpdateConfig(IndicatorsConfig),
-
+    Reload(Vec<Price>),
 }
 
 

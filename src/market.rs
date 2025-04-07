@@ -14,10 +14,10 @@ use kwant::indicators::{Price};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use tokio::{
-    sync::mpsc::{unbounded_channel,UnboundedReceiver},
+    sync::mpsc::{channel, Receiver, Sender, unbounded_channel,UnboundedReceiver},
     time::{sleep, Duration},
 };
-use flume::{bounded, TrySendError, Sender, Receiver};
+use flume::{bounded, TrySendError};
 
 
 pub struct Market {
@@ -32,13 +32,14 @@ pub struct Market {
     asset: String,
     pub signal_engine: SignalEngine,
     executor: Executor,
+    market_rv_tx: (Sender<MarketCommand>, Receiver<MarketCommand>),
 }
 
 
 
 impl Market{
 
-    pub async fn new(wallet: LocalWallet,public_key: String, asset: String, trade_params: TradeParams, indicators_config: Option<IndicatorsConfig>) -> Result<Self, String>{
+    pub async fn new(wallet: LocalWallet,public_key: String, asset: String, trade_params: TradeParams, indicators_config: Option<IndicatorsConfig>) -> Result<(Self, Sender<MarketCommand>), String>{
         if !MARKETS.contains(&asset.as_str()){
             return Err("ASSET ISN'T TRADABLE, MARKET CAN'T BE INITILIAZED".to_string());
         }
@@ -47,7 +48,11 @@ impl Market{
         let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
         let exchange_client_exec = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
         let fees = get_user_fees(&info_client, public_key.clone()).await;
-        Ok(Market{
+    
+        let (market_tx, mut market_rv) = channel::<MarketCommand>(4);
+
+
+        Ok((Market{
             wallet:wallet.clone(), 
             public_key,
             exchange_client,
@@ -59,12 +64,13 @@ impl Market{
             asset: asset.clone(), 
             signal_engine: SignalEngine::new(indicators_config, trade_params.strategy).await,
             executor: Executor::new(wallet, asset, exchange_client_exec, fees),
-        })
+            market_rv_tx: (market_tx.clone(), market_rv), 
+        }, market_tx.clone()))
     }
     
     async fn init(&mut self) -> Result<(), String>{
 
-        self.update_lev(self.trade_params.lev).await;
+        self.trade_params.update_lev(self.trade_params.lev ,&self.exchange_client, self.asset.as_str()).await;
         self.load_engine(300).await?;
         println!("Market initialized for {} {:?}", self.asset, self.trade_params);
         Ok(())
@@ -90,7 +96,6 @@ impl Market{
 
     pub async fn update_lev(&mut self, lev: u32){
         
-        self.trade_params.update_lev(lev, &self.exchange_client, self.asset.clone()).await;
     }
 
 
@@ -159,8 +164,8 @@ impl Market{
         let mut signal_engine = self.signal_engine;
         let mut executor = self.executor;
         //Setup channels
+        let (market_tx, mut market_rv) = self.market_rv_tx;
         let (engine_tx, mut engine_rv) = unbounded_channel::<EngineCommand>();
-        let (tx_info, mut rv_info) = unbounded_channel::<TradeInfo>();
         let (tx_exec, mut rv_exec) = bounded::<TradeCommand>(0);
 
         //Subscribe candles
@@ -171,7 +176,7 @@ impl Market{
         signal_engine.connect_market(engine_rv, trade_tx);
 
         //Start exucutor
-        let info_tx = tx_info.clone();  
+        let info_tx = market_tx.clone();  
         executor.connect_market(rv_exec, info_tx);
         //main loop
         tokio::spawn(async move {
@@ -199,25 +204,75 @@ impl Market{
         });
 
         //listen to edits (exemple: change strategy)
-        tokio::spawn(async move {
-            sleep(Duration::from_secs(100)).await;
-            let _ =engine_tx.send(EngineCommand::UpdateStrategy(Strategy{risk: Risk::High,
-                                                                    style: Style::Scalp,
-                                                                    stance: Stance::Bull,
-                                                                    follow_trend: false}));
-            
-                                                                
-        });
+        let engine_update_tx = engine_tx.clone();
+        while let Some(cmd) = market_rv.recv().await{
+             match cmd {
+                   MarketCommand::UpdateLeverage(lev)=>{
+                        self.trade_params.update_lev(lev ,&self.exchange_client, self.asset.as_str()).await;
+                },
 
-        //Listen to executor
-        while let Some(trade_info) = rv_info.recv().await{
-            println!("Trade info received: {trade_info:?}");
-            self.pnl_history.push(trade_info.pnl);
-            self.trade_history.push(trade_info);
-            return Ok(());
-        }
+                    MarketCommand::UpdateStrategy(strat)=>{
+                        let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(strat));
+                    },
+
+                    MarketCommand::UpdateIndicatorsConfig(config)=>{
+
+                        let _ = engine_update_tx.send(EngineCommand::UpdateConfig(config));
+                    },
+                    
+                    MarketCommand::ReceiveTrade(trade_info) =>{
+                        self.pnl_history.push(trade_info.pnl);
+                        self.trade_history.push(trade_info);
+                    },
+                    MarketCommand::UpdateTimeFrame(tf)=>{
+                        
+                        let price_data = load_candles(&self.info_client,
+                                                    self.asset.as_str(),
+                                                    tf.as_str(),
+                                                    500,
+                                                        ).await; 
+                        if let Ok(price_data) = price_data{
+                            self.trade_params.time_frame = tf;
+                            let _ = engine_update_tx.send(EngineCommand::Reload(price_data));
+                        };
+                    },
+                    MarketCommand::Close=>{println!("Close {} Market.", self.asset);} 
+
+                 
+                }
+        };
+
+
 
 
         Ok(())
     }
 }
+
+
+
+
+
+
+
+#[derive(Debug, Clone)]
+pub enum MarketCommand{
+    UpdateLeverage(u32),
+    UpdateStrategy(Strategy),
+    UpdateIndicatorsConfig(IndicatorsConfig),
+    UpdateTimeFrame(String),
+    ReceiveTrade(TradeInfo),
+    Close,
+}
+
+
+
+
+
+
+
+
+
+
+
+
