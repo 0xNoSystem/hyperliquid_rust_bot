@@ -170,10 +170,11 @@ impl fmt::Display for TradeParams {
 
 
 #[derive(Clone, Debug, Copy)]
-pub struct TradeCommand{
-    pub size: f64,
-    pub is_long: bool,
-    pub duration: u64,
+pub enum TradeCommand{
+    ExecuteTrade {size: f32, is_long: bool, duration: u64},
+    OpenTrade {size: f32, is_long: bool},
+    BuildPosition {size: f32, is_long: bool, interval: u64},
+    CancelTrade,
 }
 
 #[derive(Clone, Debug, Copy)]
@@ -202,11 +203,7 @@ pub struct TradeFillInfo{
     pub fill_type: String,
     pub sz: f32,
     pub oid: u64,  
+    pub is_long: bool,
 }
-
-
-
-
-
 
 

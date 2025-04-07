@@ -6,7 +6,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 #[derive(Debug)]
 pub struct SignalEngine{
-    price_rv: Option<UnboundedReceiver<PriceData>>,
+    engine_rv: Option<UnboundedReceiver<EngineCommand>>,
     trade_tx: Option<Sender<TradeCommand>>,
     indicators_config: IndicatorsConfig,
     rsi: Rsi,
@@ -63,7 +63,7 @@ impl SignalEngine{
         .map(|(short, long)| EmaCross::new(short, long));
 
         SignalEngine{
-            price_rv: None,
+            engine_rv: None,
             trade_tx: None,
             indicators_config: config.clone(),
             rsi: Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing),
@@ -140,6 +140,9 @@ impl SignalEngine{
             self.load(&self.price_data.clone());
         }
      }
+
+
+
     pub fn get_indicators_config(&self) -> &IndicatorsConfig{
         &self.indicators_config
     }
@@ -150,6 +153,7 @@ impl SignalEngine{
 
     pub fn change_strategy(&mut self, strategy: Strategy){
         self.strategy = strategy;
+        println!("Strategy changed to: {:?}", self.strategy);
     }
     pub fn get_strategy(&self) -> &Strategy{
         &self.strategy
@@ -240,13 +244,13 @@ impl SignalEngine{
                     if self.strategy.stance == Stance::Bear{
                         return None;
                     }else{
-                        return Some(TradeCommand{size: 1.0, is_long: true, duration: 100});
+                        return Some(TradeCommand::ExecuteTrade {size: 100.0, is_long: true, duration: 100});
                     }
                 }else if rsi > rsi_range.high && stoch > stoch_range.high{
                     if self.strategy.stance == Stance::Bull{
                         return None;
                     }else{
-                        return Some(TradeCommand{size: 1.0, is_long: false, duration: 100});
+                        return Some(TradeCommand::ExecuteTrade {size: 100.0, is_long: false, duration: 100});
                     }
                 }else{
                     return None;
@@ -263,16 +267,16 @@ impl SignalEngine{
 
     pub fn connect_market(
         &mut self,
-        receiver: UnboundedReceiver<PriceData>,
+        receiver: UnboundedReceiver<EngineCommand>,
         sender: Sender<TradeCommand>)
     {
         
-        self.price_rv = Some(receiver);
+        self.engine_rv = Some(receiver);
         self.trade_tx = Some(sender); 
     }
 
     pub fn is_connected(&self) -> bool{
-        self.price_rv.is_some() && self.trade_tx.is_some()
+        self.engine_rv.is_some() && self.trade_tx.is_some()
     }
     pub async fn start(&mut self){
         let mut time = 0;
@@ -280,26 +284,51 @@ impl SignalEngine{
         if self.is_connected(){
             
         let tx_sender = self.trade_tx.clone().unwrap();
-            while let Some(price_data) = self.price_rv.as_mut().unwrap().recv().await{
-            let close_time = price_data.time;
-            let price = price_data.price.close;
-            println!("\n\nPRICE => {}$", price);
-            if !init{
-                    self.update(price_data.price, false);
-                    time = close_time;
-                    init = true;
-                    continue;
+            while let Some(cmd) = self.engine_rv.as_mut().unwrap().recv().await{
+           
+            match cmd {
+
+                EngineCommand::UpdatePrice(price_data) => {
+                    let close_time = price_data.time;
+                    let price = price_data.price.close;
+                    println!("\n\nPRICE => {}$", price);
+                    if !init{
+                            self.update(price_data.price, false);
+                            time = close_time;
+                            init = true;
+                            continue;
+                        }
+
+
+                    if time != close_time{
+                            self.update(price_data.price, true); 
+                            time = close_time;
+                    }else{
+                            self.update(price_data.price, false);
+                    }
+
+                        self.display_indicators(price);
+                        
+                        if let Some(trade_command) = self.get_signal(){
+                            let _ = tx_sender.try_send(trade_command);
+                        }
+            },
+
+                    EngineCommand::UpdateStrategy(new_strat) =>{
+
+                       self.change_strategy(new_strat);
+                 },
+
+                    EngineCommand::UpdateConfig(new_config) =>{
+                        self.change_indicators_config(new_config);
                 }
-
-
-            if time != close_time{
-                     self.update(price_data.price, true); 
-                     time = close_time;
-            }else{
-                    self.update(price_data.price, false);
             }
+        }}
+    }
 
-            if let Some(stoch_rsi) = self.get_stoch_rsi(){
+    fn display_indicators(&self, price: f32){
+
+                    if let Some(stoch_rsi) = self.get_stoch_rsi(){
                 println!("🔵STOCH-K: {}", stoch_rsi);
             }
             
@@ -334,20 +363,8 @@ impl SignalEngine{
                 println!("DOUBLE EMA uptrend: {}", trend );
             }
 
-            if let Some(ema_cross) = self.check_ema_cross(){
-                if ema_cross{
-                    println!("*****EMA CROSS UP*****");
-                }else{
-                    println!("*****EMA CROSS DOWN*****");
-                }
-            }
-
-            if let Some(trade_command) = self.get_signal(){
-                let _ = tx_sender.try_send(trade_command);
-            }
-        }}
-    }
-
+            
+        }
 
 
 
@@ -356,6 +373,13 @@ impl SignalEngine{
 }
 
 
+pub enum EngineCommand{
+
+    UpdatePrice(PriceData),
+    UpdateStrategy(Strategy),
+    UpdateConfig(IndicatorsConfig),
+
+}
 
 
 

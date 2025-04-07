@@ -28,8 +28,8 @@ use hyperliquid_rust_bot::{SignalEngine, IndicatorsConfig};
 
 use flume::{bounded, TrySendError};
 
-const SIZE: f32 = 1.0;
-const COIN: &str = "SOL";
+
+const COIN: &str = "FARTCOIN";
 
 #[tokio::main]
 async fn main(){
@@ -46,7 +46,7 @@ async fn main(){
     let mut market = Market::new(wallet, pubkey, COIN.to_string(), trade_params, None).await.unwrap();
 
     match market.start().await{
-        Ok(_) => info!("Market started"),
+        Ok(_) => println!("Market started"),
         Err(e) => error!("Error starting market: {}", e),
     };
 

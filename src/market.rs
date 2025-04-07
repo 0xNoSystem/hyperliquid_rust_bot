@@ -5,9 +5,9 @@
 use log::info;
 use ethers::signers::LocalWallet;
 use hyperliquid_rust_sdk::{Subscription,Message,ExchangeClient, InfoClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, BaseUrl};
-use crate::trade_setup::{Strategy, Risk, TradeParams, TradeCommand, PriceData, TradeInfo};
+use crate::trade_setup::{Strategy,Style,Stance, Risk, TradeParams, TradeCommand, PriceData, TradeInfo};
 use crate::{MAX_HISTORY, MARKETS};
-use crate::{Executor, SignalEngine, IndicatorsConfig};
+use crate::{Executor, SignalEngine, IndicatorsConfig, EngineCommand};
 use crate::helper::{load_candles, subscribe_candles, get_user_fees};
 use kwant::indicators::{Price};
 
@@ -25,12 +25,13 @@ pub struct Market {
     public_key: String,
     exchange_client: ExchangeClient,
     info_client: InfoClient,
+    pub trade_history: Vec<TradeInfo>,
     pub pnl_history: Vec<f32>,
     trade_active: Arc<AtomicBool>,
     pub trade_params: TradeParams,
     asset: String,
     pub signal_engine: SignalEngine,
-    executor: Executor
+    executor: Executor,
 }
 
 
@@ -47,16 +48,17 @@ impl Market{
         let exchange_client_exec = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
         let fees = get_user_fees(&info_client, public_key.clone()).await;
         Ok(Market{
-            wallet, 
+            wallet:wallet.clone(), 
             public_key,
             exchange_client,
             info_client, 
+            trade_history: Vec::with_capacity(MAX_HISTORY),
             pnl_history: Vec::with_capacity(MAX_HISTORY),
             trade_active: Arc::new(AtomicBool::new(false)),
             trade_params : trade_params.clone(),
             asset: asset.clone(), 
             signal_engine: SignalEngine::new(indicators_config, trade_params.strategy).await,
-            executor: Executor::new(asset, exchange_client_exec, fees),
+            executor: Executor::new(wallet, asset, exchange_client_exec, fees),
         })
     }
     
@@ -64,6 +66,7 @@ impl Market{
 
         self.update_lev(self.trade_params.lev).await;
         self.load_engine(300).await?;
+        println!("Market initialized for {} {:?}", self.asset, self.trade_params);
         Ok(())
     }
 
@@ -77,6 +80,12 @@ impl Market{
             self.load_engine(300).await?;
         }
         Ok(())
+    }
+
+    pub fn change_strategy(&mut self, strategy: Strategy){
+
+        self.trade_params.strategy = strategy.clone();
+        
     }
 
     pub async fn update_lev(&mut self, lev: u32){
@@ -98,6 +107,8 @@ impl Market{
     pub fn is_active(&self) -> bool{
         self.trade_active.load(Ordering::SeqCst)
     }
+
+    
 }
 
 
@@ -108,6 +119,11 @@ impl Market{
 
         &self.pnl_history
     } 
+
+    pub fn get_trade_history(&self) -> &Vec<TradeInfo>{
+
+        &self.trade_history
+    }
 
     pub async fn get_last_pnl(&self) -> Result<f32, String>{
 
@@ -132,7 +148,6 @@ impl Market{
 
         self.pnl_history.iter().sum()
     }
-
     
 }
 
@@ -144,16 +159,16 @@ impl Market{
         let mut signal_engine = self.signal_engine;
         let mut executor = self.executor;
         //Setup channels
+        let (engine_tx, mut engine_rv) = unbounded_channel::<EngineCommand>();
         let (tx_info, mut rv_info) = unbounded_channel::<TradeInfo>();
         let (tx_exec, mut rv_exec) = bounded::<TradeCommand>(0);
-        let (tx_signal, mut rv_signal) = unbounded_channel::<PriceData>();
 
         //Subscribe candles
         let mut receiver = subscribe_candles(self.asset.as_str(), self.trade_params.time_frame.as_str()).await;
 
         //Start engine 
         let trade_tx = tx_exec.clone();
-        signal_engine.connect_market(rv_signal, trade_tx);
+        signal_engine.connect_market(engine_rv, trade_tx);
 
         //Start exucutor
         let info_tx = tx_info.clone();  
@@ -166,7 +181,9 @@ impl Market{
         tokio::spawn(async move {
             executor.start().await;
         });
-
+        
+        //Candle Stream
+        let engine_price_tx = engine_tx.clone();
         tokio::spawn(async move {
             while let Some(Message::Candle(candle)) = receiver.recv().await{
                 let timestamp = candle.data.time_close;
@@ -177,16 +194,28 @@ impl Market{
                 let price = Price{open,high, low, close};
                 let price_data = PriceData{price, time: timestamp};
 
-                    let _ = tx_signal.send(price_data);
+                let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price_data));
                 }
         });
 
+        //listen to edits (exemple: change strategy)
+        tokio::spawn(async move {
+            sleep(Duration::from_secs(100)).await;
+            let _ =engine_tx.send(EngineCommand::UpdateStrategy(Strategy{risk: Risk::High,
+                                                                    style: Style::Scalp,
+                                                                    stance: Stance::Bull,
+                                                                    follow_trend: false}));
+            
+                                                                
+        });
+
+        //Listen to executor
         while let Some(trade_info) = rv_info.recv().await{
             println!("Trade info received: {trade_info:?}");
             self.pnl_history.push(trade_info.pnl);
+            self.trade_history.push(trade_info);
+            return Ok(());
         }
-
-
 
 
         Ok(())
