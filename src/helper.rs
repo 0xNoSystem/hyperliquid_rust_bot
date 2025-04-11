@@ -1,16 +1,21 @@
 use hyperliquid_rust_sdk::{BaseUrl, InfoClient, Message, Subscription, UserFillsResponse};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver};
+use tokio::sync::watch::{Sender, Receiver};
 use std::time::{SystemTime, UNIX_EPOCH};
 use kwant::indicators::{Price};
 use ethers::types::H160;
 
+
 pub async fn subscribe_candles(
     coin: &str,
     tf: &str,
-) -> UnboundedReceiver<Message> {
-    let mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+) -> (Sender<bool>,UnboundedReceiver<Message>) {
+    let mut info_client = InfoClient::with_reconnect(None, Some(BaseUrl::Mainnet)).await.unwrap();
     
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
+
 
     let subscription_id = info_client
         .subscribe(
@@ -24,17 +29,31 @@ pub async fn subscribe_candles(
         .unwrap();
     println!("Subscribed to candle data: {:?}", subscription_id);
     
-    // Auto-unsubscribe
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(99999999)).await;
-        println!("Unsubscribing from candle data");
-        let _ = info_client.unsubscribe(subscription_id).await;
-    });
+        while shutdown_rx.changed().await.is_ok() {
+            if *shutdown_rx.borrow() {
+                println!("Shutdown received, unsubscribing...");
+                let _ = info_client.unsubscribe(subscription_id).await;
+                break;
+            }
+        }
+    }); 
 
-    receiver
+    (shutdown_tx, receiver)
 }
 
+async fn get_user_margin(info_client: &InfoClient, user: String) -> Result<f32, String> {
+        let user = address(user);
 
+        let info = info_client.user_state(user)
+        .await
+        .map_err(|e| format!("Error fetching user balance, {}",e))?;
+
+        let res =  info.cross_margin_summary.account_value
+        .parse::<f32>()
+        .map_err(|e| format!("FATAL: failed to parse account balance to f32, {}",e))?;
+        Ok(res) 
+}
 
 
 fn get_time_now_and_candles_ago(candle_count: u64, tf: u64) -> (u64, u64) {

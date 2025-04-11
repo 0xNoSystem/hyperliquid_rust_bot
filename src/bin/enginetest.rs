@@ -6,7 +6,8 @@ use ethers::signers::LocalWallet;
 use ethers::types::H160;
 use log::info;
 use log::error;
-use std::{thread,env};
+use std::{thread,env, fs};
+use toml;
 use dotenv::dotenv;
 
 use hyperliquid_rust_sdk::{
@@ -22,7 +23,7 @@ use tokio::{
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use kwant::indicators::{Rsi,Price, Indicator};
 use hyperliquid_rust_bot::{Market, MarketCommand};
-use hyperliquid_rust_bot::trade_setup::{TradeParams, Strategy, Risk};
+use hyperliquid_rust_bot::trade_setup::{TradeInfo, TradeParams, Strategy, Risk, Style, Stance};
 use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
 use hyperliquid_rust_bot::{SignalEngine, IndicatorsConfig};
 
@@ -31,18 +32,27 @@ use flume::{bounded, TrySendError};
 
 const COIN: &str = "SOL";
 
+
 #[tokio::main]
 async fn main(){
      dotenv().ok();
     env_logger::init();
-   
+ 
     let wallet: LocalWallet = env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
         .parse()
         .unwrap();
 
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
-    
-    let trade_params = TradeParams::default();
+   
+    let strat = load_strategy("config.toml");
+   
+    let trade_params = TradeParams{
+        strategy: strat,
+        lev: 20,
+        trade_time: 300,
+        time_frame: "5m".to_string(),
+    };
+
     let (mut market, sender) = Market::new(wallet, pubkey, COIN.to_string(), trade_params, None).await.unwrap();
 
 
@@ -64,20 +74,35 @@ async fn main(){
         let _ = sleep(Duration::from_secs(10)).await;
         sender.send(MarketCommand::UpdateIndicatorsConfig(config)).await;
         let _ = sleep(Duration::from_secs(10)).await;
-        sender.send(MarketCommand::Close).await; */
-        let _ = sleep(Duration::from_secs(10)).await;
-        let _ = sender.send(MarketCommand::UpdateTimeFrame("15m".to_string())).await;
-        let _ = sleep(Duration::from_secs(20)).await;
+        sender.send(MarketCommand::Close).await; */ 
+        let _ = sleep(Duration::from_secs(3000)).await;
         let _ = sender.send(MarketCommand::Close).await; 
 });
 
 
 
     match market.start().await{
-        Ok(_) => println!("Market started"),
+        Ok(_) => println!("Market closed successfully"),
         Err(e) => error!("Error starting market: {}", e),
     };
     
     
 
 }
+
+
+
+
+fn load_strategy(path: &str) -> Strategy {
+    let content = fs::read_to_string(path).expect("failed to read file");
+    toml::from_str(&content).expect("failed to parse toml")
+}
+
+
+
+
+
+
+
+
+

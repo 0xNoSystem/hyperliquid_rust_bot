@@ -3,14 +3,14 @@ use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
 use crate::trade_setup::{PriceData, Strategy, TradeCommand, Style, Stance};
 use crate::{MAX_HISTORY};
 use tokio::sync::mpsc::UnboundedReceiver;
-use flume::Sender;
+use flume::{TrySendError,Sender};
  
 use tokio::time::{sleep, Duration};
 
 #[derive(Debug)]
 pub struct SignalEngine{
-    engine_rv: Option<UnboundedReceiver<EngineCommand>>,
-    trade_tx: Option<Sender<TradeCommand>>,
+    engine_rv: UnboundedReceiver<EngineCommand>,
+    trade_tx: Sender<TradeCommand>,
     indicators_config: IndicatorsConfig,
     rsi: Rsi,
     atr: Atr,
@@ -55,7 +55,12 @@ impl Default for IndicatorsConfig{
 
 impl SignalEngine{
 
-    pub async fn new(config: Option<IndicatorsConfig>, strategy: Strategy) -> Self{
+    pub async fn new(
+        config: Option<IndicatorsConfig>,
+        strategy: Strategy,
+        engine_rv: UnboundedReceiver<EngineCommand>,
+        trade_tx: Sender<TradeCommand>, 
+    ) -> Self{
        
         let config: IndicatorsConfig = match config{
             Some(cfg) => cfg,
@@ -66,8 +71,8 @@ impl SignalEngine{
         .map(|(short, long)| EmaCross::new(short, long));
 
         SignalEngine{
-            engine_rv: None,
-            trade_tx: None,
+            engine_rv,
+            trade_tx,
             indicators_config: config.clone(),
             rsi: Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing),
             atr: Atr::new(config.atr_length),
@@ -166,15 +171,22 @@ impl SignalEngine{
         &self.price_data
     }	
 
-     pub fn load(&mut self, price_data: &Vec<Price>){
+    pub fn load(&mut self, price_data: &Vec<Price>) {
         self.price_data.clear();
-        for p in price_data{
+
+        for p in price_data.iter().take(price_data.len().saturating_sub(1)) {
             self.update_after_close(*p);
-        }
     }
 
+        if let Some(last) = price_data.last() {
+            self.update_before_close(*last);
+    }}
+
+
     pub fn is_ready(&self) -> bool{
-        self.rsi.is_ready() && self.ema.is_ready() && self.atr.is_ready() && self.sma.is_ready() && (self.ema_cross.is_none() || self.ema_cross.clone().unwrap().is_ready())
+        self.rsi.is_ready() && self.ema.is_ready()
+        && self.atr.is_ready() && self.sma.is_ready() &&
+        (self.ema_cross.is_none() || self.ema_cross.clone().unwrap().is_ready())
     }
 
     pub fn get_rsi(&self) -> Option<f32>{
@@ -228,37 +240,50 @@ impl SignalEngine{
         self.price_data.last().cloned()
     }
 
-    fn get_signal(&self) -> Option<TradeCommand>{
-
+    fn get_signal(&self, price: f32) -> Option<TradeCommand>{
+        let tf = 100;
         if !self.is_ready(){
             return None;
         }
 
+        let duration = match self.strategy.style{
+            Style::Scalp => {tf * 4},
+            Style::Swing => {tf * 10},
+        };
+
         let rsi_range = self.strategy.get_rsi_threshold();
         let stoch_range = self.strategy.get_stoch_threshold();
         
-
+        let up_trend = self.get_ema_cross_trend();
         let rsi = self.get_rsi().unwrap();
         let stoch = self.get_stoch_rsi().unwrap();
+        let atr = self.get_atr_normalized(price).unwrap(); 
         
         match self.strategy.style{
             Style::Scalp => {
-                if rsi > rsi_range.low && stoch > stoch_range.low{
+                if rsi < rsi_range.low && stoch < stoch_range.low{
+                    if atr < 0.1 {return None;}; //check is volatilty is enough 
                     if self.strategy.stance == Stance::Bear{
                         return None;
                     }else{
-                        return Some(TradeCommand::OpenTrade{size: 2.0, is_long: true});
+                        return Some(TradeCommand::ExecuteTrade{size: 1.0, is_long: true,duration: duration});
                     }
                 }else if rsi > rsi_range.high && stoch > stoch_range.high{
                     if self.strategy.stance == Stance::Bull{
                         return None;
                     }else{
-                        return Some(TradeCommand::ExecuteTrade{size: 2.0, is_long: false,duration: 240});
+                        return Some(TradeCommand::ExecuteTrade{size: 1.0, is_long: false,duration: duration});
                     }
                 }else{
                     return None;
                 }
             },
+            
+            Style::Swing =>{
+
+                return None; 
+
+            }, 
 
             _ => {
                 return None;
@@ -268,26 +293,11 @@ impl SignalEngine{
 }
 impl SignalEngine{
 
-    pub fn connect_market(
-        &mut self,
-        receiver: UnboundedReceiver<EngineCommand>,
-        sender: Sender<TradeCommand>)
-    {
-        
-        self.engine_rv = Some(receiver);
-        self.trade_tx = Some(sender); 
-    }
-
-    pub fn is_connected(&self) -> bool{
-        self.engine_rv.is_some() && self.trade_tx.is_some()
-    }
     pub async fn start(&mut self){
         let mut time = 0;
         let mut init = false;
-        if self.is_connected(){
             
-        let tx_sender = self.trade_tx.clone().unwrap();
-            while let Some(cmd) = self.engine_rv.as_mut().unwrap().recv().await{
+            while let Some(cmd) = self.engine_rv.recv().await{
            
             match cmd {
 
@@ -312,8 +322,8 @@ impl SignalEngine{
 
                         self.display_indicators(price);
                         
-                        if let Some(trade_command) = self.get_signal(){
-                            let _ = tx_sender.clone().try_send(trade_command);
+                        if let Some(trade_command) = self.get_signal(price){
+                            let _ = self.trade_tx.try_send(trade_command);
                         }
             },
 
@@ -332,12 +342,11 @@ impl SignalEngine{
                         self.load(&prices);
                         info!("RELOADED ENGINE WITH NEW TIME FRAME DATA");
                     },
-                    EngineCommand::Stop =>{
-                        let _ = tx_sender.clone().try_send(TradeCommand::CancelTrade); 
+                    EngineCommand::Stop =>{ 
                         return;
                     },
             }
-        }}
+        }
     }
 
     fn display_indicators(&self, price: f32){

@@ -3,23 +3,26 @@ use hyperliquid_rust_sdk::{ExchangeClient};
 use log::info;
 use std::fmt;
 use kwant::indicators::Price;
+use serde::Deserialize;
 
 
-
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum Risk {
     Low,
-    Medium,
+    Normal,
     High,
 }
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum Style{
     Scalp,
     Swing,
 }
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum Stance{
     Bull,
     Bear,
@@ -27,7 +30,7 @@ pub enum Stance{
 }
 
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
 pub struct Strategy {
    pub risk: Risk,
    pub style: Style,    
@@ -61,7 +64,7 @@ impl Strategy{
     pub fn get_rsi_threshold(&self) -> RsiRange{
         match self.risk{
             Risk::Low => RsiRange{low: 25.0, high: 78.0},
-            Risk::Medium => RsiRange{low: 30.0, high: 70.0},
+            Risk::Normal => RsiRange{low: 30.0, high: 70.0},
             Risk::High => RsiRange{low: 33.0, high: 67.0},
         }
     }
@@ -69,7 +72,7 @@ impl Strategy{
     pub fn get_stoch_threshold(&self) -> StochRange{
         match self.risk{
             Risk::Low => StochRange{low: 2.0, high: 95.0},
-            Risk::Medium => StochRange{low: 15.0, high: 85.0},
+            Risk::Normal => StochRange{low: 15.0, high: 85.0},
             Risk::High => StochRange{low:20.0, high: 80.0},
         }
     }
@@ -78,7 +81,7 @@ impl Strategy{
     pub fn get_atr_threshold(&self) -> AtrRange{
         match self.risk{
             Risk::Low => AtrRange{low: 0.2, high: 1.0},
-            Risk::Medium => AtrRange{low: 0.5, high: 3.0},
+            Risk::Normal => AtrRange{low: 0.5, high: 3.0},
             Risk::High => AtrRange{low: 0.8, high: f32::INFINITY},
         }
     }
@@ -105,7 +108,7 @@ impl Strategy{
 
 impl Default for Strategy{
     fn default() -> Self {
-        Self { risk: Risk::Medium, style: Style::Scalp, stance: Stance::Neutral, follow_trend: true }
+        Self { risk: Risk::Normal, style: Style::Scalp, stance: Stance::Neutral, follow_trend: true }
     }
 }
 
@@ -150,7 +153,7 @@ impl Default for TradeParams {
             strategy: Strategy::default(),
             lev: 20,
             trade_time: 300,
-            time_frame: String::from("15m"),
+            time_frame: String::from("1m"),
         }
     }
 }
@@ -191,7 +194,7 @@ pub struct TradeInfo{
     pub pnl: f32,
     pub fee: f32,
     pub is_long: bool,
-    pub duration: u64,
+    pub duration: Option<u64>,
     pub oid: (u64, u64),
 }
 
