@@ -3,9 +3,10 @@ use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
 use crate::trade_setup::{PriceData, Strategy, TradeCommand, Style, Stance};
 use crate::{MAX_HISTORY};
 use tokio::sync::mpsc::UnboundedReceiver;
-use flume::{TrySendError,Sender};
+use flume::{TrySendError,Sender, bounded};
  
 use tokio::time::{sleep, Duration};
+use tokio::sync::mpsc::unbounded_channel;
 
 #[derive(Debug)]
 pub struct SignalEngine{
@@ -349,7 +350,7 @@ impl SignalEngine{
         }
     }
 
-    fn display_indicators(&self, price: f32){
+    pub fn display_indicators(&mut self, price: f32){
 
                     if let Some(stoch_rsi) = self.get_stoch_rsi(){
                 println!("🔵STOCH-K: {}", stoch_rsi);
@@ -385,12 +386,45 @@ impl SignalEngine{
             if let Some(trend) = self.get_ema_cross_trend(){
                 println!("DOUBLE EMA uptrend: {}", trend );
             }
+            
+            if let Some(cross) = self.check_ema_cross(){
+                let trend = if cross{"uptrend"} else{"downtrend"};
+                println!("EMA cross: {}", trend);
+        }
 
             
         }
 
 
 
+        pub fn new_backtest(strategy: Strategy, config: Option<IndicatorsConfig>) -> Self{
+            
+            let config: IndicatorsConfig = match config{
+            Some(cfg) => cfg,
+            None => IndicatorsConfig::default(),
+        };
+
+            let ema_cross = config.ema_cross_short_long_lenghts
+            .map(|(short, long)| EmaCross::new(short, long));
+
+        //channels won't be used in backtest, these are placeholders
+        let (_tx, dummy_rv) = unbounded_channel::<EngineCommand>();
+        let (dummy_tx, _rx) = bounded::<TradeCommand>(0);
+
+        SignalEngine{
+            engine_rv: dummy_rv,
+            trade_tx: dummy_tx,
+            indicators_config: config.clone(),
+            rsi: Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing),
+            atr: Atr::new(config.atr_length),
+            ema: Ema::new(config.ema_length),
+            ema_cross: ema_cross,
+            adx: Adx::new(config.adx_length, config.adx_length),
+            sma: Sma::new(config.sma_length),
+            strategy,
+            price_data: Vec::new(),
+        }           
+        }
 
     
 }

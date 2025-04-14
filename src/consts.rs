@@ -1,4 +1,4 @@
-pub const MAX_HISTORY: usize = 5000;
+pub const MAX_HISTORY: usize = 20000;
 pub static MARKETS:  &[&str] = &[
     "BTC", "ETH", "ATOM", "MATIC", "DYDX", "SOL", "AVAX", "BNB", "APE", "OP",
     "LTC", "ARB", "DOGE", "INJ", "SUI", "kPEPE", "CRV", "LDO", "LINK", "STX",
