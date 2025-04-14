@@ -141,7 +141,8 @@ impl Executor {
         self.open_position = Some(trade_fill_open.clone());
         let _ = sleep(Duration::from_secs(duration)).await;
 
-        let trade_fill_close = self.close_order(size, is_long).await?;
+
+        let trade_fill_close = self.close_order(trade_fill_open.sz, trade_fill_open.is_long).await?;
         
         let (fees, pnl) = Self::calculate_pnl(&self.fees, is_long, &trade_fill_open, &trade_fill_close);
 
