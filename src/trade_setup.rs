@@ -1,10 +1,11 @@
 use hyperliquid_rust_sdk::{ExchangeClient};
+use std::collections::{HashMap, HashSet};
 //use kwant::indicators::{Rsi, StochRsi, Atr, Adx, Ema, EmaCross, Sma};
 use log::info;
 use std::fmt;
 use kwant::indicators::Price;
 use serde::Deserialize;
-
+use crate::helper::TimeFrame;
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -36,6 +37,7 @@ pub struct Strategy {
    pub style: Style,    
    pub stance: Stance,
    pub follow_trend: bool,
+   pub index_strat: IndexConfig,
 }
 
 pub struct RsiRange{
@@ -56,8 +58,8 @@ pub struct StochRange{
 
 impl Strategy{
 
-    pub fn new(risk: Risk, style: Style, stance: Stance, follow_trend: bool) -> Self{
-        Self { risk, style, stance, follow_trend }
+    pub fn new(risk: Risk, style: Style, stance: Stance, follow_trend: bool, index_strat: IndexConfig) -> Self{
+        Self { risk, style, stance, follow_trend, index_strat }
     }
 
     
@@ -103,12 +105,24 @@ impl Strategy{
     pub fn update_follow_trend(&mut self, follow_trend: bool){
         self.follow_trend = follow_trend;
     }
+    
+    pub fn update_index_strat(&mut self, new_config: IndexConfig){
+        if self.index_strat != new_config{
+            self.index_strat = new_config
+        }
+    }
+
 }
 
 
 impl Default for Strategy{
     fn default() -> Self {
-        Self { risk: Risk::Normal, style: Style::Scalp, stance: Stance::Neutral, follow_trend: true }
+        Self { 
+            risk: Risk::Normal,
+            style: Style::Scalp,
+            stance: Stance::Neutral,
+            follow_trend: true,
+            index_strat: IndexConfig::default() }
     }
 }
 
@@ -125,7 +139,7 @@ pub struct TradeParams {
     pub strategy: Strategy, 
     pub lev: u32,
     pub trade_time: u64,  
-    pub time_frame: String,
+    pub time_frame: TimeFrame,
 }
 
 
@@ -142,7 +156,14 @@ impl TradeParams{
             info!("Update leverage response: {response:?}");
     }
 
+    pub fn get_tfs(&self) -> Vec<TimeFrame>{
 
+        let mut tfs = self.strategy.index_strat.get_tfs(); 
+        if !tfs.contains(&self.time_frame){
+            tfs.push(self.time_frame);
+        }
+        tfs 
+    }
 }
 
 
@@ -153,7 +174,7 @@ impl Default for TradeParams {
             strategy: Strategy::default(),
             lev: 20,
             trade_time: 300,
-            time_frame: String::from("1m"),
+            time_frame: TimeFrame::Min5,
         }
     }
 }
@@ -166,7 +187,7 @@ impl fmt::Display for TradeParams {
             self.lev,
             self.strategy,
             self.trade_time,
-            self.time_frame
+            self.time_frame.as_str(),
         )
     }
 }
@@ -209,5 +230,104 @@ pub struct TradeFillInfo{
     pub oid: u64,  
     pub is_long: bool,
 }
+
+
+#[derive(Debug, Clone, Copy, PartialEq,Deserialize, Eq, Hash)]
+pub enum IndexStrat{
+    None,
+    Auto,
+    Manual(TimeFrame),
+}
+
+
+#[derive(Debug, Clone, Copy,Deserialize, PartialEq, Eq, Hash)]
+enum IndexKind{
+    Rsi,
+    SmaOnRsi,
+    StochRsi,
+    Adx,
+    Atr,
+    Ema,
+    EmaCross,
+    Sma,
+}
+
+#[derive(Debug,Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IndexConfig{
+    rsi: IndexStrat,
+    sma_on_rsi: IndexStrat,
+    stoch_rsi: IndexStrat,
+    adx: IndexStrat,
+    atr: IndexStrat,
+    ema: IndexStrat,
+    ema_cross: IndexStrat,
+    sma: IndexStrat, 
+}
+
+
+
+impl IndexConfig{
+
+    pub fn as_map(&self) -> HashMap<IndexKind,IndexStrat>{
+        use IndexKind::*;
+
+        let mut map = HashMap::new();
+        map.insert(Rsi, self.rsi);
+        map.insert(SmaOnRsi, self.sma_on_rsi);
+        map.insert(StochRsi, self.stoch_rsi);
+        map.insert(Adx, self.adx);
+        map.insert(Atr, self.atr); 
+        map.insert(Ema, self.ema);
+        map.insert(EmaCross, self.ema_cross);
+        map.insert(Sma, self.sma);
+        map
+    }
+
+    fn get_tfs(&self) -> Vec<TimeFrame>{
+
+        let mut tf_set = HashSet::new();
+            for (kind, strat) in self.as_map().iter(){
+               if let IndexStrat::Manual(tf) = strat{
+                    tf_set.insert(*tf);
+            }
+        }
+
+        let vec: Vec<TimeFrame> = tf_set.into_iter().collect();
+        vec
+}
+
+}
+
+impl Default for IndexConfig{
+
+    fn default() -> Self{
+        IndexConfig{
+            rsi: IndexStrat::Auto,
+            sma_on_rsi: IndexStrat::Auto,
+            stoch_rsi: IndexStrat::Auto,
+            adx: IndexStrat::Auto,
+            atr: IndexStrat::Auto,
+            ema: IndexStrat::Auto,
+            ema_cross: IndexStrat::Auto,
+            sma: IndexStrat::Auto,
+
+        }        
+
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

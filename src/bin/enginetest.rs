@@ -24,7 +24,7 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use kwant::indicators::{Rsi,Price, Indicator};
 use hyperliquid_rust_bot::{Market, MarketCommand};
 use hyperliquid_rust_bot::trade_setup::{TradeInfo, TradeParams, Strategy, Risk, Style, Stance};
-use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
+use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles, TimeFrame};
 use hyperliquid_rust_bot::{SignalEngine, IndicatorsConfig};
 
 use flume::{bounded, TrySendError};
@@ -44,13 +44,13 @@ async fn main(){
 
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
    
-    let strat = load_strategy("config.toml");
+    let strat = Strategy::default();
    
     let trade_params = TradeParams{
         strategy: strat,
         lev: 20,
         trade_time: 300,
-        time_frame: "5m".to_string(),
+        time_frame: TimeFrame::Min1,
     };
 
     let (mut market, sender) = Market::new(wallet, pubkey, COIN.to_string(), trade_params, None).await.unwrap();
@@ -68,15 +68,15 @@ async fn main(){
 };
 
    tokio::spawn(async move{
-        /*
+        
         let _ = sleep(Duration::from_secs(20)).await;
-        sender.send(MarketCommand::UpdateLeverage(30)).await;
-        let _ = sleep(Duration::from_secs(10)).await;
+        sender.send(MarketCommand::UpdateLeverage(20)).await;
+        let _ = sleep(Duration::from_secs(1000)).await;
         sender.send(MarketCommand::UpdateIndicatorsConfig(config)).await;
-        let _ = sleep(Duration::from_secs(10)).await;
-        sender.send(MarketCommand::Close).await; */ 
         let _ = sleep(Duration::from_secs(3000)).await;
-        let _ = sender.send(MarketCommand::Close).await; 
+        sender.send(MarketCommand::Close).await;
+        //let _ = sleep(Duration::from_secs(30)).await;
+        //let _ = sender.send(MarketCommand::Close).await; 
 });
 
 
@@ -97,6 +97,7 @@ fn load_strategy(path: &str) -> Strategy {
     let content = fs::read_to_string(path).expect("failed to read file");
     toml::from_str(&content).expect("failed to parse toml")
 }
+
 
 
 

@@ -259,11 +259,11 @@ impl SignalEngine{
         let rsi = self.get_rsi().unwrap();
         let stoch = self.get_stoch_rsi().unwrap();
         let atr = self.get_atr_normalized(price).unwrap(); 
-        
+     
         match self.strategy.style{
             Style::Scalp => {
                 if rsi < rsi_range.low && stoch < stoch_range.low{
-                    if atr < 0.1 {return None;}; //check is volatilty is enough 
+                    if atr < 0.1 {return None;}; //check if volatilty is high enough 
                     if self.strategy.stance == Stance::Bear{
                         return None;
                     }else{

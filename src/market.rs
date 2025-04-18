@@ -1,10 +1,11 @@
+
 use log::info;
 use ethers::signers::LocalWallet;
 use hyperliquid_rust_sdk::{Message,ExchangeClient, InfoClient, BaseUrl};
 use crate::trade_setup::{Strategy, TradeParams, TradeCommand, PriceData, TradeInfo};
 use crate::{MAX_HISTORY, MARKETS};
 use crate::{Executor, SignalEngine, IndicatorsConfig, EngineCommand};
-use crate::helper::{load_candles, subscribe_candles, get_user_fees};
+use crate::helper::{TimeFrame, load_candles, subscribe_candles, get_user_fees};
 use kwant::indicators::{Price};
 
 use tokio::{
@@ -77,9 +78,9 @@ impl Market{
 
 
 
-    pub async fn change_time_frame(&mut self, tf: &str) -> Result<(), String>{
+    pub async fn change_time_frame(&mut self, tf: TimeFrame) -> Result<(), String>{
         if tf != self.trade_params.time_frame{
-            self.trade_params.time_frame = tf.to_string();
+            self.trade_params.time_frame = tf;
             self.signal_engine.reset();
 
             self.load_engine(300).await?;
@@ -96,7 +97,7 @@ impl Market{
 
     async fn load_engine(&mut self, candle_count: u64) -> Result<(), String>{
 
-        let price_data = load_candles(&self.info_client, self.asset.as_str(), self.trade_params.time_frame.as_str(), candle_count)
+        let price_data = load_candles(&self.info_client, self.asset.as_str(), self.trade_params.time_frame, candle_count)
         .await?;
 
         self.signal_engine.load(&price_data);
@@ -183,7 +184,7 @@ impl Market{
                         
                         let price_data = load_candles(&self.info_client,
                                                     self.asset.as_str(),
-                                                    tf.as_str(),
+                                                    tf,
                                                     500,
                                                         ).await; 
                         if let Ok(price_data) = price_data{
@@ -196,12 +197,13 @@ impl Market{
                     let _ = shutdown_tx.send(true);
                     let _ = engine_update_tx.send(EngineCommand::Stop);
                     //shutdown Executor
+                    info!("Shutting down executor (Waiting for last trade execution to finish if any)");
                     match self.exec_tx.send(TradeCommand::CancelTrade) {
                         Ok(_) =>{
                             if let Some(cmd) = self.market_rv.recv().await {
                                 match cmd {
                                     MarketCommand::ReceiveTrade(trade_info) => {
-                                        info!("Received final trade before shutdown: {:?}", trade_info);
+                                        info!("\nReceived final trade before shutdown: {:?}", trade_info);
                                         self.pnl += trade_info.pnl;
                                         self.trade_history.push(trade_info);
                                         break;
@@ -217,15 +219,16 @@ impl Market{
                         },
                         
                         }
-                    println!("No. of trade : {}\nPNL: {}",&self.trade_history.len(),&self.pnl);
                     break;
                     }, 
                 };
 
                 };
+        
         let _ = engine_handle.await;
         let _ = executor_handle.await;
         let _ = candle_stream_handle.await;
+        println!("No. of trade : {}\nPNL: {}",&self.trade_history.len(),&self.pnl);
         Ok(())
     }
 }
@@ -241,7 +244,7 @@ pub enum MarketCommand{
     UpdateLeverage(u32),
     UpdateStrategy(Strategy),
     UpdateIndicatorsConfig(IndicatorsConfig),
-    UpdateTimeFrame(String),
+    UpdateTimeFrame(TimeFrame),
     ReceiveTrade(TradeInfo),
     Close,
 }

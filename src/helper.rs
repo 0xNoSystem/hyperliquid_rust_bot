@@ -4,7 +4,7 @@ use tokio::sync::watch::{Sender, Receiver};
 use std::time::{SystemTime, UNIX_EPOCH};
 use kwant::indicators::{Price};
 use ethers::types::H160;
-
+use serde::Deserialize;
 
 pub async fn subscribe_candles(
     coin: &str,
@@ -56,20 +56,28 @@ async fn get_user_margin(info_client: &InfoClient, user: String) -> Result<f32, 
 }
 
 
-fn get_time_now_and_candles_ago(candle_count: u64, tf: u64) -> (u64, u64) {
+
+
+fn get_time_now_and_candles_ago(candle_count: u64, tf: TimeFrame) -> (u64, u64) {
     let end = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
     
-    let interval = candle_count * tf * 60 * 1000; 
-    let start = end - interval;
+    let interval = candle_count
+    .checked_mul(tf.to_secs())
+    .and_then(|s| s.checked_mul(1_000))
+    .expect("interval overflowed");
 
-    (end, start)
+    let start = end.saturating_sub(interval);
+
+    (start, end)
 }
 
-pub async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: &str, start: u64, end: u64) -> Result<Vec<Price>, String>{
-    
+
+
+async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: TimeFrame, start: u64, end: u64) -> Result<Vec<Price>, String>{
+ 
     let vec = match info_client
     .candles_snapshot(coin.to_string(), time_frame.to_string(), start, end)
     .await
@@ -97,32 +105,11 @@ pub async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: &s
     Ok(res)
 }
 
-pub fn tf_to_minutes(tf: &str) -> Result<u64, String> {
-    match tf {
-        "1m" => Ok(1),
-        "3m" => Ok(3),
-        "5m" => Ok(5),
-        "15m" => Ok(15),
-        "30m" => Ok(30),
-        "1h" => Ok(60),
-        "2h" => Ok(120),
-        "4h" => Ok(240),
-        "8h" => Ok(480),
-        "12h" => Ok(720),
-        "1d" => Ok(1440),
-        "3d" => Ok(4320),
-        "w" => Ok(10080),
-        "m" => Ok(43200),
-        _ => Err(format!("Unsupported timeframe: {}", tf)),
-    }
-}
+
+pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: TimeFrame, candle_count: u64) -> Result<Vec<Price>, String> {
 
 
-pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: &str, candle_count: u64) -> Result<Vec<Price>, String> {
-
-    let tf_u64 = tf_to_minutes(tf)?;
-
-    let (end,start) = get_time_now_and_candles_ago(candle_count + 1, tf_u64);
+    let (start, end) = get_time_now_and_candles_ago(candle_count + 1, tf);
 
     let price_data = candles_snapshot(info_client, coin, tf, start, end).await?;
 
@@ -161,5 +148,76 @@ pub async fn get_user_fees(info_client: &InfoClient, user: String) -> (f32, f32)
 
 
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq,Deserialize, Hash)]
+pub enum TimeFrame {
+    Min1,
+    Min3,
+    Min5,
+    Min15,
+    Min30,
+    Hour1,
+    Hour2,
+    Hour4,
+    Hour12,
+    Day1,
+    Day3,
+    Week,
+    Month,
+}
 
 
+
+
+impl TimeFrame{
+    
+    fn to_secs(&self) -> u64{
+        match *self {
+            TimeFrame::Min1   => 1 * 60,
+            TimeFrame::Min3   => 3 * 60,
+            TimeFrame::Min5   => 5 * 60,
+            TimeFrame::Min15  => 15 * 60,
+            TimeFrame::Min30  => 30 * 60,
+            TimeFrame::Hour1  => 1 * 60 * 60,
+            TimeFrame::Hour2  => 2 * 60 * 60,
+            TimeFrame::Hour4  => 4 * 60 * 60,
+            TimeFrame::Hour12 => 12 * 60 * 60,
+            TimeFrame::Day1   => 24 * 60 * 60,
+            TimeFrame::Day3   => 3 * 24 * 60 * 60,
+            TimeFrame::Week   => 7 * 24 * 60 * 60,
+            TimeFrame::Month  => 30 * 24 * 60 * 60, // approximate month as 30 days
+        }
+
+    }
+}
+
+impl TimeFrame {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TimeFrame::Min1   => "1m",
+            TimeFrame::Min3   => "3m",
+            TimeFrame::Min5   => "5m",
+            TimeFrame::Min15  => "15m",
+            TimeFrame::Min30  => "30m",
+            TimeFrame::Hour1  => "1h",
+            TimeFrame::Hour2  => "2h",
+            TimeFrame::Hour4  => "4h",
+            TimeFrame::Hour12 => "12h",
+            TimeFrame::Day1   => "1d",
+            TimeFrame::Day3   => "3d",
+            TimeFrame::Week   => "w",
+            TimeFrame::Month  => "m",
+        }
+    }
+    pub fn to_string(&self) -> String{
+        
+        self.as_str().to_string()
+
+    } 
+
+}
+
+impl std::fmt::Display for TimeFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}

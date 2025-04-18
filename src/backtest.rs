@@ -1,7 +1,8 @@
 use crate::{SignalEngine, IndicatorsConfig, MARKETS };  
-use crate::helper::{load_candles};
+use crate::helper::{load_candles, TimeFrame};
 use kwant::indicators::{Price};
 use crate::trade_setup::{TradeParams, Strategy};
+
 
 use tokio::time::{sleep, Duration};
 use hyperliquid_rust_sdk::{InfoClient, BaseUrl};
@@ -40,7 +41,7 @@ impl BackTester{
         let mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
         let candle_data = load_candles(&info_client,
                                     self.asset.as_str(),
-                                    self.params.time_frame.as_str(),
+                                    self.params.time_frame,
                                     candle_count).await?;
 
         
@@ -58,9 +59,9 @@ impl BackTester{
     }
 
 
-    pub async fn change_time_frame(&mut self, tf: &str) -> Result<(), String>{
+    pub async fn change_time_frame(&mut self, tf: TimeFrame) -> Result<(), String>{
     
-        self.params.time_frame = tf.to_string();
+        self.params.time_frame = tf;
         self.signal_engine.reset();
         
         self.load(self.candle_data.len() as u64).await?;

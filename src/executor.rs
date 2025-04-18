@@ -247,9 +247,12 @@ impl Executor {
  
                     TradeCommand::CancelTrade => {
                         if self.is_active(){
-                            if let Some(ref pos) = self.open_position.take(){
-                                info!("Shutting down executor");
+                            if let Some(pos) = self.open_position.take(){
                                 let trade_fill = self.close_order(pos.sz, pos.is_long).await;
+                                if let Ok(close) = trade_fill{
+                                    let trade_info = Self::get_trade_info(pos, close, &self.fees);
+                                    let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
+                                }
                                 self.trade_active.store(false, Ordering::Relaxed);
                         };};
 
