@@ -176,7 +176,7 @@ impl Market{
                     },
                     
                     MarketCommand::ReceiveTrade(trade_info) =>{
-                        info!("Market received trade result, {:?}", &trade_info);
+                        info!("\nMarket received trade result, {:?}\n", &trade_info);
                         self.pnl += trade_info.pnl;
                         self.trade_history.push(trade_info);
                     },
@@ -192,18 +192,23 @@ impl Market{
                             let _ = engine_update_tx.send(EngineCommand::Reload(price_data));
                         };
                     },
+                    MarketCommand::Pause =>{
+
+                       self.exec_tx.send_async(TradeCommand::Pause).await;  
+                    },
+
                     MarketCommand::Close=>{
-                    info!("Closing {} Market...", self.asset);
+                    info!("\nClosing {} Market...\n", self.asset);
                     let _ = shutdown_tx.send(true);
                     let _ = engine_update_tx.send(EngineCommand::Stop);
                     //shutdown Executor
-                    info!("Shutting down executor (Waiting for last trade execution to finish if any)");
+                    info!("\nShutting down executor\n");
                     match self.exec_tx.send(TradeCommand::CancelTrade) {
                         Ok(_) =>{
                             if let Some(cmd) = self.market_rv.recv().await {
                                 match cmd {
                                     MarketCommand::ReceiveTrade(trade_info) => {
-                                        info!("\nReceived final trade before shutdown: {:?}", trade_info);
+                                        info!("\nReceived final trade before shutdown: {:?}\n", trade_info);
                                         self.pnl += trade_info.pnl;
                                         self.trade_history.push(trade_info);
                                         break;
@@ -246,6 +251,7 @@ pub enum MarketCommand{
     UpdateIndicatorsConfig(IndicatorsConfig),
     UpdateTimeFrame(TimeFrame),
     ReceiveTrade(TradeInfo),
+    Pause,
     Close,
 }
 

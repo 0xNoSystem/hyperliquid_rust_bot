@@ -72,9 +72,17 @@ async fn main(){
         
         let _ = sleep(Duration::from_secs(20)).await;
         sender.send(MarketCommand::UpdateLeverage(20)).await;
-        let _ = sleep(Duration::from_secs(1000)).await;
+        let _ = sleep(Duration::from_secs(20)).await;
         sender.send(MarketCommand::UpdateIndicatorsConfig(config)).await;
-        let _ = sleep(Duration::from_secs(3000)).await;
+
+        let _ = sleep(Duration::from_secs(8)).await;
+        sender.send(MarketCommand::Pause).await;
+        sender.send(MarketCommand::UpdateTimeFrame(TimeFrame::from_str("1m").unwrap())).await;
+
+        let _ = sleep(Duration::from_secs(20)).await;
+        sender.send(MarketCommand::Pause).await;
+
+        let _ = sleep(Duration::from_secs(300)).await;
         sender.send(MarketCommand::Close).await;
         //let _ = sleep(Duration::from_secs(30)).await;
         //let _ = sender.send(MarketCommand::Close).await; 

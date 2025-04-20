@@ -198,6 +198,27 @@ impl Executor {
     }
 
 
+    pub async fn cancel_trade(&mut self) -> Option<TradeInfo>{
+
+            if let Some(pos) = self.open_position.lock().await.take(){
+                let trade_fill = self.close_order(pos.sz, pos.is_long).await;
+                if let Ok(close) = trade_fill{
+                    let trade_info = Self::get_trade_info(pos, close, &self.fees);
+                    return Some(trade_info);
+                }
+        }
+        
+        None
+    }
+
+    async fn is_active(&self) -> bool{
+        let mut guard = self.open_position.lock().await;
+        guard.is_some()
+    }
+
+    fn toggle_pause(&mut self){
+        self.is_paused = !self.is_paused
+    }
     
     
     pub async fn start(mut self){
@@ -205,13 +226,11 @@ impl Executor {
              
             let info_sender = self.market_tx.clone();
             while let Ok(cmd) = self.trade_rv.recv_async().await{
-                if self.is_paused{
-                            continue;
-                        }
 
                 match cmd{
                         TradeCommand::ExecuteTrade {size, is_long, duration} => {
-                           
+                                
+                                if self.is_active().await || self.is_paused{continue};
                                 let trade_info = self.open_order(size, is_long).await;
                                 if let Ok(trade_fill) = trade_info{ 
                                     { 
@@ -254,22 +273,22 @@ impl Executor {
                     TradeCommand::OpenTrade{size, is_long}=> {
                         info!("Open trade command received");
 
-                        let mut guard = self.open_position.lock().await;
-                            
-                            if guard.is_none(){
+                            if !self.is_active().await && !self.is_paused{
                                  let trade_fill = self.open_order(size, is_long).await;
 
                                  if let Ok(trade) = trade_fill{
                                      info!("Trade Opened: {:?}", trade.clone());
-                                     *guard = Some(trade);
+                                     *self.open_position.lock().await = Some(trade);
                                     };
-                    };  
+                    }else if self.is_active().await{
+                        info!("OpenTrade skipped: a trade is already active");
+                    }  
 
 
                 },
 
                     TradeCommand::CloseTrade{size} => {
-                        
+                            if self.is_paused{continue}; 
                             let maybe_open = {
                                 let mut pos = self.open_position.lock().await;
                                 pos.take()
@@ -292,21 +311,26 @@ impl Executor {
  
                     TradeCommand::CancelTrade => {
 
-                            if let Some(pos) = self.open_position.lock().await.take(){
-                                let trade_fill = self.close_order(pos.sz, pos.is_long).await;
-                                if let Ok(close) = trade_fill{
-                                    let trade_info = Self::get_trade_info(pos, close, &self.fees);
+                            if let Some(trade_info) = self.cancel_trade().await{
                                     let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
-                                }
                             };
 
                         return;
 
                     },
 
-                    _ => {println!("Command not ready");},
+                    TradeCommand::Pause=> {
+                        
+                        if let Some(trade_info) = self.cancel_trade().await{
+                            let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
+                        };                        
+                        self.toggle_pause();
+                        info!("Executor is now {}", if self.is_paused { "paused" } else { "resumed" });
+                },
+                    
+                TradeCommand::BuildPosition{size, is_long, interval} => {info!("Contacting Bob the builder")},
+                    
         }
-
 
     }}
 

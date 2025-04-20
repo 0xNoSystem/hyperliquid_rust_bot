@@ -242,13 +242,13 @@ impl SignalEngine{
     }
 
     fn get_signal(&self, price: f32) -> Option<TradeCommand>{
-        let tf = 100;
+        let tf = 30;
         if !self.is_ready(){
             return None;
         }
 
         let duration = match self.strategy.style{
-            Style::Scalp => {tf * 4},
+            Style::Scalp => {tf * 1},
             Style::Swing => {tf * 10},
         };
 
@@ -262,8 +262,8 @@ impl SignalEngine{
      
         match self.strategy.style{
             Style::Scalp => {
-                if rsi < rsi_range.low && stoch < stoch_range.low{
-                    if atr < 0.1 {return None;}; //check if volatilty is high enough 
+                if rsi > rsi_range.low && stoch > stoch_range.low{
+                    if atr < 0.05 {return None;}; //check if volatilty is high enough 
                     if self.strategy.stance == Stance::Bear{
                         return None;
                     }else{
