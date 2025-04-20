@@ -12,4 +12,4 @@ pub use consts::{MAX_HISTORY, MARKETS};
 pub use executor::Executor;
 pub use signal::{SignalEngine, IndicatorsConfig, EngineCommand};
 pub use backtest::BackTester;
-pub use trade_setup::{TradeParams, Strategy};
+pub use trade_setup::{TradeParams, Strategy, TimeFrame};

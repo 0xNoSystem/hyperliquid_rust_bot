@@ -19,12 +19,12 @@ use tokio::{
     sync::mpsc::{unbounded_channel,UnboundedReceiver},
     time::{sleep, Duration},
 };
-
+use std::str::FromStr;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use kwant::indicators::{Rsi,Price, Indicator};
 use hyperliquid_rust_bot::{Market, MarketCommand};
-use hyperliquid_rust_bot::trade_setup::{TradeInfo, TradeParams, Strategy, Risk, Style, Stance};
-use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles, TimeFrame};
+use hyperliquid_rust_bot::trade_setup::{TimeFrame,TradeInfo, TradeParams, Strategy, Risk, Style, Stance};
+use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
 use hyperliquid_rust_bot::{SignalEngine, IndicatorsConfig};
 
 use flume::{bounded, TrySendError};
@@ -50,7 +50,8 @@ async fn main(){
         strategy: strat,
         lev: 20,
         trade_time: 300,
-        time_frame: TimeFrame::Min1,
+        time_frame: TimeFrame::from_str("5m").unwrap_or(TimeFrame::Min1),
+    
     };
 
     let (mut market, sender) = Market::new(wallet, pubkey, COIN.to_string(), trade_params, None).await.unwrap();

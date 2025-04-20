@@ -1,7 +1,8 @@
 use log::info;
 use hyperliquid_rust_sdk::{ExchangeClient,ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, BaseUrl};
 use ethers::signers::LocalWallet;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc};
+use tokio::sync::Mutex;
 
 use tokio::{
     sync::mpsc::{Sender},
@@ -17,10 +18,10 @@ pub struct Executor {
     trade_rv: Receiver<TradeCommand>,
     market_tx: Sender<MarketCommand>,
     asset: String,
-    exchange_client: ExchangeClient,
-    trade_active: Arc<AtomicBool>,
+    exchange_client: Arc<ExchangeClient>,
+    is_paused: bool,
     fees: (f32, f32),
-    open_position: Option<TradeFillInfo>,
+    open_position: Arc<Mutex<Option<TradeFillInfo>>>,
 }
 
 
@@ -35,22 +36,22 @@ impl Executor {
         market_tx: Sender<MarketCommand>,
     ) -> Self {
         
-        let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
+        let exchange_client = Arc::new(ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap());
         Executor{
             wallet,
             trade_rv,
             market_tx,
             asset,
             exchange_client,
-            trade_active: Arc::new(AtomicBool::new(false)),
+            is_paused: false,
             fees,
-            open_position: None,
+            open_position: Arc::new(Mutex::new(None)),
         }
     }
 
-    async fn try_trade(&self, params: MarketOrderParams<'_>) -> Result<ExchangeDataStatus, String>{
+    async fn try_trade(client: Arc<ExchangeClient>, params: MarketOrderParams<'_>) -> Result<ExchangeDataStatus, String>{
 
-        let response = self.exchange_client
+        let response = client
             .market_open(params)
             .await
             .map_err(|e| format!("Transport failure, {}",e))?;
@@ -81,7 +82,8 @@ impl Executor {
             wallet: None,
         };
         
-        let status = self.try_trade(market_open_params).await?;
+        
+        let status = Self::try_trade(self.exchange_client.clone(), market_open_params).await?;
 
          match status{
             
@@ -102,11 +104,7 @@ impl Executor {
     }
     pub async fn close_order(&self, size: f32, is_long: bool) -> Result<TradeFillInfo, String>   {
 
-        if !self.is_active(){
-            return Err("Trade not active".to_string());
-        }
-
-        let market_close_params = MarketOrderParams {
+        let market_close_params = MarketOrderParams{
             asset: self.asset.as_str(),
             is_buy: !is_long,
             sz: size as f64,
@@ -115,9 +113,10 @@ impl Executor {
             cloid: None,
             wallet: None,
         };
+        
 
         
-        let status = self.try_trade(market_close_params).await?;
+        let status = Self::try_trade(self.exchange_client.clone(),market_close_params).await?;
         match status{
 
             ExchangeDataStatus::Filled(ref order) =>  {
@@ -134,28 +133,38 @@ impl Executor {
     }
 
 
-
-    pub async fn market_trade_exec(&mut self, size: f32, is_long: bool, duration: u64) -> Result<TradeInfo, String>{
+    pub async fn close_order_static(client: Arc<ExchangeClient>,asset: String, size: f32, is_long: bool) -> Result<TradeFillInfo, String>{
         
-        let trade_fill_open = self.open_order(size, is_long).await?;
-        self.open_position = Some(trade_fill_open.clone());
-        let _ = sleep(Duration::from_secs(duration)).await;
+ 
+        let market_close_params = MarketOrderParams {
+            asset: asset.as_str(),
+            is_buy: !is_long,
+            sz: size as f64,
+            px: None,
+            slippage: Some(0.01), // 1% slippage
+            cloid: None,
+            wallet: None,
+        };
+
+        let status = Self::try_trade(client,market_close_params).await?;
+        match status{
+
+            ExchangeDataStatus::Filled(ref order) =>  {
+
+                println!("Close order filled: {order:?}");
+                let sz: f32 = order.total_sz.parse::<f32>().unwrap();
+                let price: f32 = order.avg_px.parse::<f32>().unwrap(); 
+                let fill_info = TradeFillInfo{fill_type: "Close".to_string(),sz, price, oid: order.oid, is_long};
+                return Ok(fill_info);
+            },
+
+            _ => Err("Close order not filled".to_string()),
+    }
 
 
-        let trade_fill_close = self.close_order(trade_fill_open.sz, trade_fill_open.is_long).await?;
-        
-        let (fees, pnl) = Self::calculate_pnl(&self.fees, is_long, &trade_fill_open, &trade_fill_close);
-
-        return Ok(TradeInfo{
-            open: trade_fill_open.price,
-            close: trade_fill_close.price,
-            pnl,
-            fee: fees,
-            is_long,
-            duration: Some(duration),
-            oid: (trade_fill_open.oid, trade_fill_close.oid)
-        });
 }
+
+
         fn get_trade_info(open: TradeFillInfo, close: TradeFillInfo, fees: &(f32, f32)) -> TradeInfo{
             let is_long = open.is_long;
             let (fee, pnl) = Self::calculate_pnl(fees,is_long, &open, &close);
@@ -188,73 +197,108 @@ impl Executor {
         (fee_open + fee_close, pnl)
     }
 
-    pub fn is_active(&self) -> bool{
-        self.trade_active.load(Ordering::Relaxed)
-    }
-    
 
+    
     
     pub async fn start(mut self){
         println!("EXECUTOR STARTED");
              
             let info_sender = self.market_tx.clone();
             while let Ok(cmd) = self.trade_rv.recv_async().await{
+                if self.is_paused{
+                            continue;
+                        }
+
                 match cmd{
                         TradeCommand::ExecuteTrade {size, is_long, duration} => {
-                        if !self.is_active(){ 
-                                self.trade_active.store(true, Ordering::Relaxed);
-                                let trade_info = self.market_trade_exec(size, is_long, duration).await;
-                                if let Ok(trade_info) = trade_info{ 
-                                    let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
+                           
+                                let trade_info = self.open_order(size, is_long).await;
+                                if let Ok(trade_fill) = trade_info{ 
+                                    { 
+                                        let mut pos = self.open_position.lock().await; 
+                                        *pos = Some(trade_fill.clone()); 
+                                    }         
+
+                                    let client = self.exchange_client.clone();
+                                    let asset = self.asset.clone();
+                                    let fees = self.fees;
+                                    let sender = info_sender.clone();
+                                    let pos_handle = self.open_position.clone();
+                                    tokio::spawn(async move{ 
+                                        let _ = sleep(Duration::from_secs(duration)).await;
+                                        let maybe_open = {
+                                            let mut pos = pos_handle.lock().await;
+                                            pos.take()
+                                        }; 
+
+                                        if let Some(open) = maybe_open{
+                                          
+                                            let close_fill = Self::close_order_static(client, asset, open.sz, is_long).await;
+                                            if let Ok(fill) = close_fill{
+                                                let trade_info = Self::get_trade_info(
+                                                                                open,
+                                                                                fill,
+                                                                                &fees);
+                                                  
+                                                
+                                                let _ = sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
+                                                info!("Trade Closed: {:?}", trade_info);
+                                            }
+                                    
+                                    }
+                        });
                                     };
 
-                                self.trade_active.store(false, Ordering::Relaxed);
-                            };
-                        },
+                            },
 
                     TradeCommand::OpenTrade{size, is_long}=> {
-                        
-                        if !self.is_active(){
-                            println!("Open trade command received");
-                            self.trade_active.store(true, Ordering::Relaxed);
-                            let trade_fill = self.open_order(size, is_long).await;
+                        info!("Open trade command received");
 
-                            if let Ok(trade) = trade_fill{
-                            info!("Trade Opened: {:?}", trade.clone());
-                                self.open_position = Some(trade);
-                            }
+                        let mut guard = self.open_position.lock().await;
+                            
+                            if guard.is_none(){
+                                 let trade_fill = self.open_order(size, is_long).await;
+
+                                 if let Ok(trade) = trade_fill{
+                                     info!("Trade Opened: {:?}", trade.clone());
+                                     *guard = Some(trade);
+                                    };
+                    };  
 
 
-                    }
                 },
 
-                    TradeCommand::CloseTrade{size, is_long} => {
+                    TradeCommand::CloseTrade{size} => {
                         
-                        if self.is_active(){
-                            let trade_fill = self.close_order(size,is_long).await;
-                            if let (Ok(fill), Some(open)) = (trade_fill, self.open_position.take()){
-                                let trade_info = Self::get_trade_info(
-                                                        open,
+                            let maybe_open = {
+                                let mut pos = self.open_position.lock().await;
+                                pos.take()
+                            };
+                            
+                            if let Some(open_pos) = maybe_open{
+                                let size = size.min(open_pos.sz);
+                                let trade_fill = self.close_order(size,open_pos.is_long).await;
+
+                                if let Ok(fill) = trade_fill{
+                                    let trade_info = Self::get_trade_info(
+                                                        open_pos,
                                                         fill,
                                                         &self.fees);
-                                let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
-                                self.open_position = None;
-                                info!("Trade Closed: {:?}", trade_info);
-                            }; 
-                            self.trade_active.store(false, Ordering::Relaxed);                  
-                    }
+                                    let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
+                                    info!("Trade Closed: {:?}", trade_info);
+                            };
+                        };
                 },
  
                     TradeCommand::CancelTrade => {
-                        if self.is_active(){
-                            if let Some(pos) = self.open_position.take(){
+
+                            if let Some(pos) = self.open_position.lock().await.take(){
                                 let trade_fill = self.close_order(pos.sz, pos.is_long).await;
                                 if let Ok(close) = trade_fill{
                                     let trade_info = Self::get_trade_info(pos, close, &self.fees);
                                     let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
                                 }
-                                self.trade_active.store(false, Ordering::Relaxed);
-                        };};
+                            };
 
                         return;
 

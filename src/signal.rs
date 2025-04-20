@@ -1,6 +1,6 @@
 use log::info;
 use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
-use crate::trade_setup::{PriceData, Strategy, TradeCommand, Style, Stance};
+use crate::trade_setup::{TimeFrame, PriceData, Strategy, TradeCommand, Style, Stance};
 use crate::{MAX_HISTORY};
 use tokio::sync::mpsc::UnboundedReceiver;
 use flume::{TrySendError,Sender, bounded};

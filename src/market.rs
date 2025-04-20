@@ -2,10 +2,10 @@
 use log::info;
 use ethers::signers::LocalWallet;
 use hyperliquid_rust_sdk::{Message,ExchangeClient, InfoClient, BaseUrl};
-use crate::trade_setup::{Strategy, TradeParams, TradeCommand, PriceData, TradeInfo};
+use crate::trade_setup::{TimeFrame,Strategy, TradeParams, TradeCommand, PriceData, TradeInfo};
 use crate::{MAX_HISTORY, MARKETS};
 use crate::{Executor, SignalEngine, IndicatorsConfig, EngineCommand};
-use crate::helper::{TimeFrame, load_candles, subscribe_candles, get_user_fees};
+use crate::helper::{load_candles, subscribe_candles, get_user_fees};
 use kwant::indicators::{Price};
 
 use tokio::{
