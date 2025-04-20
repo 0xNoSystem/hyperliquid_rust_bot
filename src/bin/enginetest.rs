@@ -50,7 +50,7 @@ async fn main(){
         strategy: strat,
         lev: 20,
         trade_time: 300,
-        time_frame: TimeFrame::from_str("5m").unwrap_or(TimeFrame::Min1),
+        time_frame: TimeFrame::from_str("1m").unwrap_or(TimeFrame::Min1),
     
     };
 
@@ -59,8 +59,8 @@ async fn main(){
 
     let config = IndicatorsConfig {
     rsi_length: 14,
-    rsi_smoothing: Some(5),
-    stoch_rsi_length: 14,
+    rsi_smoothing: Some(10),
+    stoch_rsi_length: 12,
     atr_length: 21,
     ema_length: 20,
     ema_cross_short_long_lenghts: Some((8, 21)),
@@ -75,14 +75,14 @@ async fn main(){
         let _ = sleep(Duration::from_secs(20)).await;
         sender.send(MarketCommand::UpdateIndicatorsConfig(config)).await;
 
-        let _ = sleep(Duration::from_secs(8)).await;
-        sender.send(MarketCommand::Pause).await;
-        sender.send(MarketCommand::UpdateTimeFrame(TimeFrame::from_str("1m").unwrap())).await;
+        //let _ = sleep(Duration::from_secs(8)).await;
+        //sender.send(MarketCommand::Pause).await;
+        //sender.send(MarketCommand::UpdateTimeFrame(TimeFrame::from_str("1m").unwrap())).await;
 
-        let _ = sleep(Duration::from_secs(20)).await;
-        sender.send(MarketCommand::Pause).await;
+        //let _ = sleep(Duration::from_secs(20)).await;
+        //sender.send(MarketCommand::Pause).await;
 
-        let _ = sleep(Duration::from_secs(300)).await;
+        let _ = sleep(Duration::from_secs(300000)).await;
         sender.send(MarketCommand::Close).await;
         //let _ = sleep(Duration::from_secs(30)).await;
         //let _ = sender.send(MarketCommand::Close).await; 

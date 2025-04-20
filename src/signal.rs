@@ -248,7 +248,7 @@ impl SignalEngine{
         }
 
         let duration = match self.strategy.style{
-            Style::Scalp => {tf * 1},
+            Style::Scalp => {tf * 8},
             Style::Swing => {tf * 10},
         };
 
@@ -262,8 +262,8 @@ impl SignalEngine{
      
         match self.strategy.style{
             Style::Scalp => {
-                if rsi > rsi_range.low && stoch > stoch_range.low{
-                    if atr < 0.05 {return None;}; //check if volatilty is high enough 
+                if rsi < rsi_range.low && stoch < stoch_range.low{
+                    if atr < 0.03 {return None;}; //check if volatilty is high enough 
                     if self.strategy.stance == Stance::Bear{
                         return None;
                     }else{
