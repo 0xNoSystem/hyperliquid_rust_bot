@@ -1,6 +1,6 @@
 use log::info;
 use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
-use crate::trade_setup::{TimeFrame, PriceData, Strategy, TradeCommand, Style, Stance};
+use crate::trade_setup::{TimeFrame, PriceData,TradeParams, Strategy, TradeCommand, Style, Stance};
 use crate::{MAX_HISTORY};
 use tokio::sync::mpsc::UnboundedReceiver;
 use flume::{TrySendError,Sender, bounded};
@@ -21,6 +21,7 @@ pub struct SignalEngine{
     sma: Sma,
     strategy: Strategy,
     price_data: Vec<Price>,
+    exec_params: ExecParams,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,9 +59,10 @@ impl SignalEngine{
 
     pub async fn new(
         config: Option<IndicatorsConfig>,
-        strategy: Strategy,
+        trade_params: TradeParams,
         engine_rv: UnboundedReceiver<EngineCommand>,
         trade_tx: Sender<TradeCommand>, 
+        margin: f32,
     ) -> Self{
        
         let config: IndicatorsConfig = match config{
@@ -81,8 +83,9 @@ impl SignalEngine{
             ema_cross: ema_cross,
             adx: Adx::new(config.adx_length, config.adx_length),
             sma: Sma::new(config.sma_length),
-            strategy,
+            strategy: trade_params.strategy,
             price_data: Vec::new(),
+            exec_params: ExecParams::new(margin, trade_params.lev, trade_params.time_frame),
         }
     }
 
@@ -118,7 +121,7 @@ impl SignalEngine{
             ema_cross.update(price, false);
         }
         self.adx.update_before_close(price);
-        self.atr.update_before_close(price);
+        //self.atr.update_before_close(price);
         self.sma.update_before_close(price);
     }
 
@@ -242,13 +245,16 @@ impl SignalEngine{
     }
 
     fn get_signal(&self, price: f32) -> Option<TradeCommand>{
-        let tf = 30;
         if !self.is_ready(){
             return None;
         }
+        let ExecParams { margin, lev, tf } = self.exec_params;
+        let tf = tf.to_secs();
+        
+        let size = ((margin * lev as f32) / price)*0.7;
 
         let duration = match self.strategy.style{
-            Style::Scalp => {tf * 8},
+            Style::Scalp => {tf * 4},
             Style::Swing => {tf * 10},
         };
 
@@ -256,7 +262,7 @@ impl SignalEngine{
         let stoch_range = self.strategy.get_stoch_threshold();
         
         let up_trend = self.get_ema_cross_trend();
-        let rsi = self.get_rsi().unwrap();
+        let rsi = self.get_sma_rsi().unwrap_or(self.get_rsi().unwrap_or(50.0));
         let stoch = self.get_stoch_rsi().unwrap();
         let atr = self.get_atr_normalized(price).unwrap(); 
      
@@ -267,13 +273,13 @@ impl SignalEngine{
                     if self.strategy.stance == Stance::Bear{
                         return None;
                     }else{
-                        return Some(TradeCommand::ExecuteTrade{size: 1.0, is_long: true,duration: duration});
+                        return Some(TradeCommand::ExecuteTrade{size, is_long: true,duration: duration});
                     }
                 }else if rsi > rsi_range.high && stoch > stoch_range.high{
                     if self.strategy.stance == Stance::Bull{
                         return None;
                     }else{
-                        return Some(TradeCommand::ExecuteTrade{size: 1.0, is_long: false,duration: duration});
+                        return Some(TradeCommand::ExecuteTrade{size, is_long: false,duration: duration});
                     }
                 }else{
                     return None;
@@ -337,10 +343,27 @@ impl SignalEngine{
                         info!("NEW CONFIG: {:?}", new_config);
                         self.change_indicators_config(new_config);
                 },
-
-                    EngineCommand::Reload(prices)=>{
+                
+                    EngineCommand::UpdateExecParams(param)=>{
+                        use ExecParam::*;
+                        match param{
+                            Margin(m)=>{
+                                self.exec_params.margin = m;
+                        },
+                            Lev(l) => {
+                                self.exec_params.lev = l;
+                        },
+                            Tf(t) => {
+                                self.exec_params.tf = t;                                
+                        },
+                    }
+                },
+                EngineCommand::Reload{price_data, tf}=>{
+                        self.exec_params.tf = tf;
                         self.reset();
-                        self.load(&prices);
+                        self.load(&price_data);
+                        time = 0;
+                        init = false;
                         info!("RELOADED ENGINE WITH NEW TIME FRAME DATA");
                     },
                     EngineCommand::Stop =>{ 
@@ -382,22 +405,24 @@ impl SignalEngine{
             if let Some(ema) = self.get_ema(){
                 println!("🟠EMA: {}", ema);
             }
-
+            if let Some(sma) = self.get_sma(){
+                println!("⚪SMA: {}", sma );
+            }
             if let Some(trend) = self.get_ema_cross_trend(){
                 println!("DOUBLE EMA uptrend: {}", trend );
             }
-            
             if let Some(cross) = self.check_ema_cross(){
                 let trend = if cross{"uptrend"} else{"downtrend"};
                 println!("EMA cross: {}", trend);
-        }
-
+            }
+            
+                
             
         }
 
 
 
-        pub fn new_backtest(strategy: Strategy, config: Option<IndicatorsConfig>) -> Self{
+        pub fn new_backtest(params: TradeParams, config: Option<IndicatorsConfig>, margin: f32) -> Self{
             
             let config: IndicatorsConfig = match config{
             Some(cfg) => cfg,
@@ -421,8 +446,9 @@ impl SignalEngine{
             ema_cross: ema_cross,
             adx: Adx::new(config.adx_length, config.adx_length),
             sma: Sma::new(config.sma_length),
-            strategy,
+            strategy: params.strategy,
             price_data: Vec::new(),
+            exec_params: ExecParams{margin, lev: params.lev, tf: params.time_frame},
         }           
         }
 
@@ -435,10 +461,30 @@ pub enum EngineCommand{
     UpdatePrice(PriceData),
     UpdateStrategy(Strategy),
     UpdateConfig(IndicatorsConfig),
-    Reload(Vec<Price>),
+    UpdateExecParams(ExecParam),
+    Reload{price_data: Vec<Price>, tf: TimeFrame},
     Stop,
 }
 
+#[derive(Debug, Copy, Clone)]
+struct ExecParams{
+    margin: f32,
+    lev: u32,
+    tf: TimeFrame,
+} 
 
+impl ExecParams{
+    fn new(margin: f32, lev:u32, tf: TimeFrame)-> Self{
+       Self{
+            margin,
+            lev,
+            tf,
+        } 
+    }
+}
 
-    
+pub enum ExecParam{
+    Margin(f32),
+    Lev(u32),
+    Tf(TimeFrame),
+}

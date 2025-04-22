@@ -2,8 +2,6 @@ use crate::{SignalEngine, IndicatorsConfig, MARKETS };
 use crate::helper::{load_candles};
 use kwant::indicators::{Price};
 use crate::trade_setup::{TradeParams, Strategy, TimeFrame};
-
-
 use tokio::time::{sleep, Duration};
 use hyperliquid_rust_sdk::{InfoClient, BaseUrl};
 
@@ -21,15 +19,16 @@ pub struct BackTester{
 
 impl BackTester{
 
-    pub fn new(asset: &str,params: TradeParams, config: Option<IndicatorsConfig>) -> Self{
+    pub fn new(asset: &str,params: TradeParams, config: Option<IndicatorsConfig>, margin: f32) -> Self{
         if !MARKETS.contains(&asset){
             panic!("ASSET ISN'T TRADABLE, MARKET CAN'T BE INITILIAZED");
         }
 
 
+
         BackTester{
             asset: asset.to_string(),
-            signal_engine: SignalEngine::new_backtest(params.strategy, config),
+            signal_engine: SignalEngine::new_backtest(params.clone(), config, margin),
             params,
             candle_data: Vec::new(),
         }
@@ -76,12 +75,11 @@ impl BackTester{
 
 
 
-    pub async fn run(&mut self,candle_count: u64, margin: usize) -> bool{
+    pub async fn run(&mut self,candle_count: u64) -> bool{
         self.load(candle_count).await;
     
         let mut tick = 0;
         
-         
         for price in &self.candle_data{
             println!("\nPrice: {}", price.close); 
             self.signal_engine.update_after_close(*price);

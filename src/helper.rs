@@ -1,4 +1,4 @@
-use hyperliquid_rust_sdk::{BaseUrl,ExchangeClient, InfoClient, Message, Subscription, UserFillsResponse};
+use hyperliquid_rust_sdk::{AssetMeta, BaseUrl,ExchangeClient, InfoClient, Message, Subscription, UserFillsResponse};
 use tokio::sync::mpsc::{UnboundedReceiver};
 use tokio::sync::watch::{Sender, Receiver};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -6,12 +6,14 @@ use kwant::indicators::{Price};
 use ethers::types::H160;
 use serde::Deserialize;
 use crate::TimeFrame;
+use log::warn;
 
 pub async fn subscribe_candles(
+    url: BaseUrl,
     coin: &str,
     tf: &str,
 ) -> (Sender<bool>,UnboundedReceiver<Message>) {
-    let mut info_client = InfoClient::with_reconnect(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    let mut info_client = InfoClient::with_reconnect(None, Some(url)).await.unwrap();
     
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
@@ -41,19 +43,6 @@ pub async fn subscribe_candles(
     }); 
 
     (shutdown_tx, receiver)
-}
-
-async fn get_user_margin(info_client: &InfoClient, user: String) -> Result<f32, String> {
-        let user = address(user);
-
-        let info = info_client.user_state(user)
-        .await
-        .map_err(|e| format!("Error fetching user balance, {}",e))?;
-
-        let res =  info.cross_margin_summary.account_value
-        .parse::<f32>()
-        .map_err(|e| format!("FATAL: failed to parse account balance to f32, {}",e))?;
-        Ok(res) 
 }
 
 
@@ -120,37 +109,35 @@ pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: TimeFrame, can
 
 
 
-pub async fn user_fills(info_client: &InfoClient, user: String) -> Vec<UserFillsResponse>{
 
-    let user = address(user);
 
-    return info_client.user_fills(user).await.unwrap();
-    
-}
-
-pub fn address(address: String) -> H160 {
+pub fn address(address: &String) -> H160 {
     address.parse().unwrap()
 }
 
 
 
+pub async fn get_max_lev(info_client: &InfoClient, token: &str) -> u32{
+    let assets = info_client.meta().await.unwrap().universe;
 
-
-pub async fn get_user_fees(info_client: &InfoClient, user: String) -> (f32, f32) {
-    let user = address(user);
-    let user_fees = info_client.user_fees(user).await.unwrap();
-    let add_fee: f32 = user_fees.user_add_rate.parse().unwrap();
-    let cross_fee: f32 = user_fees.user_cross_rate.parse().unwrap();
-    
-    (add_fee, cross_fee)
+    if let Some(asset) = assets.iter().find(|a| a.name == token) {
+        asset.max_leverage
+    }else{
+        warn!("ERROR: Failed to retrieve max_leverage for {}", token);
+        1
+    }
 }
 
 
+pub async fn get_asset(info_client: &InfoClient, token: &str) -> Option<AssetMeta>{
+    let assets = info_client.meta().await.unwrap().universe;
 
-
-
-
-
+    if let Some(asset) = assets.into_iter().find(|a| a.name == token) {
+        Some(asset)
+    }else{
+        None
+    }
+}
 
 
 

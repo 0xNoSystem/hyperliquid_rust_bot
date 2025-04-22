@@ -1,11 +1,11 @@
-
 use log::info;
 use ethers::signers::LocalWallet;
-use hyperliquid_rust_sdk::{Message,ExchangeClient, InfoClient, BaseUrl};
+use hyperliquid_rust_sdk::{AssetMeta, Message,ExchangeClient, InfoClient, BaseUrl};
 use crate::trade_setup::{TimeFrame,Strategy, TradeParams, TradeCommand, PriceData, TradeInfo};
 use crate::{MAX_HISTORY, MARKETS};
-use crate::{Executor, SignalEngine, IndicatorsConfig, EngineCommand};
-use crate::helper::{load_candles, subscribe_candles, get_user_fees};
+use crate::{Wallet, Executor, SignalEngine, IndicatorsConfig, EngineCommand};
+use crate::signal::ExecParam;
+use crate::helper::{get_asset, load_candles, subscribe_candles};
 use kwant::indicators::{Price};
 
 use tokio::{
@@ -16,63 +16,82 @@ use flume::{bounded, Sender as FlumeSender};
 
 
 pub struct Market {
-    wallet: LocalWallet,
-    public_key: String,
     exchange_client: ExchangeClient,
     info_client: InfoClient,
+    pub margin: f32,
     pub trade_history: Vec<TradeInfo>,
     pnl: f32,
     pub trade_params: TradeParams,
-    asset: String,
+    asset: AssetMeta,
     pub signal_engine: SignalEngine,
     executor: Executor,
     market_rv: Receiver<MarketCommand>,
     engine_tx: UnboundedSender<EngineCommand>,
     exec_tx: FlumeSender<TradeCommand>, 
+    url: BaseUrl,
 }
 
 
 
 impl Market{
 
-    pub async fn new(wallet: LocalWallet,public_key: String, asset: String, trade_params: TradeParams, indicators_config: Option<IndicatorsConfig>) -> Result<(Self, Sender<MarketCommand>), String>{
-        if !MARKETS.contains(&asset.as_str()){
+    pub async fn new(wallet: Wallet,
+                    asset: String,
+                    mut trade_params: TradeParams,
+                    indicators_config: Option<IndicatorsConfig>
+    ) -> Result<(Self, Sender<MarketCommand>), String>{
+
+        if !MARKETS.contains(&asset.as_str().trim()){
             return Err("ASSET ISN'T TRADABLE, MARKET CAN'T BE INITILIAZED".to_string());
         }
 
-        let mut info_client = InfoClient::with_reconnect(None, Some(BaseUrl::Mainnet)).await.unwrap();
-        let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap();
+        let mut info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await.unwrap();
+        let exchange_client = ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await.unwrap();
 
         //fetch user fees %
-        let fees = get_user_fees(&info_client, public_key.clone()).await;
+        let fees = wallet.get_user_fees().await;
+        let margin = wallet.get_user_margin().await.unwrap_or(0.0);
+        let meta = get_asset(&info_client, asset.as_str().trim()).await;
         
+        if meta.is_none(){
+            return Err(format!("Failed to fetch Metadata for the {}", asset));
+        } 
+        
+        info!("\n MARGIN: {}", margin); 
         //setup channels
         let (market_tx, mut market_rv) = channel::<MarketCommand>(4);
         let (exec_tx, mut rv_exec) = bounded::<TradeCommand>(0);
         let (engine_tx, mut engine_rv) = unbounded_channel::<EngineCommand>();
 
-        Ok((Market{
-            wallet:wallet.clone(), 
-            public_key,
+        Ok((Market{ 
             exchange_client,
             info_client, 
+            margin,
             trade_history: Vec::with_capacity(MAX_HISTORY),
             pnl: 0_f32,
             trade_params : trade_params.clone(),
-            asset: asset.clone(), 
-            signal_engine: SignalEngine::new(indicators_config, trade_params.strategy,engine_rv,exec_tx.clone()).await,
-            executor: Executor::new(wallet, asset, fees,rv_exec ,market_tx.clone()).await,
+            asset: meta.unwrap(), 
+            signal_engine: SignalEngine::new(indicators_config, trade_params,engine_rv,exec_tx.clone(), margin).await,
+            executor: Executor::new(wallet.wallet, asset, fees,rv_exec ,market_tx.clone()).await,
             market_rv, 
             engine_tx,
             exec_tx,
-        }, market_tx))
+            url: wallet.url,
+        }, market_tx,
+        ))
     }
     
     async fn init(&mut self) -> Result<(), String>{
-
-        self.trade_params.update_lev(self.trade_params.lev ,&self.exchange_client, self.asset.as_str()).await;
+        
+        //check if lev > max_lev
+        let lev = self.trade_params.lev.min(self.asset.max_leverage);
+        let upd = self.trade_params.update_lev(lev ,&self.exchange_client, self.asset.name.as_str()).await;
+        if let Some(lev) = upd{
+            let engine_tx = self.engine_tx.clone();
+            let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
+        };
         self.load_engine(300).await?;
-        println!("Market initialized for {} {:?}", self.asset, self.trade_params);
+        println!("\nMarket initialized for {} {:?}\n", self.asset.name, self.trade_params);
         Ok(())
     }
 
@@ -83,7 +102,7 @@ impl Market{
             self.trade_params.time_frame = tf;
             self.signal_engine.reset();
 
-            self.load_engine(300).await?;
+            self.load_engine(3000).await?;
         }
         Ok(())
     }
@@ -94,10 +113,9 @@ impl Market{
         
     }
         
-
     async fn load_engine(&mut self, candle_count: u64) -> Result<(), String>{
 
-        let price_data = load_candles(&self.info_client, self.asset.as_str(), self.trade_params.time_frame, candle_count)
+        let price_data = load_candles(&self.info_client, self.asset.name.as_str(), self.trade_params.time_frame, candle_count)
         .await?;
 
         self.signal_engine.load(&price_data);
@@ -136,7 +154,7 @@ impl Market{
             executor.start().await;
         });
         //Subscribe candles
-        let (shutdown_tx, mut receiver) = subscribe_candles(self.asset.as_str(), self.trade_params.time_frame.as_str()).await;
+        let (shutdown_tx, mut receiver) = subscribe_candles(self.url,self.asset.name.as_str(), self.trade_params.time_frame.as_str()).await;
 
 
 
@@ -163,7 +181,11 @@ impl Market{
         while let Some(cmd) = self.market_rv.recv().await{
              match cmd {
                    MarketCommand::UpdateLeverage(lev)=>{
-                        self.trade_params.update_lev(lev ,&self.exchange_client, self.asset.as_str()).await;
+                        let lev = lev.min(self.asset.max_leverage);
+                        let upd = self.trade_params.update_lev(lev ,&self.exchange_client, self.asset.name.as_str()).await;
+                        if let Some(lev) = upd{
+                            let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
+                    };
                 },
 
                     MarketCommand::UpdateStrategy(strat)=>{
@@ -178,18 +200,20 @@ impl Market{
                     MarketCommand::ReceiveTrade(trade_info) =>{
                         info!("\nMarket received trade result, {:?}\n", &trade_info);
                         self.pnl += trade_info.pnl;
+                        self.margin += trade_info.pnl;
                         self.trade_history.push(trade_info);
+                        let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Margin(self.margin)));
                     },
                     MarketCommand::UpdateTimeFrame(tf)=>{
                         
                         let price_data = load_candles(&self.info_client,
-                                                    self.asset.as_str(),
+                                                    self.asset.name.as_str(),
                                                     tf,
-                                                    500,
+                                                    3000,
                                                         ).await; 
                         if let Ok(price_data) = price_data{
                             self.trade_params.time_frame = tf;
-                            let _ = engine_update_tx.send(EngineCommand::Reload(price_data));
+                            let _ = engine_update_tx.send(EngineCommand::Reload{price_data, tf});
                         };
                     },
                     MarketCommand::Pause =>{
@@ -198,7 +222,7 @@ impl Market{
                     },
 
                     MarketCommand::Close=>{
-                    info!("\nClosing {} Market...\n", self.asset);
+                    info!("\nClosing {} Market...\n", self.asset.name);
                     let _ = shutdown_tx.send(true);
                     let _ = engine_update_tx.send(EngineCommand::Stop);
                     //shutdown Executor
@@ -210,6 +234,7 @@ impl Market{
                                     MarketCommand::ReceiveTrade(trade_info) => {
                                         info!("\nReceived final trade before shutdown: {:?}\n", trade_info);
                                         self.pnl += trade_info.pnl;
+                                        self.margin += trade_info.pnl;
                                         self.trade_history.push(trade_info);
                                         break;
                                         },

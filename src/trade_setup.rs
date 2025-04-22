@@ -1,4 +1,4 @@
-use hyperliquid_rust_sdk::{ExchangeClient};
+use hyperliquid_rust_sdk::{ExchangeClient, ExchangeResponseStatus};
 use std::collections::{HashMap, HashSet};
 //use kwant::indicators::{Rsi, StochRsi, Atr, Adx, Ema, EmaCross, Sma};
 use log::info;
@@ -145,14 +145,26 @@ pub struct TradeParams {
 
 impl TradeParams{
 
-    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient, asset: &str){    
-        
+    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient, asset: &str) -> Option<u32>{   
+            
             let response = client
             .update_leverage(lev, asset, false, None)
-            .await
-            .unwrap();
-        
+            .await.unwrap();
+
             info!("Update leverage response: {response:?}");
+            match response{
+                ExchangeResponseStatus::Ok(_) => {
+                    if self.lev == lev{
+                        return None;
+                    }else{
+                        self.lev = lev;
+                        return Some(lev);
+                    }
+            },
+                ExchangeResponseStatus::Err(_)=>{
+                    return None;
+            },
+        }
     }
 
     pub fn get_tfs(&self) -> Vec<TimeFrame>{

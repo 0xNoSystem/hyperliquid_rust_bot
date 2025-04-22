@@ -12,10 +12,11 @@ use hyperliquid_rust_bot::{BackTester, IndicatorsConfig, TradeParams, Strategy};
 async fn main(){
 
     let params = TradeParams::default();
+    let config = IndicatorsConfig::default();
 
-    let mut bt = BackTester::new("SOL", params, None);
+    let mut bt = BackTester::new("SOL", params, Some(config), 1000.0);
     
-    bt.run(3000, 1000).await;
+    bt.run(3000).await;
   
     if let Some(value) = bt.signal_engine.get_rsi(){
          println!("RSI: {}", value);

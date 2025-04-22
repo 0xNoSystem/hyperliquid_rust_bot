@@ -1,6 +1,5 @@
 use log::info;
 use hyperliquid_rust_sdk::{ExchangeClient,ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, BaseUrl};
-use ethers::signers::LocalWallet;
 use std::sync::{Arc};
 use tokio::sync::Mutex;
 
@@ -9,6 +8,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 
+use ethers::signers::LocalWallet;
 use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo};
 use flume::{Receiver};
 use crate::market::MarketCommand;
