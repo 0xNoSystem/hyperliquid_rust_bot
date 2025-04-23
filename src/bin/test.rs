@@ -2,7 +2,8 @@
 #![allow(unused_mut)]
 #![allow(unused_variables)]
 
-use hyperliquid_rust_bot::{BackTester, IndicatorsConfig, TradeParams, Strategy};
+use hyperliquid_rust_bot::strategy::{Strategy};
+use hyperliquid_rust_bot::{BackTester, IndicatorsConfig, TradeParams};
 
 
 

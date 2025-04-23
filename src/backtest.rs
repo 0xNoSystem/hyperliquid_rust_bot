@@ -1,7 +1,8 @@
 use crate::{SignalEngine, IndicatorsConfig, MARKETS };  
 use crate::helper::{load_candles};
 use kwant::indicators::{Price};
-use crate::trade_setup::{TradeParams, Strategy, TimeFrame};
+use crate::trade_setup::{TradeParams, TimeFrame};
+use crate::strategy::{Strategy, CustomStrategy, Style, Stance};
 use tokio::time::{sleep, Duration};
 use hyperliquid_rust_sdk::{InfoClient, BaseUrl};
 

@@ -23,7 +23,8 @@ use std::str::FromStr;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use kwant::indicators::{Rsi,Price, Indicator};
 use hyperliquid_rust_bot::{Wallet, Market, MarketCommand};
-use hyperliquid_rust_bot::trade_setup::{TimeFrame,TradeInfo, TradeParams, Strategy, Risk, Style, Stance};
+use hyperliquid_rust_bot::trade_setup::{TimeFrame,TradeInfo, TradeParams};
+use hyperliquid_rust_bot::strategy::{Strategy, CustomStrategy, Style, Stance, Risk};
 use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
 use hyperliquid_rust_bot::{SignalEngine, IndicatorsConfig};
 
@@ -51,7 +52,7 @@ async fn main(){
     let wallet = Wallet::new(URL, pubkey, wallet).await; 
    
 
-    let strat = Strategy::default();
+    let strat = Strategy::Custom(CustomStrategy::default());
    
     let trade_params = TradeParams{
         strategy: strat,

@@ -1,6 +1,7 @@
 use log::info;
 use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
-use crate::trade_setup::{TimeFrame, PriceData,TradeParams, Strategy, TradeCommand, Style, Stance};
+use crate::trade_setup::{TimeFrame, PriceData,TradeParams,TradeCommand};
+use crate::strategy::{Strategy, CustomStrategy, Style, Stance};
 use crate::{MAX_HISTORY};
 use tokio::sync::mpsc::UnboundedReceiver;
 use flume::{TrySendError,Sender, bounded};
@@ -248,35 +249,39 @@ impl SignalEngine{
         if !self.is_ready(){
             return None;
         }
+
         let ExecParams { margin, lev, tf } = self.exec_params;
         let tf = tf.to_secs();
         
         let size = ((margin * lev as f32) / price)*0.7;
-
-        let duration = match self.strategy.style{
+        
+        match self.strategy{
+            Strategy::Custom(strat) =>{
+            
+        let duration = match strat.style{
             Style::Scalp => {tf * 4},
             Style::Swing => {tf * 10},
         };
 
-        let rsi_range = self.strategy.get_rsi_threshold();
-        let stoch_range = self.strategy.get_stoch_threshold();
+        let rsi_range = strat.get_rsi_threshold();
+        let stoch_range = strat.get_stoch_threshold();
         
         let up_trend = self.get_ema_cross_trend();
         let rsi = self.get_sma_rsi().unwrap_or(self.get_rsi().unwrap_or(50.0));
         let stoch = self.get_stoch_rsi().unwrap();
         let atr = self.get_atr_normalized(price).unwrap(); 
      
-        match self.strategy.style{
+        match strat.style{
             Style::Scalp => {
                 if rsi < rsi_range.low && stoch < stoch_range.low{
                     if atr < 0.03 {return None;}; //check if volatilty is high enough 
-                    if self.strategy.stance == Stance::Bear{
+                    if strat.stance == Stance::Bear{
                         return None;
                     }else{
                         return Some(TradeCommand::ExecuteTrade{size, is_long: true,duration: duration});
                     }
                 }else if rsi > rsi_range.high && stoch > stoch_range.high{
-                    if self.strategy.stance == Stance::Bull{
+                    if strat.stance == Stance::Bull{
                         return None;
                     }else{
                         return Some(TradeCommand::ExecuteTrade{size, is_long: false,duration: duration});
@@ -297,6 +302,9 @@ impl SignalEngine{
             }
         }
     }
+
+    }
+}
 }
 impl SignalEngine{
 

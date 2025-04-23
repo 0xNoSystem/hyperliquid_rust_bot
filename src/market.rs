@@ -1,7 +1,8 @@
 use log::info;
 use ethers::signers::LocalWallet;
 use hyperliquid_rust_sdk::{AssetMeta, Message,ExchangeClient, InfoClient, BaseUrl};
-use crate::trade_setup::{TimeFrame,Strategy, TradeParams, TradeCommand, PriceData, TradeInfo};
+use crate::trade_setup::{TimeFrame,TradeParams, TradeCommand, PriceData, TradeInfo};
+use crate::strategy::Strategy;
 use crate::{MAX_HISTORY, MARKETS};
 use crate::{Wallet, Executor, SignalEngine, IndicatorsConfig, EngineCommand};
 use crate::signal::ExecParam;
