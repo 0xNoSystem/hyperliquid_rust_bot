@@ -13,45 +13,10 @@ use tokio::sync::mpsc::unbounded_channel;
 pub struct SignalEngine{
     engine_rv: UnboundedReceiver<EngineCommand>,
     trade_tx: Sender<TradeCommand>,
-    indicators_config: IndicatorsConfig,
-    rsi: Rsi,
-    atr: Atr,
-    ema: Ema,
-    ema_cross: Option<EmaCross>,
-    adx: Adx,
-    sma: Sma,
+    indicators: HashMap<IndexId, Handler>, 
     strategy: Strategy,
-    price_data: Vec<Price>,
+    price_data: HashMap<TimeFrame, Vec<Price>>,
     exec_params: ExecParams,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct IndicatorsConfig{
-    pub rsi_length: usize,
-    pub rsi_smoothing: Option<usize>,
-    pub stoch_rsi_length: usize,
-    pub atr_length: usize,
-    pub ema_length: usize,
-    pub ema_cross_short_long_lenghts: Option<(usize, usize)>,
-    pub adx_length: usize,
-    pub sma_length: usize,
-}
-
-
-impl Default for IndicatorsConfig{
-
-    fn default() -> Self {
-        IndicatorsConfig{
-            rsi_length: 14,
-            rsi_smoothing: Some(10),
-            stoch_rsi_length: 14,
-            atr_length: 14,
-            ema_length: 9,
-            ema_cross_short_long_lenghts: Some((9, 21)),
-            adx_length: 14,
-            sma_length: 14,
-        }
-    }
 }
 
 
@@ -59,33 +24,26 @@ impl Default for IndicatorsConfig{
 impl SignalEngine{
 
     pub async fn new(
-        config: Option<IndicatorsConfig>,
+        config: Option<Vec<IndexId>>,
         trade_params: TradeParams,
         engine_rv: UnboundedReceiver<EngineCommand>,
         trade_tx: Sender<TradeCommand>, 
         margin: f32,
     ) -> Self{
-       
-        let config: IndicatorsConfig = match config{
-            Some(cfg) => cfg,
-            None => IndicatorsConfig::default(),
-        };
+        let mut indicators:HashMap<IndexId, Handler> = HashMap::new();
 
-        let ema_cross = config.ema_cross_short_long_lenghts
-        .map(|(short, long)| EmaCross::new(short, long));
-
+        if let Some(list) = config{
+            if !indicators.is_empty(){
+                for id in list{
+                    indicators.insert(id, Handler::from_index_id(id)); 
+                } 
+            }
+        }
+            
         SignalEngine{
             engine_rv,
             trade_tx,
-            indicators_config: config.clone(),
-            rsi: Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing),
-            atr: Atr::new(config.atr_length),
-            ema: Ema::new(config.ema_length),
-            ema_cross: ema_cross,
-            adx: Adx::new(config.adx_length, config.adx_length),
-            sma: Sma::new(config.sma_length),
-            strategy: trade_params.strategy,
-            price_data: Vec::new(),
+            indicators,
             exec_params: ExecParams::new(margin, trade_params.lev, trade_params.time_frame),
         }
     }
@@ -464,6 +422,12 @@ impl SignalEngine{
 }
 
 
+
+
+
+
+type IndexId = (IndicatorKind, TimeFrame);
+
 pub enum EngineCommand{
 
     UpdatePrice(PriceData),
@@ -474,25 +438,3 @@ pub enum EngineCommand{
     Stop,
 }
 
-#[derive(Debug, Copy, Clone)]
-struct ExecParams{
-    margin: f32,
-    lev: u32,
-    tf: TimeFrame,
-} 
-
-impl ExecParams{
-    fn new(margin: f32, lev:u32, tf: TimeFrame)-> Self{
-       Self{
-            margin,
-            lev,
-            tf,
-        } 
-    }
-}
-
-pub enum ExecParam{
-    Margin(f32),
-    Lev(u32),
-    Tf(TimeFrame),
-}
