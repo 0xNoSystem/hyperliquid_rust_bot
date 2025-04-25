@@ -1,34 +1,48 @@
+use std::collections::{HashMap, HashSet};
+
 use log::info;
+
 use ethers::signers::LocalWallet;
-use hyperliquid_rust_sdk::{AssetMeta, Message,ExchangeClient, InfoClient, BaseUrl};
-use crate::trade_setup::{TimeFrame,TradeParams, TradeCommand, PriceData, TradeInfo};
+use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, ExchangeClient, InfoClient, Message};
+
+use kwant::indicators::Price;
+
+use crate::MAX_HISTORY;
+use crate::MARKETS;
+
+use crate::wallet::Wallet;
+use crate::executor::Executor;
+use crate::signal::{SignalEngine, ExecParam, EngineCommand, TimeFrameData, Entry, EditType, IndexId};
+use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, PriceData, TradeInfo};
 use crate::strategy::Strategy;
-use crate::{MAX_HISTORY, MARKETS};
-use crate::{Wallet, Executor, SignalEngine, IndicatorsConfig, EngineCommand};
-use crate::signal::ExecParam;
 use crate::helper::{get_asset, load_candles, subscribe_candles};
-use kwant::indicators::{Price};
 
 use tokio::{
-    sync::mpsc::{channel, UnboundedSender,Receiver, Sender, unbounded_channel,UnboundedReceiver},
+    sync::mpsc::{channel, Sender, Receiver, UnboundedSender, UnboundedReceiver, unbounded_channel},
     time::{sleep, Duration},
 };
+
 use flume::{bounded, Sender as FlumeSender};
+
+
+
+
 
 
 pub struct Market {
     exchange_client: ExchangeClient,
     info_client: InfoClient,
-    pub margin: f32,
     pub trade_history: Vec<TradeInfo>,
-    pnl: f32,
+    pub pnl: f32,
     pub trade_params: TradeParams,
-    asset: AssetMeta,
-    pub signal_engine: SignalEngine,
+    pub asset: AssetMeta,
+    signal_engine: SignalEngine,
     executor: Executor,
     market_rv: Receiver<MarketCommand>,
     engine_tx: UnboundedSender<EngineCommand>,
     exec_tx: FlumeSender<TradeCommand>, 
+    pub active_tfs: HashSet<TimeFrame>,
+    pub margin: f32,
     url: BaseUrl,
 }
 
@@ -39,7 +53,7 @@ impl Market{
     pub async fn new(wallet: Wallet,
                     asset: String,
                     mut trade_params: TradeParams,
-                    indicators_config: Option<IndicatorsConfig>
+                    config: Option<Vec<IndexId>>
     ) -> Result<(Self, Sender<MarketCommand>), String>{
 
         if !MARKETS.contains(&asset.as_str().trim()){
@@ -57,10 +71,18 @@ impl Market{
         if meta.is_none(){
             return Err(format!("Failed to fetch Metadata for the {}", asset));
         } 
+        //Look up needed tfs for loading 
+        let mut active_tfs: HashSet<TimeFrame> = HashSet::new();
+        active_tfs.insert(trade_params.time_frame);
+        if let Some(ref cfg) = config{
+            for ind_id in cfg{
+                active_tfs.insert(ind_id.1);
+            }
+        }
         
         info!("\n MARGIN: {}", margin); 
         //setup channels
-        let (market_tx, mut market_rv) = channel::<MarketCommand>(4);
+        let (market_tx, mut market_rv) = channel::<MarketCommand>(5);
         let (exec_tx, mut rv_exec) = bounded::<TradeCommand>(0);
         let (engine_tx, mut engine_rv) = unbounded_channel::<EngineCommand>();
 
@@ -72,11 +94,12 @@ impl Market{
             pnl: 0_f32,
             trade_params : trade_params.clone(),
             asset: meta.unwrap(), 
-            signal_engine: SignalEngine::new(indicators_config, trade_params,engine_rv,exec_tx.clone(), margin).await,
+            signal_engine: SignalEngine::new(config, trade_params,engine_rv,exec_tx.clone(), margin).await,
             executor: Executor::new(wallet.wallet, asset, fees,rv_exec ,market_tx.clone()).await,
             market_rv, 
             engine_tx,
             exec_tx,
+            active_tfs,
             url: wallet.url,
         }, market_tx,
         ))
@@ -91,45 +114,33 @@ impl Market{
             let engine_tx = self.engine_tx.clone();
             let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
         };
-        self.load_engine(300).await?;
+        self.load_engine(3000).await?;
         println!("\nMarket initialized for {} {:?}\n", self.asset.name, self.trade_params);
         Ok(())
     }
 
 
 
-    pub async fn change_time_frame(&mut self, tf: TimeFrame) -> Result<(), String>{
-        if tf != self.trade_params.time_frame{
-            self.trade_params.time_frame = tf;
-            self.signal_engine.reset();
-
-            self.load_engine(3000).await?;
-        }
-        Ok(())
-    }
-
     pub fn change_strategy(&mut self, strategy: Strategy){
 
-        self.trade_params.strategy = strategy.clone();
+        self.trade_params.strategy = strategy;
         
     }
         
     async fn load_engine(&mut self, candle_count: u64) -> Result<(), String>{
+        
+        for tf in &self.active_tfs{
+            let price_data = load_candles(&self.info_client, 
+                                         self.asset.name.as_str(),
+                                         *tf,
+                                        candle_count).await?;
+            self.signal_engine.load(*tf, price_data);
+            }
 
-        let price_data = load_candles(&self.info_client, self.asset.name.as_str(), self.trade_params.time_frame, candle_count)
-        .await?;
-
-        self.signal_engine.load(&price_data);
         Ok(())
 
     }
     
-}
-
-
-
-impl Market{
-
     pub fn get_trade_history(&self) -> &Vec<TradeInfo>{
 
         &self.trade_history
@@ -165,15 +176,13 @@ impl Market{
         let candle_stream_handle = tokio::spawn(async move {
            
                 while let Some(Message::Candle(candle)) = receiver.recv().await{
-                    let timestamp = candle.data.time_close;
                     let close = candle.data.close.parse::<f32>().ok().unwrap();
                     let high = candle.data.high.parse::<f32>().ok().unwrap();
                     let low = candle.data.low.parse::<f32>().ok().unwrap();            
                     let open = candle.data.open.parse::<f32>().ok().unwrap();
                     let price = Price{open,high, low, close};
-                    let price_data = PriceData{price, time: timestamp};
-
-                    let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price_data));
+                    println!("{:?}", price);
+                    let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
             }
         });
 
@@ -193,9 +202,24 @@ impl Market{
                         let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(strat));
                     },
 
-                    MarketCommand::UpdateIndicatorsConfig(config)=>{
-
-                        let _ = engine_update_tx.send(EngineCommand::UpdateConfig(config));
+                    MarketCommand::EditIndicators(entry_vec)=>{
+                        let mut map: TimeFrameData = HashMap::new(); 
+                        for &entry in &entry_vec{
+                            if entry.edit == EditType::Add && !self.active_tfs.contains(&entry.id.1){
+                                let tf_data = load_candles(&self.info_client,
+                                                            self.asset.name.as_str(),
+                                                            entry.id.1,
+                                                            3000).await?;
+                                map.insert(entry.id.1, tf_data);
+                            }else{
+                                self.active_tfs.insert(entry.id.1);    
+                            }
+                        };
+                        let price_data = if map.is_empty() {None} else {Some(map)};
+                        
+                        let _ = engine_update_tx.send(EngineCommand::EditIndicators{indicators: entry_vec,
+                                                                                    price_data,
+                                                                                    });
                     },
                     
                     MarketCommand::ReceiveTrade(trade_info) =>{
@@ -207,15 +231,8 @@ impl Market{
                     },
                     MarketCommand::UpdateTimeFrame(tf)=>{
                         
-                        let price_data = load_candles(&self.info_client,
-                                                    self.asset.name.as_str(),
-                                                    tf,
-                                                    3000,
-                                                        ).await; 
-                        if let Ok(price_data) = price_data{
-                            self.trade_params.time_frame = tf;
-                            let _ = engine_update_tx.send(EngineCommand::Reload{price_data, tf});
-                        };
+                        let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Tf(tf)));
+
                     },
                     MarketCommand::Pause =>{
 
@@ -274,7 +291,7 @@ impl Market{
 pub enum MarketCommand{
     UpdateLeverage(u32),
     UpdateStrategy(Strategy),
-    UpdateIndicatorsConfig(IndicatorsConfig),
+    EditIndicators(Vec<Entry>),
     UpdateTimeFrame(TimeFrame),
     ReceiveTrade(TradeInfo),
     Pause,

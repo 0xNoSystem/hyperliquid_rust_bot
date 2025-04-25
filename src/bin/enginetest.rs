@@ -2,45 +2,47 @@
 #![allow(unused_mut)]
 #![allow(unused_variables)]
 
-use ethers::signers::LocalWallet;
-use ethers::types::H160;
-use log::info;
-use log::error;
-use std::{thread,env, fs};
-use toml;
-use dotenv::dotenv;
-
-use hyperliquid_rust_sdk::{
-    ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus,
-    MarketOrderParams,
+use std::{
+    env, fs,
+    str::FromStr,
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    thread,
 };
-use hyperliquid_rust_sdk::{BaseUrl, InfoClient, Message, Subscription};
+
+use dotenv::dotenv;
+use ethers::signers::LocalWallet;
+use flume::{bounded, TrySendError};
+use hyperliquid_rust_sdk::{
+    BaseUrl, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus,
+    InfoClient, MarketOrderParams, Message, Subscription,
+};
+use kwant::indicators::{Price, Rsi, Indicator};
+use log::{error, info};
 use tokio::{
-    sync::mpsc::{unbounded_channel,UnboundedReceiver},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver},
     time::{sleep, Duration},
 };
-use std::str::FromStr;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use kwant::indicators::{Rsi,Price, Indicator};
-use hyperliquid_rust_bot::{Wallet, Market, MarketCommand};
-use hyperliquid_rust_bot::trade_setup::{TimeFrame,TradeInfo, TradeParams};
+
+use hyperliquid_rust_bot::{
+    Wallet, Market,MarketCommand, Executor, SignalEngine, IndexId, IndicatorKind, EditType, Entry
+};
+use hyperliquid_rust_bot::trade_setup::{TimeFrame, TradeInfo, TradeParams};
 use hyperliquid_rust_bot::strategy::{Strategy, CustomStrategy, Style, Stance, Risk};
 use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
-use hyperliquid_rust_bot::{SignalEngine, IndicatorsConfig};
-
-use flume::{bounded, TrySendError};
 
 
-const COIN: &str = "BTC ";
+
+const COIN: &str = "SOL";
 const URL: BaseUrl = BaseUrl::Testnet;
 
 #[tokio::main]
 async fn main(){
+    use IndicatorKind::*;
     env_logger::init();
     match URL{
         BaseUrl::Mainnet => dotenv().ok(),
-        BaseUrl::Testnet => dotenv::from_filename(".env.test").ok(),
-        BaseUrl::Localhost => dotenv::from_filename(".env.test").ok(),
+        BaseUrl::Testnet => dotenv::from_filename("testnet").ok(),
+        BaseUrl::Localhost => dotenv::from_filename("testnet").ok(),
         };
         
     /// 
@@ -62,19 +64,33 @@ async fn main(){
     
     };
 
-    let (mut market, sender) = Market::new(wallet,COIN.trim().to_string(), trade_params, None).await.unwrap();
+    let config = Vec::from([
+    (
+        IndicatorKind::Rsi {
+            length: 14,
+            stoch_length: 14,
+            smoothing_length: Some(3),
+        },
+        TimeFrame::Min1,
+    ),
+    (
+        IndicatorKind::Adx {
+            periods: 14,
+            di_length: 14,
+        },
+        TimeFrame::Min5,
+    ),
+    (
+        IndicatorKind::Atr(14),
+        TimeFrame::Min15,
+    ),
+    (
+        IndicatorKind::Sma(50),
+        TimeFrame::Hour1,
+    ),
+]);
 
-
-    let config = IndicatorsConfig {
-    rsi_length: 9,
-    rsi_smoothing: Some(8),
-    stoch_rsi_length: 10,
-    atr_length: 30,
-    ema_length: 18,
-    ema_cross_short_long_lenghts: Some((8, 21)),
-    adx_length: 5,
-    sma_length: 100,
-};
+    let (mut market, sender) = Market::new(wallet,COIN.trim().to_string(), trade_params, Some(config)).await.unwrap();
 
    tokio::spawn(async move{
         
@@ -82,16 +98,14 @@ async fn main(){
         sender.send(MarketCommand::UpdateLeverage(50)).await;
         let _ = sleep(Duration::from_secs(10)).await;
         sender.send(MarketCommand::UpdateLeverage(40)).await;
-        let _ = sleep(Duration::from_secs(10)).await;
-        sender.send(MarketCommand::UpdateIndicatorsConfig(config)).await;
 
-        let _ = sleep(Duration::from_secs(120)).await;
-        sender.send(MarketCommand::Pause).await;
+        //let _ = sleep(Duration::from_secs(120)).await;
+        //sender.send(MarketCommand::Pause).await;
         let _ = sleep(Duration::from_secs(5)).await;
         sender.send(MarketCommand::UpdateTimeFrame(TimeFrame::from_str("4h").unwrap())).await;
-        sender.send(MarketCommand::UpdateIndicatorsConfig(IndicatorsConfig::default())).await;
 
         let _ = sleep(Duration::from_secs(10)).await;
+        sender.send(MarketCommand::Pause).await;
         sender.send(MarketCommand::Pause).await;
 
         let _ = sleep(Duration::from_secs(3000000)).await;

@@ -1,7 +1,4 @@
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
-use crate::TimeFrame;
-
 
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
@@ -39,7 +36,6 @@ pub struct CustomStrategy {
    pub style: Style,    
    pub stance: Stance,
    pub follow_trend: bool,
-   pub index_strat: IndexConfig,
 }
 
 pub struct RsiRange{
@@ -60,8 +56,8 @@ pub struct StochRange{
 
 impl CustomStrategy{
 
-    pub fn new(risk: Risk, style: Style, stance: Stance, follow_trend: bool, index_strat: IndexConfig) -> Self{
-        Self { risk, style, stance, follow_trend, index_strat }
+    pub fn new(risk: Risk, style: Style, stance: Stance, follow_trend: bool) -> Self{
+        Self { risk, style, stance, follow_trend }
     }
 
     
@@ -108,12 +104,6 @@ impl CustomStrategy{
         self.follow_trend = follow_trend;
     }
     
-    pub fn update_index_strat(&mut self, new_config: IndexConfig){
-        if self.index_strat != new_config{
-            self.index_strat = new_config
-        }
-    }
-
 }
 
 
@@ -124,8 +114,8 @@ impl Default for CustomStrategy{
             style: Style::Scalp,
             stance: Stance::Neutral,
             follow_trend: true,
-            index_strat: IndexConfig::default() }
     }
+}
 }
 
 

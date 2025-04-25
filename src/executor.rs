@@ -1,17 +1,22 @@
-use log::info;
-use hyperliquid_rust_sdk::{ExchangeClient,ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, BaseUrl};
-use std::sync::{Arc};
-use tokio::sync::Mutex;
+use std::sync::Arc;
 
+use ethers::signers::LocalWallet;
+use flume::Receiver;
+use log::info;
 use tokio::{
-    sync::mpsc::{Sender},
+    sync::{mpsc::Sender, Mutex},
     time::{sleep, Duration},
 };
 
-use ethers::signers::LocalWallet;
+use hyperliquid_rust_sdk::{
+    BaseUrl, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams,
+};
+
 use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo};
-use flume::{Receiver};
 use crate::market::MarketCommand;
+
+
+
 
 pub struct Executor {
     wallet: LocalWallet,

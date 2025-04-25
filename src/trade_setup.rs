@@ -1,11 +1,15 @@
-use hyperliquid_rust_sdk::{ExchangeClient, ExchangeResponseStatus};
-use std::collections::{HashMap, HashSet};
-//use kwant::indicators::{Rsi, StochRsi, Atr, Adx, Ema, EmaCross, Sma};
-use log::info;
+use std::collections::HashMap;
 use std::fmt;
-use kwant::indicators::Price;
+use std::str::FromStr;
+
+use log::info;
 use serde::Deserialize;
+use hyperliquid_rust_sdk::{ExchangeClient, ExchangeResponseStatus};
+use kwant::indicators::Price;
+
 use crate::strategy::{Strategy, CustomStrategy};
+
+
 
 #[derive(Clone, Debug)]
 pub struct TradeParams {
@@ -153,7 +157,7 @@ impl TimeFrame{
         }
     }
 
-    pub fn to_millis(&sefl) -> u64{
+    pub fn to_millis(&self) -> u64{
         self.to_secs() * 1000
     }
 

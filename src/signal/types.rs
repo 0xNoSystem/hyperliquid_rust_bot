@@ -1,14 +1,23 @@
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use arraydeque::{ArrayDeque, behavior::Wrapping};
+use kwant::indicators::{Rsi, Atr, StochRsi, Price, Indicator, Ema, EmaCross, Sma, Adx};
+
+use crate::trade_setup::TimeFrame;
+use crate::helper::get_time_now;
+use crate::MAX_HISTORY;
+
+
 #[derive(Debug, Copy, Clone)]
-struct ExecParams{
-    margin: f32,
-    lev: u32,
-    tf: TimeFrame,
+pub struct ExecParams{
+    pub margin: f32,
+    pub lev: u32,
+    pub tf: TimeFrame,
 } 
 
 impl ExecParams{
-    fn new(margin: f32, lev:u32, tf: TimeFrame)-> Self{
+    pub fn new(margin: f32, lev:u32, tf: TimeFrame)-> Self{
        Self{
             margin,
             lev,
@@ -27,7 +36,7 @@ pub enum ExecParam{
 #[derive(Debug, Clone,Copy, PartialEq, Eq, Hash)]
 pub enum IndicatorKind{
     Rsi{length: u32, stoch_length: u32, smoothing_length: Option<u32>},
-    StochRsi{length: u32,k_smoothing: u32, d_smoothing: u32},
+    StochRsi{length: u32},
     Adx{periods: u32, di_length: u32},
     Atr(u32),
     Ema(u32),
@@ -35,15 +44,14 @@ pub enum IndicatorKind{
     Sma(u32),
 }
 
-#[derive(Clone, Debug)]
 pub struct Handler{
-    indicator: Box<dyn Indicator>,
+    indicator: Box<dyn Indicator + Send>,
     pub is_active: bool,
 }
 
 impl Handler{
 
-    pub fn new(indicator: IndicatorKind,tf: TimeFrame) -> Handler{
+    pub fn new(indicator: IndicatorKind) -> Handler{
         Handler{
             indicator: match_kind(indicator),
             is_active: true,
@@ -63,11 +71,12 @@ impl Handler{
         }
     }
     pub fn get_value(&self) -> Option<f32>{
-        self.indicator.get_last();
+        self.indicator.get_last()
     }
 
-    pub fn load(&mut self, price_data: Vec<Price>){
-        self.indicator.load(&price_data);
+    pub fn load<'a,I: IntoIterator<Item=&'a Price>>(&mut self, price_data: I){
+        let data_vec: Vec<Price> = price_data.into_iter().cloned().collect();
+        self.indicator.load(&data_vec);
     }
 
     pub fn reset(&mut self){
@@ -81,41 +90,40 @@ impl Handler{
 
 pub type IndexId = (IndicatorKind, TimeFrame);
 
-fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
+fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator + Send> {
     match kind {
         IndicatorKind::Rsi { length, stoch_length, smoothing_length } => {
-            Some(Box::new(Rsi::new(length, smoothing_length, stoch_length)))
+            Box::new(Rsi::new(length, stoch_length, smoothing_length))
         }
-        IndicatorKind::StochRsi { length, k_smoothing, d_smoothing } => {
-            Some(Box::new(StochRsi::new(length, k_smoothing, d_smoothing)))
+        IndicatorKind::StochRsi { length} => {
+            Box::new(Rsi::new(length, length, None))
         }
         IndicatorKind::Adx { periods, di_length } => {
-            Some(Box::new(Adx::new(periods, di_length)))
+            Box::new(Adx::new(periods, di_length))
         }
         IndicatorKind::Atr(period) => {
-            Some(Box::new(Atr::new(period)))
+            Box::new(Atr::new(period))
         }
         IndicatorKind::Ema(period) => {
-            Some(Box::new(Ema::new(period)))
+            Box::new(Ema::new(period))
         }
         IndicatorKind::EmaCross { short, long } => {
-            Some(Box::new(EmaCross::new(short, long)))
+            Box::new(EmaCross::new(short, long))
         }
         IndicatorKind::Sma(period) => {
-            Some(Box::new(Sma::new(period)))
+            Box::new(Sma::new(period))
         }
     }
 }
 
 
-
+type History = ArrayDeque<Price, MAX_HISTORY, Wrapping>;
 
 pub struct Tracker{
-    pub price_data: VecDeque<Price>,
+    pub price_data: History,
     pub indicators: HashMap<IndicatorKind, Handler>,
     tf: TimeFrame,
     next_close: u64,
-    init: bool,
 }
 
 
@@ -123,26 +131,21 @@ pub struct Tracker{
 impl Tracker{
     pub fn new(tf: TimeFrame) -> Self{
         Tracker{
-            price_data: Vec::with_capacity(MAX_HISTORY),
+            price_data: ArrayDeque::new(),
             indicators: HashMap::new(),
             tf,
-            next_close: 0_u64,
-            init: false,
+            next_close: Self::calc_next_close(tf),
         }
     }
 
 
-    pub fn digest(&mut self, data: Price){
+    pub fn digest(&mut self, price: Price){
         let time = get_time_now(); 
-        if !self.init{
-            self.update_indicators(price, false);
-            self.init = true;
-            return;
-        };
-
+       
         if time >= self.next_close{
+            self.next_close = Self::calc_next_close(self.tf);
+            self.price_data.push_back(price);
             self.update_indicators(price, true);
-            self.calc_next_close();
         }else{
             self.update_indicators(price, false);
         }
@@ -151,26 +154,27 @@ impl Tracker{
 
     fn update_indicators(&mut self,price: Price, after_close: bool){
 
-        for kind, handler in &mut self.indicators{
+        for (kind, handler) in &mut self.indicators{
             handler.update(price, after_close);
         }
     }
     
-    fn calc_next_close(&mut self) {
+    fn calc_next_close(tf: TimeFrame)-> u64 {
         let now = get_time_now();
 
-        let tf_ms = self.tf.to_millis();
-        self.next_close = ((now / tf_ms) + 1) * tf_ms;
+        let tf_ms = tf.to_millis();
+        ((now / tf_ms) + 1) * tf_ms
     }
     
     
-    pub fn load(&mut self, price_data: &Vec<Price>){
-        
-        for _kind, hanlder in &mut self.indicators{
-            handler.load(price_data);
+    pub fn load<I: IntoIterator<Item=Price>>(&mut self, price_data: I){
+        let buffer: Vec<Price> = price_data.into_iter().collect();
+        for (_kind, handler) in &mut self.indicators{
+            handler.load(&buffer);
         }
 
-        self.price_data
+        self.price_data.extend(buffer);
+
     }
 
 
@@ -180,25 +184,42 @@ impl Tracker{
         self.indicators.insert(kind, handler);
     }
 
+    pub fn remove_indicator(&mut self, kind: IndicatorKind){
+        self.indicators.remove(&kind);
+    } 
+
     pub fn toggle_indicator(&mut self, kind: IndicatorKind){
-        if let Some(handler) = self.indicators.get_mut(kind){
+        if let Some(handler) = self.indicators.get_mut(&kind){
             let _ = handler.toggle();
         }
     }
     
     pub fn reset(&mut self){
         self.price_data.clear();
-        for _kind, handler in &mut self.indicators{
+        for (_kind, handler) in &mut self.indicators{
             handler.reset();
         }
-        self.init = false;
     }
-
+    
 }
 
 
 
 
+pub type TimeFrameData = HashMap<TimeFrame, Vec<Price>>;
+
+#[derive(Copy, Clone, Debug,PartialEq)]
+pub struct Entry{
+    pub id: IndexId,
+    pub edit: EditType
+}
+
+#[derive(Copy, Clone, Debug,PartialEq)]
+pub enum EditType{
+    Toggle,
+    Add,
+    Remove,
+}
 
 
 
