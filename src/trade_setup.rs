@@ -151,8 +151,13 @@ impl TimeFrame{
             TimeFrame::Week   => 7 * 24 * 60 * 60,
             TimeFrame::Month  => 30 * 24 * 60 * 60, // approximate month as 30 days
         }
-
     }
+
+    pub fn to_millis(&sefl) -> u64{
+        self.to_secs() * 1000
+    }
+
+
 }
 
 impl TimeFrame {

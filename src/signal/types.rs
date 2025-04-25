@@ -1,4 +1,4 @@
-
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Copy, Clone)]
 struct ExecParams{
@@ -38,8 +38,7 @@ pub enum IndicatorKind{
 #[derive(Clone, Debug)]
 pub struct Handler{
     indicator: Box<dyn Indicator>,
-    tf: TimeFrame,
-    is_active: bool,
+    pub is_active: bool,
 }
 
 impl Handler{
@@ -47,23 +46,20 @@ impl Handler{
     pub fn new(indicator: IndicatorKind,tf: TimeFrame) -> Handler{
         Handler{
             indicator: match_kind(indicator),
-            tf,
             is_active: true,
         }
     }
 
-    pub fn from_index_id((kind, tf): IndexId) -> Self{
-        Self{
-            indicator: match_kind(kind),
-            tf,
-            is_active: true,
-        }
+    fn toggle(&mut self) -> bool{
+        self.is_active = !self.is_active;
+        self.is_active
     }
-    pub fn update(&mut self, after_close: bool){
-        if after_close{
-            self.indicator.update_after_close();
+
+    pub fn update(&mut self,price: Price, after_close: bool){
+        if !after_close{
+            self.indicator.update_before_close(price);
         }else{
-            self.indicator.update_before_close();
+            self.indicator.update_after_close(price);
         }
     }
     pub fn get_value(&self) -> Option<f32>{
@@ -83,8 +79,7 @@ impl Handler{
     
 
 
-
-type IndexId = (IndicatorKind, TimeFrame);
+pub type IndexId = (IndicatorKind, TimeFrame);
 
 fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
     match kind {
@@ -111,6 +106,100 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
         }
     }
 }
+
+
+
+
+pub struct Tracker{
+    pub price_data: VecDeque<Price>,
+    pub indicators: HashMap<IndicatorKind, Handler>,
+    tf: TimeFrame,
+    next_close: u64,
+    init: bool,
+}
+
+
+
+impl Tracker{
+    pub fn new(tf: TimeFrame) -> Self{
+        Tracker{
+            price_data: Vec::with_capacity(MAX_HISTORY),
+            indicators: HashMap::new(),
+            tf,
+            next_close: 0_u64,
+            init: false,
+        }
+    }
+
+
+    pub fn digest(&mut self, data: Price){
+        let time = get_time_now(); 
+        if !self.init{
+            self.update_indicators(price, false);
+            self.init = true;
+            return;
+        };
+
+        if time >= self.next_close{
+            self.update_indicators(price, true);
+            self.calc_next_close();
+        }else{
+            self.update_indicators(price, false);
+        }
+        
+    }
+
+    fn update_indicators(&mut self,price: Price, after_close: bool){
+
+        for kind, handler in &mut self.indicators{
+            handler.update(price, after_close);
+        }
+    }
+    
+    fn calc_next_close(&mut self) {
+        let now = get_time_now();
+
+        let tf_ms = self.tf.to_millis();
+        self.next_close = ((now / tf_ms) + 1) * tf_ms;
+    }
+    
+    
+    pub fn load(&mut self, price_data: &Vec<Price>){
+        
+        for _kind, hanlder in &mut self.indicators{
+            handler.load(price_data);
+        }
+
+        self.price_data
+    }
+
+
+    pub fn add_indicator(&mut self, kind: IndicatorKind){
+        let mut handler = Handler::new(kind);
+        handler.load(&self.price_data);
+        self.indicators.insert(kind, handler);
+    }
+
+    pub fn toggle_indicator(&mut self, kind: IndicatorKind){
+        if let Some(handler) = self.indicators.get_mut(kind){
+            let _ = handler.toggle();
+        }
+    }
+    
+    pub fn reset(&mut self){
+        self.price_data.clear();
+        for _kind, handler in &mut self.indicators{
+            handler.reset();
+        }
+        self.init = false;
+    }
+
+}
+
+
+
+
+
 
 
 

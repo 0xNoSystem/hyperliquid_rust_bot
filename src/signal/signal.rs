@@ -13,9 +13,8 @@ use tokio::sync::mpsc::unbounded_channel;
 pub struct SignalEngine{
     engine_rv: UnboundedReceiver<EngineCommand>,
     trade_tx: Sender<TradeCommand>,
-    indicators: HashMap<IndexId, Handler>, 
+    trackers: HashMap<TimeFrame, Tracker>, 
     strategy: Strategy,
-    price_data: HashMap<TimeFrame, Vec<Price>>,
     exec_params: ExecParams,
 }
 
@@ -30,178 +29,76 @@ impl SignalEngine{
         trade_tx: Sender<TradeCommand>, 
         margin: f32,
     ) -> Self{
-        let mut indicators:HashMap<IndexId, Handler> = HashMap::new();
+        let mut trackers:HashMap<TimeFrame, Tracker> = HashMap::new();
+        trackers.insert(trade_params.time_frame, Tracker::new(trade_params.time_frame);
 
         if let Some(list) = config{
-            if !indicators.is_empty(){
+            if !list.is_empty(){
                 for id in list{
-                    indicators.insert(id, Handler::from_index_id(id)); 
-                } 
-            }
-        }
+                    if let Some(tracker) = &mut trackers.get_mut(id.1){
+                        tracker.add_indicator(id.0); 
+                    }else{
+                    let mut new_tracker = Tracker::new(id.1);
+                    new_tracker.add_indicator(id.0); 
+                    trackers.insert(id.1, new_tracker);
+                    }
+                }
+            }};
             
         SignalEngine{
             engine_rv,
             trade_tx,
-            indicators,
+            trackers,
             exec_params: ExecParams::new(margin, trade_params.lev, trade_params.time_frame),
         }
     }
 
-    pub fn update(&mut self, price:Price, after_close: bool){
-        
-        if !after_close{
-            self.update_before_close(price);
-        }else{
-            self.update_after_close(price);
-        }
-    }
-
-
-    pub fn update_after_close(&mut self, price: Price){
-        self.rsi.update_after_close(price);
-        self.ema.update_after_close(price);
-        if let Some(ref mut ema_cross) = self.ema_cross{
-            ema_cross.update(price, true);
-        }
-        self.adx.update_after_close(price);
-        self.atr.update_after_close(price);
-        self.sma.update_after_close(price);
-        if self.price_data.len() >= MAX_HISTORY{
-            self.price_data.remove(0);
-        }
-        self.price_data.push(price);
-    }
-
-    pub fn update_before_close(&mut self, price: Price){
-        self.rsi.update_before_close(price);
-        self.ema.update_before_close(price);
-        if let Some(ref mut ema_cross) = self.ema_cross{
-            ema_cross.update(price, false);
-        }
-        self.adx.update_before_close(price);
-        //self.atr.update_before_close(price);
-        self.sma.update_before_close(price);
-    }
-
     pub fn reset(&mut self){
-        self.rsi.reset();
-        self.ema.reset();
-        if let Some(ref mut ema_cross) = self.ema_cross{
-            ema_cross.reset();
+        for _tf, tracker in &mut self.trackers{
+            tracker.reset();
         }
-        self.adx.reset();
-        self.atr.reset();
-        self.sma.reset();
     } 
     
     
-     pub fn change_indicators_config(&mut self, config: IndicatorsConfig){
-        if config != self.indicators_config{
-            self.reset();
-            let ema_cross = config.ema_cross_short_long_lenghts
-            .map(|(short, long)| EmaCross::new(short, long));
-            self.rsi = Rsi::new(config.rsi_length, config.stoch_rsi_length ,config.rsi_smoothing);
-            self.atr = Atr::new(config.atr_length);
-            self.ema = Ema::new(config.ema_length);
-            self.ema_cross = ema_cross;
-            self.adx= Adx::new(config.adx_length, config.adx_length);
-            self.sma = Sma::new(config.sma_length);
-            self.indicators_config = config.clone();
-            self.load(&self.price_data.clone());
-        }
+     pub fn add_indicator(&mut self, id: IndexId){
+       if let Some(tracker) = &mut trackers.get_mut(id.1){
+            tracker.add_indicator(id.0); 
+        }else{
+            let mut new_tracker = Tracker::new(id.1);
+            new_tracker.add_indicator(id.0); 
+            trackers.insert(id.1, new_tracker);
      }
+    }
 
 
 
-    pub fn get_indicators_config(&self) -> &IndicatorsConfig{
-        &self.indicators_config
+    pub fn get_active_indicators(&self) -> Vec<IndexId>{
+        let mut active = Vec::new();
+        for tf, tracker in &self.trackers{
+            for kind, handler in &tracker.indicators{
+                if handler.is_active{
+                    active.push((*kind, *tf));
+                }
+            }
+        }
+        active
     }
     
-    pub fn get_mut_strategy(&mut self) -> &mut Strategy{
-        &mut self.strategy
-    }
-
     pub fn change_strategy(&mut self, strategy: Strategy){
         self.strategy = strategy;
-        println!("Strategy changed to: {:?}", self.strategy);
+        info!("Strategy changed to: {:?}", self.strategy);
     }
     pub fn get_strategy(&self) -> &Strategy{
         &self.strategy
     }
 
-    pub fn get_price_data(&self) -> &Vec<Price>{
-        &self.price_data
-    }	
-
-    pub fn load(&mut self, price_data: &Vec<Price>) {
-        self.price_data.clear();
-
-        for p in price_data.iter().take(price_data.len().saturating_sub(1)) {
-            self.update_after_close(*p);
-    }
-
-        if let Some(last) = price_data.last() {
-            self.update_before_close(*last);
-    }}
-
-
-    pub fn is_ready(&self) -> bool{
-        self.rsi.is_ready() && self.ema.is_ready()
-        && self.atr.is_ready() && self.sma.is_ready() &&
-        (self.ema_cross.is_none() || self.ema_cross.clone().unwrap().is_ready())
-    }
-
-    pub fn get_rsi(&self) -> Option<f32>{
-        self.rsi.get_last()
-    }
-    pub fn get_sma_rsi(&self) -> Option<f32>{
-        self.rsi.get_sma_rsi()
-    }
-    pub fn get_stoch_rsi(&self) -> Option<f32>{
-        self.rsi.get_stoch_rsi()
-    }
-    pub fn get_stoch_signal(&self) -> Option<f32>{
-        self.rsi.get_stoch_signal()
-    }
-    pub fn get_ema(&self) -> Option<f32>{
-        self.ema.get_last()
-    }
-    pub fn get_ema_slope(&self) -> Option<f32>{
-        self.ema.get_slope()
-    }
-    pub fn get_ema_cross_trend(&self) -> Option<bool>{
-        
-        if let Some(ref ema_cross) = self.ema_cross{
-            return ema_cross.get_trend()
-        }else{
-            return None;
-        }
-    }   
-
-     pub fn check_ema_cross(&mut self) -> Option<bool>{
-        if let Some(ref mut ema_cross) = self.ema_cross{
-            ema_cross.check_for_cross()
-        }else{
-            None
+    pub fn load(&mut self,tf: TimeFrame, price_data: &Vec<Price>) {
+      
+        if let Some(tracker) = self.indicators.get_mut(tf){
+            
         }
     }
-    pub fn get_adx(&self) -> Option<f32>{
-        self.adx.get_last()
-    }
-    pub fn get_atr(&self) -> Option<f32>{
-        self.atr.get_last()
-    }
-    pub fn get_atr_normalized(&self, price: f32) -> Option<f32>{
-        self.atr.normalized(price)
-    }
-    pub fn get_sma(&self) -> Option<f32>{
-        self.sma.get_last()
-    }
-    
-    pub fn get_last_price(&self) -> Option<Price>{
-        self.price_data.last().cloned()
-    }
+
 
     fn get_signal(&self, price: f32) -> Option<TradeCommand>{
         if !self.is_ready(){

@@ -49,11 +49,8 @@ pub async fn subscribe_candles(
 
 
 fn get_time_now_and_candles_ago(candle_count: u64, tf: TimeFrame) -> (u64, u64) {
-    let end = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    
+    let end = get_time_now();
+
     let interval = candle_count
     .checked_mul(tf.to_secs())
     .and_then(|s| s.checked_mul(1_000))
@@ -109,8 +106,6 @@ pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: TimeFrame, can
 
 
 
-
-
 pub fn address(address: &String) -> H160 {
     address.parse().unwrap()
 }
@@ -140,4 +135,11 @@ pub async fn get_asset(info_client: &InfoClient, token: &str) -> Option<AssetMet
 }
 
 
+pub fn get_time_now() -> u64{
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+}
+    
 
