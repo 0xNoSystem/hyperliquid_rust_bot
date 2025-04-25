@@ -41,8 +41,8 @@ async fn main(){
     env_logger::init();
     match URL{
         BaseUrl::Mainnet => dotenv().ok(),
-        BaseUrl::Testnet => dotenv::from_filename("testnet").ok(),
-        BaseUrl::Localhost => dotenv::from_filename("testnet").ok(),
+        BaseUrl::Testnet => dotenv::from_filename(".env.test").ok(),
+        BaseUrl::Localhost => dotenv::from_filename(".env.test").ok(),
         };
         
     /// 
