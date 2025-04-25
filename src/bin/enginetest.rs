@@ -33,15 +33,15 @@ use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
 
 
 const COIN: &str = "SOL";
-const URL: BaseUrl = BaseUrl::Testnet;
+const URL: BaseUrl = BaseUrl::Mainnet;
 
 #[tokio::main]
 async fn main(){
     use IndicatorKind::*;
     env_logger::init();
     match URL{
-        BaseUrl::Mainnet => dotenv().ok(),
-        BaseUrl::Testnet => dotenv::from_filename(".env.test").ok(),
+        BaseUrl::Testnet => dotenv().ok(),
+        BaseUrl::Mainnet => dotenv::from_filename(".env.test").ok(),
         BaseUrl::Localhost => dotenv::from_filename(".env.test").ok(),
         };
         
@@ -94,16 +94,19 @@ async fn main(){
 
    tokio::spawn(async move{
         
-        let _ = sleep(Duration::from_secs(10)).await;
+        /*let _ = sleep(Duration::from_secs(10)).await;
         sender.send(MarketCommand::UpdateLeverage(50)).await;
         let _ = sleep(Duration::from_secs(10)).await;
-        sender.send(MarketCommand::UpdateLeverage(40)).await;
+        sender.send(MarketCommand::UpdateLeverage(40)).await;*/
 
         //let _ = sleep(Duration::from_secs(120)).await;
         //sender.send(MarketCommand::Pause).await;
-        let _ = sleep(Duration::from_secs(5)).await;
-        sender.send(MarketCommand::UpdateTimeFrame(TimeFrame::from_str("4h").unwrap())).await;
+        let _ = sleep(Duration::from_secs(20)).await;
+        //sender.send(MarketCommand::UpdateTimeFrame(TimeFrame::from_str("4h").unwrap())).await;
         sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour1),edit: EditType::Add}]))).await;
+        let _ = sleep(Duration::from_secs(20)).await;
+        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour4),edit: EditType::Add}]))).await;
+        let _ = sleep(Duration::from_secs(20)).await;
         let _ = sleep(Duration::from_secs(10)).await;
         sender.send(MarketCommand::Pause).await;
         sender.send(MarketCommand::Pause).await;

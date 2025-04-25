@@ -178,9 +178,11 @@ impl Tracker{
     }
 
 
-    pub fn add_indicator(&mut self, kind: IndicatorKind){
+    pub fn add_indicator(&mut self, kind: IndicatorKind, load: bool){
         let mut handler = Handler::new(kind);
-        handler.load(&self.price_data);
+        if load{
+            handler.load(&self.price_data);
+        }
         self.indicators.insert(kind, handler);
     }
 

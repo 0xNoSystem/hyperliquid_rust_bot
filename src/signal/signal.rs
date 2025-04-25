@@ -50,10 +50,10 @@ impl SignalEngine{
             if !list.is_empty(){
                 for id in list{
                     if let Some(tracker) = &mut trackers.get_mut(&id.1){
-                        tracker.add_indicator(id.0); 
+                        tracker.add_indicator(id.0, false); 
                     }else{
                     let mut new_tracker = Tracker::new(id.1);
-                    new_tracker.add_indicator(id.0); 
+                    new_tracker.add_indicator(id.0, false); 
                     trackers.insert(id.1, new_tracker);
                     }
                 }
@@ -77,12 +77,12 @@ impl SignalEngine{
     
     pub fn add_indicator(&mut self, id: IndexId){
        if let Some(tracker) = &mut self.trackers.get_mut(&id.1){
-            tracker.add_indicator(id.0); 
+            tracker.add_indicator(id.0, true); 
         }else{
             let mut new_tracker = Tracker::new(id.1);
-            new_tracker.add_indicator(id.0); 
+            new_tracker.add_indicator(id.0, false); 
             self.trackers.insert(id.1, new_tracker);
-
+            println!("BUFFERh ===");
      }
     }
 
@@ -131,7 +131,6 @@ impl SignalEngine{
     }
 
     pub fn load<I:IntoIterator<Item=Price>>(&mut self,tf: TimeFrame, price_data: I) {
-      
         if let Some(tracker) = self.trackers.get_mut(&tf){
             tracker.load(price_data)    
         }
@@ -167,6 +166,8 @@ impl SignalEngine{
                 
                 EngineCommand::EditIndicators{indicators, price_data} =>{
                     info!("RECEIVED INDCATORS EDIT"); 
+                    
+
                     for entry in indicators{
                         match entry.edit{
                             EditType::Add => {self.add_indicator(entry.id);},
@@ -174,12 +175,12 @@ impl SignalEngine{
                             EditType::Toggle => {self.toggle_indicator(entry.id)},
                         }
                     }
-
                     if let Some(data) = price_data{
                         for (tf, prices) in data{
                             self.load(tf, prices);
                         }
                     }
+                   
                 }
                 
                 EngineCommand::UpdateExecParams(param)=>{
@@ -221,10 +222,10 @@ impl SignalEngine{
                 if !list.is_empty(){
                     for id in list{
                         if let Some(tracker) = &mut trackers.get_mut(&id.1){ 
-                            tracker.add_indicator(id.0); 
+                            tracker.add_indicator(id.0, false); 
                         }else{
                             let mut new_tracker = Tracker::new(id.1);
-                            new_tracker.add_indicator(id.0); 
+                            new_tracker.add_indicator(id.0, false); 
                             trackers.insert(id.1, new_tracker);
                     }
                 }

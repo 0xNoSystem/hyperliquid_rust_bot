@@ -210,12 +210,11 @@ impl Market{
                                                             entry.id.1,
                                                             3000).await?;
                                 map.insert(entry.id.1, tf_data);
-                            }else{
                                 self.active_tfs.insert(entry.id.1);    
                             }
                         };
-                        let price_data = if map.is_empty() {None} else {Some(map)};
                         
+                        let price_data = if map.is_empty() {None} else {Some(map)};
                         let _ = engine_update_tx.send(EngineCommand::EditIndicators{indicators: entry_vec,
                                                                                     price_data,
                                                                                     });
