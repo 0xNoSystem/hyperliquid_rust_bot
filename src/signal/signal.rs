@@ -27,7 +27,7 @@ use super::types::{
 pub struct SignalEngine{
     engine_rv: UnboundedReceiver<EngineCommand>,
     trade_tx: Sender<TradeCommand>,
-    trackers: HashMap<TimeFrame, Tracker>, 
+    trackers: HashMap<TimeFrame, Box<Tracker>>, 
     strategy: Strategy,
     exec_params: ExecParams,
 }
@@ -43,8 +43,8 @@ impl SignalEngine{
         trade_tx: Sender<TradeCommand>, 
         margin: f32,
     ) -> Self{
-        let mut trackers:HashMap<TimeFrame, Tracker> = HashMap::new();
-        trackers.insert(trade_params.time_frame, Tracker::new(trade_params.time_frame));
+        let mut trackers:HashMap<TimeFrame, Box<Tracker>> = HashMap::new();
+        trackers.insert(trade_params.time_frame, Box::new(Tracker::new(trade_params.time_frame)));
 
         if let Some(list) = config{
             if !list.is_empty(){
@@ -54,7 +54,7 @@ impl SignalEngine{
                     }else{
                     let mut new_tracker = Tracker::new(id.1);
                     new_tracker.add_indicator(id.0, false); 
-                    trackers.insert(id.1, new_tracker);
+                    trackers.insert(id.1, Box::new(new_tracker));
                     }
                 }
             }};
@@ -81,7 +81,7 @@ impl SignalEngine{
         }else{
             let mut new_tracker = Tracker::new(id.1);
             new_tracker.add_indicator(id.0, false); 
-            self.trackers.insert(id.1, new_tracker);
+            self.trackers.insert(id.1, Box::new(new_tracker));
             println!("BUFFERh ===");
      }
     }
@@ -170,7 +170,10 @@ impl SignalEngine{
 
                     for entry in indicators{
                         match entry.edit{
-                            EditType::Add => {self.add_indicator(entry.id);},
+                            EditType::Add => {
+                                self.add_indicator(entry.id);
+                                println!("ADDED FINISH");
+                            },
                             EditType::Remove => {self.remove_indicator(entry.id);},
                             EditType::Toggle => {self.toggle_indicator(entry.id)},
                         }
@@ -215,8 +218,8 @@ impl SignalEngine{
 
 
         pub fn new_backtest(trade_params: TradeParams, config: Option<Vec<IndexId>>, margin: f32) -> Self{
-            let mut trackers:HashMap<TimeFrame, Tracker> = HashMap::new();
-            trackers.insert(trade_params.time_frame, Tracker::new(trade_params.time_frame));
+            let mut trackers:HashMap<TimeFrame, Box<Tracker>> = HashMap::new();
+            trackers.insert(trade_params.time_frame, Box::new(Tracker::new(trade_params.time_frame)));
 
             if let Some(list) = config{
                 if !list.is_empty(){
@@ -226,7 +229,7 @@ impl SignalEngine{
                         }else{
                             let mut new_tracker = Tracker::new(id.1);
                             new_tracker.add_indicator(id.0, false); 
-                            trackers.insert(id.1, new_tracker);
+                            trackers.insert(id.1, Box::new(new_tracker));
                     }
                 }
             }}

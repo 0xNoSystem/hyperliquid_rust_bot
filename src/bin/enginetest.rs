@@ -106,7 +106,13 @@ async fn main(){
         sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour1),edit: EditType::Add}]))).await;
         let _ = sleep(Duration::from_secs(20)).await;
         sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour4),edit: EditType::Add}]))).await;
+        let _ = sleep(Duration::from_secs(10)).await;
+        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour4),edit: EditType::Toggle}]))).await;
+
         let _ = sleep(Duration::from_secs(20)).await;
+        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Sma(10), TimeFrame::Min5),edit: EditType::Add}]))).await;
+        let _ = sleep(Duration::from_secs(20)).await;
+        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Sma(10), TimeFrame::Min5),edit: EditType::Remove}]))).await;
         let _ = sleep(Duration::from_secs(10)).await;
         sender.send(MarketCommand::Pause).await;
         sender.send(MarketCommand::Pause).await;
