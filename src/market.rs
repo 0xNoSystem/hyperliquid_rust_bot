@@ -174,7 +174,6 @@ impl Market{
         let engine_price_tx = self.engine_tx.clone();
 
         let candle_stream_handle = tokio::spawn(async move {
-           
                 while let Some(Message::Candle(candle)) = receiver.recv().await{
                     let close = candle.data.close.parse::<f32>().ok().unwrap();
                     let high = candle.data.high.parse::<f32>().ok().unwrap();

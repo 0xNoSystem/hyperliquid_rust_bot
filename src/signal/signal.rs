@@ -109,6 +109,17 @@ impl SignalEngine{
         }
         active
     }
+
+
+    pub fn display_values(&self){
+        for (tf, tracker) in &self.trackers{
+            for (kind, handler) in &tracker.indicators{
+                if handler.is_active{
+                    println!("\nKind: {:?} TF: {}\nValue: {:?}\n", kind, tf.as_str(), handler.get_value());
+                }
+            }
+        }
+    }
     
     pub fn change_strategy(&mut self, strategy: Strategy){
         self.strategy = strategy;
@@ -142,7 +153,6 @@ impl SignalEngine{
             match cmd {
 
                 EngineCommand::UpdatePrice(price) => {
-                    info!("engine receied price"); 
                     for (_tf, tracker) in &mut self.trackers{
                             tracker.digest(price);
                         }
@@ -156,7 +166,7 @@ impl SignalEngine{
 
                 
                 EngineCommand::EditIndicators{indicators, price_data} =>{
-                    
+                    info!("RECEIVED INDCATORS EDIT"); 
                     for entry in indicators{
                         match entry.edit{
                             EditType::Add => {self.add_indicator(entry.id);},
@@ -195,9 +205,10 @@ impl SignalEngine{
     }
 
     pub fn display_indicators(&mut self, price: f32){
-            println!("Price => {}", price);
-            let vec = self.get_active_indicators();      
-            println!("{:?}", vec); 
+            println!("\nPrice => {}\n", price);
+            //let vec = self.get_active_indicators();      
+            self.display_values(); 
+             
         }
 
 

@@ -103,7 +103,7 @@ async fn main(){
         //sender.send(MarketCommand::Pause).await;
         let _ = sleep(Duration::from_secs(5)).await;
         sender.send(MarketCommand::UpdateTimeFrame(TimeFrame::from_str("4h").unwrap())).await;
-
+        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour1),edit: EditType::Add}]))).await;
         let _ = sleep(Duration::from_secs(10)).await;
         sender.send(MarketCommand::Pause).await;
         sender.send(MarketCommand::Pause).await;
@@ -113,8 +113,6 @@ async fn main(){
         //let _ = sleep(Duration::from_secs(30)).await;
         //let _ = sender.send(MarketCommand::Close).await; 
 });
-
-
 
     match market.start().await{
         Ok(_) => println!("Market closed successfully"),
