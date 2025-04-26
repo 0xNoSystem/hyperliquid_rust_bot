@@ -16,5 +16,6 @@ pub use types::{
     TimeFrameData,
     EditType,
     Entry,
+    SignalVecElement
 };
 

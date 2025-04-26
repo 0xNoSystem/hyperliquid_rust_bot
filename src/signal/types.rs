@@ -1,8 +1,9 @@
+use std::fmt::Debug;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use arraydeque::{ArrayDeque, behavior::Wrapping};
-use kwant::indicators::{Rsi, Atr, StochRsi, Price, Indicator, Ema, EmaCross, Sma, Adx};
+use kwant::indicators::{Rsi, Atr, StochasticRsi, Price, Indicator, Ema, EmaCross, Sma, SmaRsi, Adx, Value};
 
 use crate::trade_setup::TimeFrame;
 use crate::helper::get_time_now;
@@ -35,8 +36,9 @@ pub enum ExecParam{
 
 #[derive(Debug, Clone,Copy, PartialEq, Eq, Hash)]
 pub enum IndicatorKind{
-    Rsi{length: u32, stoch_length: u32, smoothing_length: Option<u32>},
-    StochRsi{length: u32},
+    Rsi(u32),
+    SmaOnRsi{periods: u32, smoothing_length: u32},
+    StochRsi{periods: u32, k_smoothing: Option<u32>, d_smoothing: Option<u32>},
     Adx{periods: u32, di_length: u32},
     Atr(u32),
     Ema(u32),
@@ -44,8 +46,9 @@ pub enum IndicatorKind{
     Sma(u32),
 }
 
+#[derive(Debug)]
 pub struct Handler{
-    indicator: Box<dyn Indicator + Send>,
+    pub indicator: Box<dyn Indicator>,
     pub is_active: bool,
 }
 
@@ -70,7 +73,7 @@ impl Handler{
             self.indicator.update_after_close(price);
         }
     }
-    pub fn get_value(&self) -> Option<f32>{
+    pub fn get_value(&self) -> Option<Value>{
         self.indicator.get_last()
     }
 
@@ -90,28 +93,31 @@ impl Handler{
 
 pub type IndexId = (IndicatorKind, TimeFrame);
 
-fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator + Send> {
+fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
     match kind {
-        IndicatorKind::Rsi { length, stoch_length, smoothing_length } => {
-            Box::new(Rsi::new(length, stoch_length, smoothing_length))
+        IndicatorKind::Rsi (periods) => {
+            Box::new(Rsi::new(periods, periods, None,None, None))
         }
-        IndicatorKind::StochRsi { length} => {
-            Box::new(Rsi::new(length, length, None))
+         IndicatorKind::SmaOnRsi{periods, smoothing_length} => {
+            Box::new(SmaRsi::new(periods, smoothing_length))
+        }
+        IndicatorKind::StochRsi{periods, k_smoothing, d_smoothing}=> {
+            Box::new(StochasticRsi::new(periods, k_smoothing, d_smoothing))
         }
         IndicatorKind::Adx { periods, di_length } => {
             Box::new(Adx::new(periods, di_length))
         }
-        IndicatorKind::Atr(period) => {
-            Box::new(Atr::new(period))
+        IndicatorKind::Atr(periods) => {
+            Box::new(Atr::new(periods))
         }
-        IndicatorKind::Ema(period) => {
-            Box::new(Ema::new(period))
+        IndicatorKind::Ema(periods) => {
+            Box::new(Ema::new(periods))
         }
         IndicatorKind::EmaCross { short, long } => {
             Box::new(EmaCross::new(short, long))
         }
-        IndicatorKind::Sma(period) => {
-            Box::new(Sma::new(period))
+        IndicatorKind::Sma(periods) => {
+            Box::new(Sma::new(periods))
         }
     }
 }
@@ -119,6 +125,7 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator + Send> {
 
 type History = ArrayDeque<Price, MAX_HISTORY, Wrapping>;
 
+#[derive(Debug)]
 pub struct Tracker{
     pub price_data: History,
     pub indicators: HashMap<IndicatorKind, Handler>,
@@ -195,7 +202,7 @@ impl Tracker{
             let _ = handler.toggle();
         }
     }
-    
+  
     pub fn reset(&mut self){
         self.price_data.clear();
         for (_kind, handler) in &mut self.indicators{
@@ -225,6 +232,16 @@ pub enum EditType{
 
 
 
+pub enum SignalVecElement{
+    Rsi(f32),
+    StochRsi(f32),
+    SmaOnRsi(f32),
+    Adx(f32),
+    Atr(f32),
+    Sma(f32),
+    Ema(f32),
+    EmaCross(bool),
+}
 
 
 

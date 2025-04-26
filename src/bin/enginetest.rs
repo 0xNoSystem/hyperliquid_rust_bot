@@ -33,15 +33,15 @@ use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
 
 
 const COIN: &str = "SOL";
-const URL: BaseUrl = BaseUrl::Mainnet;
+const URL: BaseUrl = BaseUrl::Testnet;
 
 #[tokio::main]
 async fn main(){
     use IndicatorKind::*;
     env_logger::init();
     match URL{
-        BaseUrl::Testnet => dotenv().ok(),
-        BaseUrl::Mainnet => dotenv::from_filename(".env.test").ok(),
+        BaseUrl::Mainnet => dotenv().ok(),
+        BaseUrl::Testnet => dotenv::from_filename(".env.test").ok(),
         BaseUrl::Localhost => dotenv::from_filename(".env.test").ok(),
         };
         
@@ -66,13 +66,18 @@ async fn main(){
 
     let config = Vec::from([
     (
-        IndicatorKind::Rsi {
-            length: 14,
-            stoch_length: 14,
-            smoothing_length: Some(3),
-        },
+        IndicatorKind::Rsi(12),
         TimeFrame::Min1,
     ),
+        (
+        IndicatorKind::SmaOnRsi{periods: 14, smoothing_length: 9},
+        TimeFrame::Hour1,
+    ),
+    (
+        IndicatorKind::StochRsi{periods: 16,k_smoothing: Some(4), d_smoothing: Some(4)},
+        TimeFrame::Hour4,
+    ),
+        
     (
         IndicatorKind::Adx {
             periods: 14,

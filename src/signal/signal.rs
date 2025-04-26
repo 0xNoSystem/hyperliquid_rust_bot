@@ -82,7 +82,6 @@ impl SignalEngine{
             let mut new_tracker = Tracker::new(id.1);
             new_tracker.add_indicator(id.0, false); 
             self.trackers.insert(id.1, Box::new(new_tracker));
-            println!("BUFFERh ===");
      }
     }
 

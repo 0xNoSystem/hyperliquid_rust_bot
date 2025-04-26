@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use crate::TradeCommand;
-
+use crate::signal::{IndicatorKind, SignalVecElement};
+use kwant::indicators::Value;
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -105,6 +106,10 @@ impl CustomStrategy{
         self.follow_trend = follow_trend;
     }
     
+    pub fn generate_signal(&self,data: Vec<SignalVecElement>, price: f32)->Option<TradeCommand>{
+           
+        None 
+    }
 }
 
 
