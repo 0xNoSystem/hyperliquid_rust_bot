@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use crate::TradeCommand;
 
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize)]

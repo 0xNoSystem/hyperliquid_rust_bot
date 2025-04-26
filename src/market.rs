@@ -185,7 +185,7 @@ impl Market{
             }
         });
 
-        //listen to edits (exemple: change strategy)
+        //listen to changes and trade results
         let engine_update_tx = self.engine_tx.clone();
         while let Some(cmd) = self.market_rv.recv().await{
              match cmd {

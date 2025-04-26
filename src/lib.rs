@@ -16,4 +16,4 @@ pub use market::{Market, MarketCommand};
 pub use consts::{MAX_HISTORY, MARKETS};
 pub use executor::Executor;
 // pub use backtest::BackTester; 
-pub use trade_setup::{TradeParams, TimeFrame};
+pub use trade_setup::{TradeParams, TimeFrame, TradeCommand};
