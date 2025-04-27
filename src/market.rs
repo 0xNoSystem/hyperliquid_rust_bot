@@ -228,7 +228,7 @@ impl Market{
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Margin(self.margin)));
                     },
                     MarketCommand::UpdateTimeFrame(tf)=>{
-                        
+                        self.trade_params.time_frame = tf;
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Tf(tf)));
 
                     },
