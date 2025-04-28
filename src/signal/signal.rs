@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use log::info;
 
-use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx};
+use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx, Value};
 
 use crate::trade_setup::{TimeFrame, PriceData, TradeParams, TradeCommand};
 use crate::strategy::{Strategy, CustomStrategy, Style, Stance};
@@ -109,6 +109,13 @@ impl SignalEngine{
         active
     }
 
+    pub fn get_active_values(&self) -> Vec<Value>{
+        let mut values = Vec::new();
+            for (tf, tracker) in &self.trackers{
+                values.extend(tracker.get_active_values()); 
+            }
+        values
+        }
 
     pub fn display_values(&self){
         for (tf, tracker) in &self.trackers{
@@ -137,6 +144,9 @@ impl SignalEngine{
 
 
     fn get_signal(&self, price: f32) -> Option<TradeCommand>{
+        let values = self.get_active_values();
+        //println!("VALUES IN SIGNAL: {:?}", values);
+ 
         None
        }
 

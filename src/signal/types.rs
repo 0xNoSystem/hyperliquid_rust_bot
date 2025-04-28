@@ -202,6 +202,16 @@ impl Tracker{
             let _ = handler.toggle();
         }
     }
+
+    pub fn get_active_values(&self) -> Vec<Value>{
+        let mut values = Vec::new();
+        for (_kind, handler) in &self.indicators{
+            if let Some(val) = handler.get_value(){
+                values.push(val);
+            }
+        }
+        values
+    }
   
     pub fn reset(&mut self){
         self.price_data.clear();
@@ -228,19 +238,6 @@ pub enum EditType{
     Toggle,
     Add,
     Remove,
-}
-
-
-
-pub enum SignalVecElement{
-    Rsi(f32),
-    StochRsi(f32),
-    SmaOnRsi(f32),
-    Adx(f32),
-    Atr(f32),
-    Sma(f32),
-    Ema(f32),
-    EmaCross(bool),
 }
 
 

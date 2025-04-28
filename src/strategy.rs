@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use crate::TradeCommand;
-use crate::signal::{IndicatorKind, SignalVecElement};
+use crate::signal::{IndicatorKind};
 use kwant::indicators::Value;
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
@@ -105,8 +105,36 @@ impl CustomStrategy{
     pub fn update_follow_trend(&mut self, follow_trend: bool){
         self.follow_trend = follow_trend;
     }
+
+  /*  fn get_threshhold(value: Value) -> Option<bool> {
+         use Risk::*;
+    let res = match value {
+        Value::RsiValue(v) => {
+                }
+        Value::StochRsiValue { k, d } => {
+            },
+        Value::EmaValue(v) => {
+
+        }
+        Value::EmaCrossValue { short, long, trend } => {
+
+        }
+        Value::SmaValue(v) => {
+
+        }
+        Value::SmaRsiValue(v) => {
+
+        }
+        Value::AdxValue(v) => {
+
+        }
+        Value::AtrValue(v) => {
+
+        }
+    }
+}*/
     
-    pub fn generate_signal(&self,data: Vec<SignalVecElement>, price: f32)->Option<TradeCommand>{
+    pub fn generate_signal(&self,data: Vec<Value>, price: f32)->Option<TradeCommand>{
            
         None 
     }
@@ -123,6 +151,16 @@ impl Default for CustomStrategy{
     }
 }
 }
+
+
+
+
+
+
+
+
+
+
 
 
 

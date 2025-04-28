@@ -75,7 +75,7 @@ async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: TimeFr
             return Err("Candles Snapshot Failed".to_string());
         }
     };
-    let mut res = Vec::new();
+    let mut res: Vec<Price> = Vec::with_capacity(vec.len());
     for candle in vec {
         let h = candle.high.parse::<f32>().map_err(|e| e.to_string())?;
         let l = candle.low.parse::<f32>().map_err(|e| e.to_string())?;
