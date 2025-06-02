@@ -1,4 +1,4 @@
-use hyperliquid_rust_sdk::{AssetMeta, BaseUrl,ExchangeClient, InfoClient, Message, Subscription, UserFillsResponse};
+use hyperliquid_rust_sdk::{Error,AssetMeta, BaseUrl,ExchangeClient, InfoClient, Message, Subscription, UserFillsResponse};
 use tokio::sync::mpsc::{UnboundedReceiver};
 use tokio::sync::watch::{Sender, Receiver};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -63,24 +63,22 @@ fn get_time_now_and_candles_ago(candle_count: u64, tf: TimeFrame) -> (u64, u64) 
 
 
 
-async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: TimeFrame, start: u64, end: u64) -> Result<Vec<Price>, String>{
+async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: TimeFrame, start: u64, end: u64) -> Result<Vec<Price>, Error>{
  
-    let vec = match info_client
+    let vec = info_client
     .candles_snapshot(coin.to_string(), time_frame.to_string(), start, end)
-    .await
-    {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("Failed to fetch candles: {}", e);
-            return Err("Candles Snapshot Failed".to_string());
-        }
-    };
+    .await?;
+
     let mut res: Vec<Price> = Vec::with_capacity(vec.len());
     for candle in vec {
-        let h = candle.high.parse::<f32>().map_err(|e| e.to_string())?;
-        let l = candle.low.parse::<f32>().map_err(|e| e.to_string())?;
-        let o = candle.open.parse::<f32>().map_err(|e| e.to_string())?;
-        let c = candle.close.parse::<f32>().map_err(|e| e.to_string())?;
+        let h = candle.high.parse::<f32>()
+                .map_err(|e| Error::GenericParse(format!("Failed to parse high: {}", e)))?;
+        let l = candle.low.parse::<f32>()
+                .map_err(|e| Error::GenericParse(format!("Failed to parse low: {}", e)))?;
+        let o = candle.open.parse::<f32>()
+                .map_err(|e| Error::GenericParse(format!("Failed to parse open: {}", e)))?;
+        let c = candle.close.parse::<f32>()
+                .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
 
         res.push(Price {
             high: h,
@@ -93,7 +91,7 @@ async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: TimeFr
 }
 
 
-pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: TimeFrame, candle_count: u64) -> Result<Vec<Price>, String> {
+pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: TimeFrame, candle_count: u64) -> Result<Vec<Price>, Error> {
 
 
     let (start, end) = get_time_now_and_candles_ago(candle_count + 1, tf);
@@ -124,13 +122,13 @@ pub async fn get_max_lev(info_client: &InfoClient, token: &str) -> u32{
 }
 
 
-pub async fn get_asset(info_client: &InfoClient, token: &str) -> Option<AssetMeta>{
-    let assets = info_client.meta().await.unwrap().universe;
+pub async fn get_asset(info_client: &InfoClient, token: &str) -> Result<AssetMeta, Error>{
+    let assets = info_client.meta().await?.universe;
 
     if let Some(asset) = assets.into_iter().find(|a| a.name == token) {
-        Some(asset)
+        Ok(asset)
     }else{
-        None
+        return Err(Error::AssetNotFound);
     }
 }
 

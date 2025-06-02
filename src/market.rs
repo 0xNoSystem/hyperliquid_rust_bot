@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use log::info;
 
+
 use ethers::signers::LocalWallet;
-use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, ExchangeClient, InfoClient, Message};
+use hyperliquid_rust_sdk::{AssetMeta,Error, BaseUrl, ExchangeClient, InfoClient, Message};
 
 use kwant::indicators::Price;
 
@@ -54,23 +55,20 @@ impl Market{
                     asset: String,
                     mut trade_params: TradeParams,
                     config: Option<Vec<IndexId>>
-    ) -> Result<(Self, Sender<MarketCommand>), String>{
+    ) -> Result<(Self, Sender<MarketCommand>), Error>{
 
         if !MARKETS.contains(&asset.as_str().trim()){
-            return Err("ASSET ISN'T TRADABLE, MARKET CAN'T BE INITILIAZED".to_string());
+            return Err(Error::AssetNotFound);
         }
 
-        let mut info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await.unwrap();
-        let exchange_client = ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await.unwrap();
+        let mut info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
+        let exchange_client = ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
 
         //fetch user fees %
-        let fees = wallet.get_user_fees().await;
-        let margin = wallet.get_user_margin().await.unwrap_or(0.0);
-        let meta = get_asset(&info_client, asset.as_str().trim()).await;
+        let fees = wallet.get_user_fees().await?;
+        let margin = wallet.get_user_margin().await?;
+        let meta = get_asset(&info_client, asset.as_str().trim()).await?;
         
-        if meta.is_none(){
-            return Err(format!("Failed to fetch Metadata for the {}", asset));
-        } 
         //Look up needed tfs for loading 
         let mut active_tfs: HashSet<TimeFrame> = HashSet::new();
         active_tfs.insert(trade_params.time_frame);
@@ -93,9 +91,9 @@ impl Market{
             trade_history: Vec::with_capacity(MAX_HISTORY),
             pnl: 0_f32,
             trade_params : trade_params.clone(),
-            asset: meta.unwrap(), 
+            asset: meta, 
             signal_engine: SignalEngine::new(config, trade_params,engine_rv,exec_tx.clone(), margin).await,
-            executor: Executor::new(wallet.wallet, asset, fees,rv_exec ,market_tx.clone()).await,
+            executor: Executor::new(wallet.wallet, asset, fees,rv_exec ,market_tx.clone()).await?,
             market_rv, 
             engine_tx,
             exec_tx,
@@ -105,7 +103,7 @@ impl Market{
         ))
     }
     
-    async fn init(&mut self) -> Result<(), String>{
+    async fn init(&mut self) -> Result<(), Error>{
         
         //check if lev > max_lev
         let lev = self.trade_params.lev.min(self.asset.max_leverage);
@@ -127,7 +125,7 @@ impl Market{
         
     }
         
-    async fn load_engine(&mut self, candle_count: u64) -> Result<(), String>{
+    async fn load_engine(&mut self, candle_count: u64) -> Result<(), Error>{
         
         for tf in &self.active_tfs{
             let price_data = load_candles(&self.info_client, 
@@ -151,7 +149,7 @@ impl Market{
 
 impl Market{
 
-    pub async fn start(mut self) -> Result<(), String>{
+    pub async fn start(mut self) -> Result<(), Error>{
         self.init().await?;
 
         let mut signal_engine = self.signal_engine;

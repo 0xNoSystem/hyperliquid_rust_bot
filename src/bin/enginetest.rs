@@ -15,7 +15,7 @@ use ethers::signers::LocalWallet;
 use flume::{bounded, TrySendError};
 use hyperliquid_rust_sdk::{
     BaseUrl, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus,
-    InfoClient, MarketOrderParams, Message, Subscription,
+    InfoClient, MarketOrderParams, Message, Subscription, Error
 };
 use kwant::indicators::{Price, Rsi, Indicator};
 use log::{error, info};
@@ -37,7 +37,7 @@ const COIN: &str = "LAUNCHCOIN";
 const URL: BaseUrl = BaseUrl::Mainnet;
 
 #[tokio::main]
-async fn main(){
+async fn main() -> Result<(), Error>{
     use IndicatorKind::*;
     env_logger::init();
     match URL{
@@ -52,7 +52,7 @@ async fn main(){
         .unwrap();
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
 
-    let wallet = Wallet::new(URL, pubkey, wallet).await; 
+    let wallet = Wallet::new(URL, pubkey, wallet).await?; 
    
 
     let strat = Strategy::Custom(CustomStrategy::default());
@@ -139,13 +139,9 @@ async fn main(){
         //let _ = sender.send(MarketCommand::Close).await; 
 });
 
-    match market.start().await{
-        Ok(_) => println!("Market closed successfully"),
-        Err(e) => error!("Error starting market: {}", e),
-    };
     
-    
-
+    market.start().await?;
+    Ok(())
 }
 
 

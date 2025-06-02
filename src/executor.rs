@@ -9,7 +9,7 @@ use tokio::{
 };
 
 use hyperliquid_rust_sdk::{
-    BaseUrl, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams,
+    Error,BaseUrl, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams,
 };
 
 use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo};
@@ -39,10 +39,10 @@ impl Executor {
         fees: (f32, f32),
         trade_rv: Receiver<TradeCommand>, 
         market_tx: Sender<MarketCommand>,
-    ) -> Self {
+    ) -> Result<Executor, Error>{
         
-        let exchange_client = Arc::new(ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await.unwrap());
-        Executor{
+        let exchange_client = Arc::new(ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await?);
+        Ok(Executor{
             wallet,
             trade_rv,
             market_tx,
@@ -51,7 +51,7 @@ impl Executor {
             is_paused: false,
             fees,
             open_position: Arc::new(Mutex::new(None)),
-        }
+        })
     }
 
     async fn try_trade(client: Arc<ExchangeClient>, params: MarketOrderParams<'_>) -> Result<ExchangeDataStatus, String>{
@@ -69,8 +69,12 @@ impl Executor {
                 return Err(format!("Exchange Error: Couldn't execute trade => {}",e));
          }
         };
-     
-        let status = response.data.unwrap().statuses[0].clone();
+        
+        let status = response
+            .data
+            .filter(|d| !d.statuses.is_empty())
+            .and_then(|d| d.statuses.get(0).cloned())
+            .ok_or_else(|| "Exchange Error: Couldn't fetch trade status".to_string())?;
 
         Ok(status)
 
