@@ -17,5 +17,5 @@ pub static MARKETS:  &[&str] = &[
     "GOAT", "MOODENG", "GRASS", "PURR", "PNUT", "XLM", "CHILLGUY", "SAND", "IOTA",
     "ALGO", "HYPE", "ME", "MOVE", "VIRTUAL", "PENGU", "USUAL", "FARTCOIN", "AI16Z",
     "AIXBT", "ZEREBRO", "BIO", "GRIFFAIN", "SPX", "S", "MORPHO", "TRUMP", "MELANIA",
-    "ANIME", "VINE", "VVV", "JELLY", "BERA", "TST", "LAYER", "IP", "OM", "KAITO", "NIL"
+    "ANIME", "VINE", "VVV", "JELLY", "BERA", "TST", "LAYER", "IP", "OM", "KAITO", "NIL", "LAUNCHCOIN"
 ];

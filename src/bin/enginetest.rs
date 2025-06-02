@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 #![allow(unused_mut)]
 #![allow(unused_variables)]
+#![allow(dead_code)]
 
 use std::{
     env, fs,
@@ -32,7 +33,7 @@ use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
 
 
 
-const COIN: &str = "SOL";
+const COIN: &str = "LAUNCHCOIN";
 const URL: BaseUrl = BaseUrl::Mainnet;
 
 #[tokio::main]
@@ -112,23 +113,27 @@ async fn main(){
         //sender.send(MarketCommand::Pause).await;
         let _ = sleep(Duration::from_secs(20)).await;
         //sender.send(MarketCommand::UpdateTimeFrame(TimeFrame::from_str("4h").unwrap())).await;
-        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour1),edit: EditType::Add}]))).await;
+        let _ = sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour1),edit: EditType::Add}, 
+                                                            Entry{id: (SmaOnRsi{periods: 12, smoothing_length: 9}, TimeFrame::Min1),edit: EditType::Add}
+        ]))).await;
+
         let _ = sleep(Duration::from_secs(20)).await;
-        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour4),edit: EditType::Add}]))).await;
+        let _ = sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour4),edit: EditType::Add}]))).await;
         let _ = sleep(Duration::from_secs(10)).await;
-        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour1),edit: EditType::Toggle}]))).await;
+        let _ = sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour1),edit: EditType::Toggle}]))).await;
 
         let _ = sleep(Duration::from_secs(20)).await;
-        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Sma(10), TimeFrame::Min5),edit: EditType::Add}]))).await;
+        let _ = sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Sma(10), TimeFrame::Min5),edit: EditType::Add}]))).await;
         let _ = sleep(Duration::from_secs(20)).await;
-        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(10), TimeFrame::Hour4),edit: EditType::Remove}]))).await;
-        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Sma(10), TimeFrame::Min5),edit: EditType::Remove}]))).await;
-        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Atr(14), TimeFrame::Min15),edit: EditType::Remove}]))).await;
+        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(10), TimeFrame::Hour4),edit: EditType::Remove}, 
+                                                            Entry{id: (Sma(10), TimeFrame::Min5),edit: EditType::Remove},
+                                                            Entry{id: (Atr(14), TimeFrame::Min15),edit: EditType::Remove},
+                                                            Entry{id: (Rsi(12), TimeFrame::Min1),edit: EditType::Toggle}
+        ]))).await;
         let _ = sleep(Duration::from_secs(30)).await;
-
-        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Rsi(12), TimeFrame::Min1),edit: EditType::Toggle}]))).await;
-        sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Rsi(12), TimeFrame::Min1),edit: EditType::Toggle}]))).await;
-        let _ = sleep(Duration::from_secs(100)).await;
+        let _ = sender.send(MarketCommand::EditIndicators(Vec::from([]))).await;
+        let _ =sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Rsi(12), TimeFrame::Min1),edit: EditType::Toggle}]))).await;
+        let _ = sleep(Duration::from_secs(100000)).await;
         sender.send(MarketCommand::Close).await;
         //let _ = sleep(Duration::from_secs(30)).await;
         //let _ = sender.send(MarketCommand::Close).await; 

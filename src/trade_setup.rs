@@ -84,11 +84,6 @@ pub enum TradeCommand{
     Pause,
 }
 
-#[derive(Clone, Debug, Copy)]
-pub struct PriceData{
-    pub price: Price,
-    pub time: u64,
-}
 
 #[derive(Clone, Debug, Copy)]
 pub struct TradeInfo{

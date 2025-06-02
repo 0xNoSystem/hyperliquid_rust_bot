@@ -3,7 +3,7 @@ use log::info;
 
 use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx, Value};
 
-use crate::trade_setup::{TimeFrame, PriceData, TradeParams, TradeCommand};
+use crate::trade_setup::{TimeFrame,TradeParams, TradeCommand};
 use crate::strategy::{Strategy, CustomStrategy, Style, Stance};
 use crate::MAX_HISTORY;
 
@@ -144,9 +144,35 @@ impl SignalEngine{
 
 
     fn get_signal(&self, price: f32) -> Option<TradeCommand>{
+        use Value::*;
+        let risk_pct = 0.02;
         let values = self.get_active_values();
-        //println!("VALUES IN SIGNAL: {:?}", values);
- 
+        //println!("\nVALUES IN SIGNAL: {:?}\n", values);
+        for v in values.into_iter(){
+            match v{
+                RsiValue(value) =>{
+                    if value <= 30.0{
+                        return Some(TradeCommand::ExecuteTrade{size: (self.exec_params.margin * risk_pct * self.exec_params.lev as f32), is_long: true, duration: self.exec_params.tf.to_secs() *5});
+                    }
+
+                    if value >= 70.0{
+                        return Some(TradeCommand::ExecuteTrade{size: (self.exec_params.margin * risk_pct * self.exec_params.lev as f32), is_long: false, duration: self.exec_params.tf.to_secs() *5});
+                    }
+                },
+                SmaRsiValue(value) =>{
+                    if value <= 30.0{
+                        return Some(TradeCommand::ExecuteTrade{size: (self.exec_params.margin * risk_pct * self.exec_params.lev as f32), is_long: true, duration: self.exec_params.tf.to_secs() *5});
+                    }
+
+                    if value >= 70.0{
+                        return Some(TradeCommand::ExecuteTrade{size: (self.exec_params.margin * risk_pct * self.exec_params.lev as f32), is_long: false, duration: self.exec_params.tf.to_secs() *5});
+                    }
+                },
+
+                _ => {},
+
+            }
+        }  
         None
        }
 
@@ -164,7 +190,7 @@ impl SignalEngine{
                     for (_tf, tracker) in &mut self.trackers{
                             tracker.digest(price);
                         }
-                    self.display_indicators(price.close);
+                     self.display_indicators(price.close);
                     if let Some(trade) = self.get_signal(price.close){
                         self.trade_tx.try_send(trade);
                     }
@@ -176,7 +202,7 @@ impl SignalEngine{
 
                 
                 EngineCommand::EditIndicators{indicators, price_data} =>{
-                    info!("RECEIVED INDCATORS EDIT"); 
+                    info!("Received Indicator Edit Vec of length : {}", indicators.len()); 
                     
 
                     for entry in indicators{
@@ -223,7 +249,7 @@ impl SignalEngine{
             println!("\nPrice => {}\n", price);
             //let vec = self.get_active_indicators();      
             self.display_values(); 
-             
+            //Update 
         }
 
 

@@ -13,7 +13,7 @@ use crate::MARKETS;
 use crate::wallet::Wallet;
 use crate::executor::Executor;
 use crate::signal::{SignalEngine, ExecParam, EngineCommand, TimeFrameData, Entry, EditType, IndexId};
-use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, PriceData, TradeInfo};
+use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, TradeInfo};
 use crate::strategy::Strategy;
 use crate::helper::{get_asset, load_candles, subscribe_candles};
 
@@ -167,7 +167,6 @@ impl Market{
         });
         //Subscribe candles
         let (shutdown_tx, mut receiver) = subscribe_candles(self.url,self.asset.name.as_str(), self.trade_params.time_frame.as_str()).await;
-
 
 
         //Candle Stream
