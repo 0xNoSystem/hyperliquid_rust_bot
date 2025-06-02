@@ -106,38 +106,166 @@ impl CustomStrategy{
         self.follow_trend = follow_trend;
     }
 
-  /*  fn get_threshhold(value: Value) -> Option<bool> {
-         use Risk::*;
-    let res = match value {
-        Value::RsiValue(v) => {
-                }
-        Value::StochRsiValue { k, d } => {
-            },
-        Value::EmaValue(v) => {
 
-        }
-        Value::EmaCrossValue { short, long, trend } => {
-
-        }
-        Value::SmaValue(v) => {
-
-        }
-        Value::SmaRsiValue(v) => {
-
-        }
-        Value::AdxValue(v) => {
-
-        }
-        Value::AtrValue(v) => {
-
-        }
-    }
-}*/
+    pub fn generate_signal(&self, data: Vec<Value>, price: f32) -> Option<TradeCommand> {
+    // Extract indicator values from the data
+    let mut rsi_value = None;
+    let mut stoch_rsi = None;
+    let mut ema_cross = None;
+    let mut adx_value = None;
+    let mut atr_value = None;
     
-    pub fn generate_signal(&self,data: Vec<Value>, price: f32)->Option<TradeCommand>{
-           
-        None 
+    for value in data {
+        match value {
+            Value::RsiValue(rsi) => rsi_value = Some(rsi),
+            Value::StochRsiValue { k, d } => stoch_rsi = Some((k, d)),
+            Value::EmaCrossValue { short, long, trend } => {
+                ema_cross = Some((short, long, trend))
+            }
+            Value::AdxValue(adx) => adx_value = Some(adx),
+            Value::AtrValue(atr) => atr_value = Some(atr),
+            _ => {} // Handle other indicators as needed
+        }
     }
+    
+    self.scalping_strategy(rsi_value, stoch_rsi, ema_cross, adx_value, atr_value, price)
+}
+
+fn scalping_strategy(
+    &self,
+    rsi: Option<f32>,
+    stoch_rsi: Option<(f32, f32)>,
+    ema_cross: Option<(f32, f32, bool)>,
+    adx: Option<f32>,
+    atr: Option<f32>,
+    price: f32,
+) -> Option<TradeCommand> {
+    // Scalping parameters
+    const RSI_OVERSOLD: f32 = 30.0;
+    const RSI_OVERBOUGHT: f32 = 70.0;
+    const STOCH_OVERSOLD: f32 = 20.0;
+    const STOCH_OVERBOUGHT: f32 = 80.0;
+    const ADX_TREND_THRESHOLD: f32 = 25.0;
+    const BASE_POSITION_SIZE: f32 = 0.1; // 10% of available capital
+    const SCALP_DURATION: u64 = 300; // 5 minutes for scalping
+    
+    // Determine trend direction from EMA cross
+    let trend_direction = if let Some((short_ema, long_ema, trend)) = ema_cross {
+        if trend && short_ema > long_ema {
+            Some(true) // Bullish trend
+        } else if !trend && short_ema < long_ema {
+            Some(false) // Bearish trend
+        } else {
+            None // No clear trend
+        }
+    } else {
+        None
+    };
+    
+    // Check trend strength with ADX
+    let strong_trend = adx.map_or(true, |adx| adx > ADX_TREND_THRESHOLD);
+    
+    // Calculate position size based on ATR (volatility-adjusted sizing)
+    let position_size = if let Some(atr) = atr {
+        // Reduce position size in high volatility
+        let volatility_adjustment = (atr / price).min(0.05); // Cap at 5%
+        BASE_POSITION_SIZE * (1.0 - volatility_adjustment)
+    } else {
+        BASE_POSITION_SIZE
+    };
+    
+    // Generate signals based on multiple confirmations
+    
+    // LONG SIGNAL LOGIC
+    if let Some(true) = trend_direction {
+        if strong_trend {
+            // RSI-based long entry
+            if let Some(rsi) = rsi {
+                if rsi < RSI_OVERSOLD {
+                    return Some(TradeCommand::ExecuteTrade {
+                        size: position_size,
+                        is_long: true,
+                        duration: SCALP_DURATION,
+                    });
+                }
+            }
+            
+            // StochRSI-based long entry (more sensitive for scalping)
+            if let Some((k, d)) = stoch_rsi {
+                if k < STOCH_OVERSOLD && d < STOCH_OVERSOLD && k > d {
+                    // StochRSI bullish crossover in oversold region
+                    return Some(TradeCommand::ExecuteTrade {
+                        size: position_size,
+                        is_long: true,
+                        duration: SCALP_DURATION,
+                    });
+                }
+            }
+        }
+    }
+    
+    // SHORT SIGNAL LOGIC
+    if let Some(false) = trend_direction {
+        if strong_trend {
+            // RSI-based short entry
+            if let Some(rsi) = rsi {
+                if rsi > RSI_OVERBOUGHT {
+                    return Some(TradeCommand::ExecuteTrade {
+                        size: position_size,
+                        is_long: false,
+                        duration: SCALP_DURATION,
+                    });
+                }
+            }
+            
+            // StochRSI-based short entry
+            if let Some((k, d)) = stoch_rsi {
+                if k > STOCH_OVERBOUGHT && d > STOCH_OVERBOUGHT && k < d {
+                    // StochRSI bearish crossover in overbought region
+                    return Some(TradeCommand::ExecuteTrade {
+                        size: position_size,
+                        is_long: false,
+                        duration: SCALP_DURATION,
+                    });
+                }
+            }
+        }
+    }
+    
+    // MOMENTUM SCALPING (when no clear EMA trend)
+    if trend_direction.is_none() {
+        // Use StochRSI for quick momentum plays
+        if let Some((k, d)) = stoch_rsi {
+            // Quick long on bullish momentum
+            if k < 50.0 && d < 50.0 && k > d && (k - d) > 5.0 {
+                if let Some(rsi) = rsi {
+                    if rsi < 60.0 { // Don't buy into overbought
+                        return Some(TradeCommand::ExecuteTrade {
+                            size: position_size * 0.7, // Smaller size for momentum plays
+                            is_long: true,
+                            duration: SCALP_DURATION / 2, // Shorter duration
+                        });
+                    }
+                }
+            }
+            
+            // Quick short on bearish momentum
+            if k > 50.0 && d > 50.0 && k < d && (d - k) > 5.0 {
+                if let Some(rsi) = rsi {
+                    if rsi > 40.0 { // Don't sell into oversold
+                        return Some(TradeCommand::ExecuteTrade {
+                            size: position_size * 0.7,
+                            is_long: false,
+                            duration: SCALP_DURATION / 2,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    None // No signal generated
+}
 }
 
 

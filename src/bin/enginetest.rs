@@ -52,9 +52,8 @@ async fn main() -> Result<(), Error>{
         .unwrap();
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
 
-    let wallet = Wallet::new(URL, pubkey, wallet).await?; 
+    let wallet = Wallet::new(URL, wallet).await?; 
    
-
     let strat = Strategy::Custom(CustomStrategy::default());
    
     let trade_params = TradeParams{

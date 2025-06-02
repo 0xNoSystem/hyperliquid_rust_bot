@@ -147,34 +147,11 @@ impl SignalEngine{
         use Value::*;
         let risk_pct = 0.02;
         let values = self.get_active_values();
-        //println!("\nVALUES IN SIGNAL: {:?}\n", values);
-        for v in values.into_iter(){
-            match v{
-                RsiValue(value) =>{
-                    if value <= 30.0{
-                        return Some(TradeCommand::ExecuteTrade{size: (self.exec_params.margin * risk_pct * self.exec_params.lev as f32), is_long: true, duration: self.exec_params.tf.to_secs() *5});
-                    }
-
-                    if value >= 70.0{
-                        return Some(TradeCommand::ExecuteTrade{size: (self.exec_params.margin * risk_pct * self.exec_params.lev as f32), is_long: false, duration: self.exec_params.tf.to_secs() *5});
-                    }
-                },
-                SmaRsiValue(value) =>{
-                    if value <= 30.0{
-                        return Some(TradeCommand::ExecuteTrade{size: (self.exec_params.margin * risk_pct * self.exec_params.lev as f32), is_long: true, duration: self.exec_params.tf.to_secs() *5});
-                    }
-
-                    if value >= 70.0{
-                        return Some(TradeCommand::ExecuteTrade{size: (self.exec_params.margin * risk_pct * self.exec_params.lev as f32), is_long: false, duration: self.exec_params.tf.to_secs() *5});
-                    }
-                },
-
-                _ => {},
-
-            }
-        }  
-        None
-       }
+       
+        match self.strategy{
+            Strategy::Custom(brr) => brr.generate_signal(values, price)
+        }
+    }
 
 }
 

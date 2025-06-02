@@ -1,3 +1,4 @@
+use log::info;
 use hyperliquid_rust_sdk::{Error,AssetMeta, BaseUrl,ExchangeClient, InfoClient, Message, Subscription, UserFillsResponse};
 use tokio::sync::mpsc::{UnboundedReceiver};
 use tokio::sync::watch::{Sender, Receiver};
@@ -9,15 +10,13 @@ use crate::TimeFrame;
 use log::warn;
 
 pub async fn subscribe_candles(
-    url: BaseUrl,
+    info_client: &mut InfoClient,
     coin: &str,
     tf: &str,
-) -> (Sender<bool>,UnboundedReceiver<Message>) {
-    let mut info_client = InfoClient::with_reconnect(None, Some(url)).await.unwrap();
+) -> Result<(u32,UnboundedReceiver<Message>), Error> {
     
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
-
 
 
     let subscription_id = info_client
@@ -28,21 +27,10 @@ pub async fn subscribe_candles(
             },
             sender,
         )
-        .await
-        .unwrap();
-    println!("Subscribed to candle data: {:?}", subscription_id);
-    
-    tokio::spawn(async move {
-        while shutdown_rx.changed().await.is_ok() {
-            if *shutdown_rx.borrow() {
-                println!("Shutdown received, unsubscribing...");
-                let _ = info_client.unsubscribe(subscription_id).await;
-                break;
-            }
-        }
-    }); 
+        .await?;
+    info!("Subscribed to new candle data: {:?}", subscription_id);
 
-    (shutdown_tx, receiver)
+    Ok((subscription_id, receiver))
 }
 
 
