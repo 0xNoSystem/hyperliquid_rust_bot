@@ -20,20 +20,21 @@ use hyperliquid_rust_sdk::{
 use kwant::indicators::{Price, Rsi, Indicator};
 use log::{error, info};
 use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedReceiver},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     time::{sleep, Duration},
 };
 
 use hyperliquid_rust_bot::{
-    Wallet, Market,MarketCommand, Executor, SignalEngine, IndexId, IndicatorKind, EditType, Entry
+    Wallet, Market,MarketCommand, Executor, SignalEngine, IndexId, IndicatorKind, EditType, Entry, Bot
 };
+use hyperliquid_rust_bot::bot::{BotEvent, UpdateFrontend, AddMarketInfo, BotToMarket};
 use hyperliquid_rust_bot::trade_setup::{TimeFrame, TradeInfo, TradeParams};
 use hyperliquid_rust_bot::strategy::{Strategy, CustomStrategy, Style, Stance, Risk};
 use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
 
 
 
-const COIN: &str = "LAUNCHCOIN";
+const COIN: &str = "BTC";
 const URL: BaseUrl = BaseUrl::Mainnet;
 
 #[tokio::main]
@@ -52,8 +53,8 @@ async fn main() -> Result<(), Error>{
         .unwrap();
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
 
-    let wallet = Wallet::new(URL, wallet).await?; 
-   
+    let wallet = Wallet::new(URL, pubkey, wallet).await?;
+
     let strat = Strategy::Custom(CustomStrategy::default());
    
     let trade_params = TradeParams{
@@ -98,10 +99,42 @@ async fn main() -> Result<(), Error>{
         TimeFrame::Hour1,
     ),
 ]);
+    
+    let (app_tx, mut app_rv) = unbounded_channel::<UpdateFrontend>();
 
-    let (mut market, sender) = Market::new(wallet,COIN.trim().to_string(), trade_params, Some(config)).await.unwrap();
+    let (mut bot, sender) = Bot::new(wallet).await?;
 
-   tokio::spawn(async move{
+    tokio::spawn(async move {
+        bot.start(app_tx).await;
+    });
+
+    tokio::spawn(async move {
+     let market_add = AddMarketInfo{
+        asset: COIN.to_string(), 
+        margin_alloc: 0.1,
+        trade_params: trade_params,
+        config: Some(config),
+    };
+        let market_add2 = AddMarketInfo{
+        asset: "SOL".to_string(), 
+        margin_alloc: 0.1,
+        trade_params: TradeParams::default(),
+        config: None,
+    };
+   
+   
+        let _ = sleep(Duration::from_secs(5)).await;
+        sender.send(BotEvent::AddMarket(market_add));
+        let _ = sleep(Duration::from_secs(5)).await;
+        sender.send(BotEvent::AddMarket(market_add2));
+    });
+
+
+    while let Some(update) = app_rv.recv().await{
+            info!("FRONT END RECEIVED {:?}", update);
+    }
+
+/*   tokio::spawn(async move{
         
         /*let _ = sleep(Duration::from_secs(10)).await;
         sender.send(MarketCommand::UpdateLeverage(50)).await;
@@ -137,9 +170,8 @@ async fn main() -> Result<(), Error>{
         //let _ = sleep(Duration::from_secs(30)).await;
         //let _ = sender.send(MarketCommand::Close).await; 
 });
-
+*/
     
-    market.start().await?;
     Ok(())
 }
 

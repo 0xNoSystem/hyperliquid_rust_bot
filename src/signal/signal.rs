@@ -167,7 +167,7 @@ impl SignalEngine{
                     for (_tf, tracker) in &mut self.trackers{
                             tracker.digest(price);
                         }
-                     self.display_indicators(price.close);
+                     //self.display_indicators(price.close);
                     if let Some(trade) = self.get_signal(price.close){
                         self.trade_tx.try_send(trade);
                     }

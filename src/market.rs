@@ -14,9 +14,10 @@ use crate::MARKETS;
 use crate::wallet::Wallet;
 use crate::executor::Executor;
 use crate::signal::{SignalEngine, ExecParam, EngineCommand, TimeFrameData, Entry, EditType, IndexId};
-use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, TradeInfo};
+use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, TradeInfo, TradeFillInfo};
 use crate::strategy::Strategy;
 use crate::helper::{get_asset, load_candles, subscribe_candles};
+use crate::bot::BotEvent;
 
 use tokio::{
     sync::mpsc::{channel, Sender, Receiver, UnboundedSender, UnboundedReceiver, unbounded_channel},
