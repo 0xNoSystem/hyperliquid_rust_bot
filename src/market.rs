@@ -237,9 +237,18 @@ impl Market{
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Tf(tf)));
 
                     },
+                    MarketCommand::Toggle =>{
+                       self.senders.exec_tx.send_async(TradeCommand::Toggle).await;  
+                    },
+                
                     MarketCommand::Pause =>{
                        self.senders.exec_tx.send_async(TradeCommand::Pause).await;  
                     },
+                    
+                    MarketCommand::Resume => {
+                        self.senders.exec_tx.send_async(TradeCommand::Resume).await;
+                    },
+                    
 
                     MarketCommand::Close=>{
                     info!("\nClosing {} Market...\n", asset.name);
@@ -296,6 +305,8 @@ pub enum MarketCommand{
     EditIndicators(Vec<Entry>),
     UpdateTimeFrame(TimeFrame),
     ReceiveTrade(TradeInfo),
+    Toggle,
+    Resume,
     Pause,
     Close,
 }

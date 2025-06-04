@@ -25,8 +25,7 @@ pub struct Bot{
 }
 
 
-
-
+//TODO: Manage margin accross market, and account
 
 impl Bot{
 
@@ -63,8 +62,8 @@ impl Bot{
             trade_params,
             config,
                 } = info;
-
-        let asset_str = asset.trim();
+        let asset = asset.trim().to_uppercase();
+        let asset_str = asset.as_str();
         let margin_alloc = margin_alloc.min(0.99);
         if !MARKETS.contains(&asset_str){
             return Err(Error::AssetNotFound);
@@ -85,7 +84,7 @@ impl Bot{
             self.update_tx.clone(),
             receiver,
             meta,     
-            self.margin * margin_alloc,
+            margin * margin_alloc,
             self.fees,
             trade_params,
             config,
@@ -103,9 +102,9 @@ impl Bot{
 
 
     pub async fn remove_market(&mut self, asset: &String) -> Result<(), Error>{
+        let asset = asset.trim().to_uppercase();
       
-        let id = self.candle_subs.remove(asset);
-        if let Some(sub_id) = id{
+        if let Some(sub_id) = self.candle_subs.remove(&asset){
             self.info_client.unsubscribe(sub_id).await?;
             info!("Removed {} market successfully", asset);
         }else{
@@ -113,7 +112,7 @@ impl Bot{
             return Ok(());
         }
 
-        if let Some(tx) = self.markets.remove(asset){
+        if let Some(tx) = self.markets.remove(&asset){
             let tx = tx.clone();
             let cmd = MarketCommand::Close;
             tokio::spawn(async move {
@@ -131,8 +130,9 @@ impl Bot{
     }
 
     pub async fn pause_or_resume_market(&self, asset: &String){
+        let asset = asset.trim().to_uppercase();
         
-        if let Some(tx) = self.markets.get(asset){
+        if let Some(tx) = self.markets.get(&asset){
             let tx = tx.clone();
             let cmd = MarketCommand::Pause;
             tokio::spawn(async move{
@@ -146,9 +146,37 @@ impl Bot{
         }
     }
 
-    pub async fn send_cmd(&self, asset: &String, cmd: MarketCommand){
+    pub async fn pause_all(&self){
+       
+        info!("PAUSING ALL MARKETS");
+        for (_asset, tx) in &self.markets{
+            let _ = tx.send(MarketCommand::Pause).await;
+        }
+
+    }
+    pub async fn resume_all(&self){
+        info!("RESUMING ALL MARKETS");
+        for (_asset, tx) in &self.markets{
+            let _ = tx.send(MarketCommand::Resume).await;
+        }
+    }
+    pub async fn close_all(&mut self){
+        info!("CLOSING ALL MARKETS");
+        for (_asset, id) in self.candle_subs.drain(){
+                self.info_client.unsubscribe(id).await;
+            } 
+        self.candle_subs.clear();
+        for (asset, tx) in self.markets.drain(){
+            let _ = tx.send(MarketCommand::Close).await;
+        }
         
-        if let Some(tx) = self.markets.get(asset){
+    }
+
+
+    pub async fn send_cmd(&self, asset: &String, cmd: MarketCommand){
+        let asset = asset.trim().to_uppercase();
+        
+        if let Some(tx) = self.markets.get(&asset){
             let tx = tx.clone();
             tokio::spawn(async move{
                 if let Err(e) =  tx.send(cmd).await{
@@ -174,6 +202,9 @@ impl Bot{
                         ToggleMarket(asset) => {self.pause_or_resume_market(&asset).await;},
                         RemoveMarket(asset) => {self.remove_market(&asset).await;},
                         MarketComm(command) => {self.send_cmd(&command.asset, command.cmd).await;},
+                        ResumeAll =>{self.resume_all().await},
+                        PauseAll => {self.pause_all().await;},
+                        CloseAll => {self.close_all().await;},
                     }
             },
 
@@ -198,14 +229,17 @@ pub enum BotEvent{
     ToggleMarket(String),
     RemoveMarket(String),
     MarketComm(BotToMarket),
+    ResumeAll,
+    PauseAll,
+    CloseAll,
 }
 
 
 
 #[derive(Clone, Debug)]
 pub struct BotToMarket{
-    asset: String,
-    cmd: MarketCommand,
+    pub asset: String,
+    pub cmd: MarketCommand,
 }
 
 

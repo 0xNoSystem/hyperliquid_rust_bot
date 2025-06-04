@@ -61,7 +61,7 @@ async fn main() -> Result<(), Error>{
         strategy: strat,
         lev: 20,
         trade_time: 300,
-        time_frame: TimeFrame::from_str("1m").unwrap_or(TimeFrame::Min1),
+        time_frame: TimeFrame::from_str("5m").unwrap_or(TimeFrame::Min1),
     
     };
 
@@ -112,7 +112,7 @@ async fn main() -> Result<(), Error>{
      let market_add = AddMarketInfo{
         asset: COIN.to_string(), 
         margin_alloc: 0.1,
-        trade_params: trade_params,
+        trade_params: trade_params.clone(),
         config: Some(config),
     };
         let market_add2 = AddMarketInfo{
@@ -121,12 +121,51 @@ async fn main() -> Result<(), Error>{
         trade_params: TradeParams::default(),
         config: None,
     };
-   
+        let market_add3 = AddMarketInfo{
+        asset: "xrp ".to_string(), 
+        margin_alloc: 0.03,
+        trade_params: trade_params,
+        config: None,
+    };
+        let cmd = BotToMarket{
+            asset:"BTC".to_string(),
+            cmd: MarketCommand::UpdateLeverage(40),
+        };
+
+        let cmd2 = BotToMarket{
+            asset: "SOL".to_string(),
+            cmd: MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour4),edit: EditType::Add}])),
+        };
+
+        let cmd3 = BotToMarket{
+            asset: "XRP".to_string(),
+            cmd: MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour4),edit: EditType::Toggle},
+                                                            Entry{id: (Rsi(12), TimeFrame::Min1),edit: EditType::Add},
+                                                        ])
+                                                ),
+        };
    
         let _ = sleep(Duration::from_secs(5)).await;
-        sender.send(BotEvent::AddMarket(market_add));
+        sender.send(BotEvent::AddMarket(market_add.clone()));
         let _ = sleep(Duration::from_secs(5)).await;
         sender.send(BotEvent::AddMarket(market_add2));
+        sender.send(BotEvent::AddMarket(market_add3));
+        //let _ = sleep(Duration::from_secs(20)).await;
+        //sender.send(BotEvent::RemoveMarket("BTC".to_string()));
+        let _ = sleep(Duration::from_secs(5)).await;
+        sender.send(BotEvent::MarketComm(cmd));
+        sender.send(BotEvent::MarketComm(cmd2));
+        let _ = sleep(Duration::from_secs(5)).await;
+        sender.send(BotEvent::MarketComm(cmd3));
+        let _ = sleep(Duration::from_secs(10)).await;
+
+        sender.send(BotEvent::PauseAll);
+        let _ = sleep(Duration::from_secs(10)).await;
+        sender.send(BotEvent::ResumeAll);
+        let _ = sleep(Duration::from_secs(10)).await;
+        sender.send(BotEvent::CloseAll);
+        let _ = sleep(Duration::from_secs(10)).await;
+        sender.send(BotEvent::AddMarket(market_add));
     });
 
 

@@ -328,13 +328,23 @@ impl Executor {
 
                     },
 
-                    TradeCommand::Pause=> {
+                    TradeCommand::Toggle=> {
                         
                         if let Some(trade_info) = self.cancel_trade().await{
                             let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
                         };                        
                         self.toggle_pause();
                         info!("Executor is now {}", if self.is_paused { "paused" } else { "resumed" });
+                },
+
+                    TradeCommand::Pause => {
+                        if let Some(trade_info) = self.cancel_trade().await{
+                            let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
+                        }; 
+                        self.is_paused = true;
+                },
+                    TradeCommand::Resume => {
+                        self.is_paused = false;
                 },
                     
                 TradeCommand::BuildPosition{size, is_long, interval} => {info!("Contacting Bob the builder")},

@@ -81,6 +81,8 @@ pub enum TradeCommand{
     CloseTrade{size: f32},
     BuildPosition {size: f32, is_long: bool, interval: u64},
     CancelTrade,
+    Toggle,
+    Resume,
     Pause,
 }
 
