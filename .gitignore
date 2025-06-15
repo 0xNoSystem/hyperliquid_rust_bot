@@ -2,4 +2,4 @@
 /target
 Cargo.lock
 testnet
-bin/actix-back/.env
+src/bin/actix-back/

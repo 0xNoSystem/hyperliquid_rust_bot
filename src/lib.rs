@@ -21,5 +21,5 @@ pub use executor::Executor;
 pub use trade_setup::{TradeParams, TimeFrame, TradeCommand, TradeInfo, TradeFillInfo};
 
 //expost HL sdk types
-pub use hyperliquid_rust_sdk::BaseUrl;
+pub use hyperliquid_rust_sdk::{BaseUrl, Error};
 use ethers::signers::LocalWallet;
