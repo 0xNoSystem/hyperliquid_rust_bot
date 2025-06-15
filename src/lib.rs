@@ -22,4 +22,4 @@ pub use trade_setup::{TradeParams, TimeFrame, TradeCommand, TradeInfo, TradeFill
 
 //expost HL sdk types
 pub use hyperliquid_rust_sdk::{BaseUrl, Error};
-use ethers::signers::LocalWallet;
+pub use ethers::signers::LocalWallet;
