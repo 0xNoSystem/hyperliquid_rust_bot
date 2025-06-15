@@ -196,6 +196,15 @@ impl Bot{
             });
         }
 }
+
+    pub fn get_markets(&self) -> Vec<&String>{
+        let mut assets = Vec::new();
+         for (asset, _tx) in &self.markets{
+            assets.push(asset);
+        }
+
+        assets
+    }
     
  
     pub async fn start(mut self, app_tx: UnboundedSender<UpdateFrontend>){
