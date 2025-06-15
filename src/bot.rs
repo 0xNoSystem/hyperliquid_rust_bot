@@ -16,7 +16,8 @@ pub struct Bot{
     wallet: Wallet,
     markets: HashMap<String, Sender<MarketCommand>>,
     candle_subs: HashMap<String, u32>,
-    margin: f32,
+    margin_map: HashMap<String, f32>,
+    margin: Margin,
     fees: (f32, f32),
     bot_tx: UnboundedSender<BotEvent>,
     bot_rv: UnboundedReceiver<BotEvent>,
@@ -32,7 +33,7 @@ impl Bot{
     pub async fn new(wallet: Wallet) -> Result<(Self, UnboundedSender<BotEvent>), Error>{
 
         let mut info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
-        let margin = wallet.get_user_margin().await?;
+        let margin_av = wallet.get_user_margin().await?;
         let fees = wallet.get_user_fees().await?;
 
         let (bot_tx, mut bot_rv) = unbounded_channel::<BotEvent>();
@@ -43,7 +44,8 @@ impl Bot{
             wallet,
             markets: HashMap::new(),
             candle_subs: HashMap::new(),
-            margin,
+            margin_map: HashMap::new(),
+            margin: Margin{used: 0.0, free: margin_av},
             fees,
             bot_tx: bot_tx.clone(),
             bot_rv,
@@ -71,12 +73,12 @@ impl Bot{
         
         let meta = get_asset(&self.info_client, asset_str).await?;
         let margin = self.wallet.get_user_margin().await?;
+        let margin_alloc = margin * margin_alloc;
         let (sub_id, mut receiver) = subscribe_candles(&mut self.info_client,
                                                         asset_str,
                                                         trade_params.time_frame.as_str())
                                                         .await?;
 
-        self.candle_subs.insert(asset.clone(), sub_id);
         
         let (market, market_tx) = Market::new(
             self.wallet.wallet.clone(),
@@ -84,20 +86,26 @@ impl Bot{
             self.update_tx.clone(),
             receiver,
             meta,     
-            margin * margin_alloc,
+            margin_alloc,
             self.fees,
             trade_params,
             config,
         ).await?;
 
         self.markets.insert(asset.clone(), market_tx);
+        let ass = asset.clone();
         tokio::spawn(async move {
             if let Err(e) = market.start().await {
-                eprintln!("Market {} exited with error: {:?}", asset, e);
+                eprintln!("Market {} exited with error: {:?}", ass, e);
             }
         });         
 
+            self.candle_subs.insert(asset.clone(), sub_id);
+            self.margin_map.insert(asset, margin_alloc);
+            self.margin.free = margin - margin_alloc;
+            self.margin.used = margin + margin_alloc;
         Ok(())
+
 }
 
 
@@ -117,12 +125,15 @@ impl Bot{
             let cmd = MarketCommand::Close;
             tokio::spawn(async move {
                 if let Err(e) = tx.send(cmd).await{
-                   log::warn!("Failed to send Pause command: {:?}", e); 
+                   log::warn!("Failed to send Close command: {:?}", e); 
                 }
             });
-
+            if let Some(freed_margin) = self.margin_map.remove(&asset){
+                self.margin.free += freed_margin;
+                self.margin.used -= freed_margin;
+            }
         }else{
-            info!("Failed: Pause {} market, it doesn't exist", asset);
+            info!("Failed: Close {} market, it doesn't exist", asset);
         }
 
 
@@ -257,4 +268,20 @@ pub struct AddMarketInfo {
     pub trade_params: TradeParams,
     pub config: Option<Vec<IndexId>>,
 }
+
+
+
+
+#[derive(Clone,Copy,Debug)]
+pub struct Margin{
+    free: f32,
+    used: f32,
+}
+
+
+
+
+
+
+
 

@@ -230,6 +230,7 @@ impl Market{
                         self.margin += trade_info.pnl;
                         self.trade_history.push(trade_info);
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Margin(self.margin)));
+                        //maybe send margin to Bot struct ??
                         let _ = bot_update_tx.send(MarketUpdate::TradeUpdate(trade_info));
                     },
                     MarketCommand::UpdateTimeFrame(tf)=>{
