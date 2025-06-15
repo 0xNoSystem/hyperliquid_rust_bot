@@ -19,3 +19,7 @@ pub use consts::{MAX_HISTORY, MARKETS};
 pub use executor::Executor;
 // pub use backtest::BackTester; 
 pub use trade_setup::{TradeParams, TimeFrame, TradeCommand, TradeInfo, TradeFillInfo};
+
+//expost HL sdk types
+pub use hyperliquid_rust_sdk::BaseUrl;
+use ethers::signers::LocalWallet;
