@@ -223,7 +223,7 @@ impl SignalEngine{
     }
 
     pub fn display_indicators(&mut self, price: f32){
-            println!("\nPrice => {}\n", price);
+            //info!("\nPrice => {}\n", price);
             //let vec = self.get_active_indicators();      
             self.display_values(); 
             //Update 

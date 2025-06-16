@@ -181,7 +181,7 @@ impl Market{
                     let low = candle.data.low.parse::<f32>().ok().unwrap();            
                     let open = candle.data.open.parse::<f32>().ok().unwrap();
                     let price = Price{open,high, low, close};
-                    println!("{:?}", price);
+                    //info!("{:?}", price);
                     let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
                     let _ = bot_price_update.send(MarketUpdate::PriceUpdate((asset_name.clone(), close)));
             }
