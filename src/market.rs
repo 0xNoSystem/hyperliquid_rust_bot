@@ -18,6 +18,7 @@ use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, TradeInfo, TradeF
 use crate::strategy::Strategy;
 use crate::helper::{get_asset, load_candles, subscribe_candles};
 use crate::bot::BotEvent;
+use crate::AssetMargin;
 
 use tokio::{
     sync::mpsc::{channel, Sender, Receiver, UnboundedSender, UnboundedReceiver, unbounded_channel},
@@ -236,7 +237,12 @@ impl Market{
                     MarketCommand::UpdateTimeFrame(tf)=>{
                         self.trade_params.time_frame = tf;
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Tf(tf)));
-
+                    },
+                    
+                    MarketCommand::UpdateMargin(marge) => {
+                        self.margin = marge;
+                        let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Margin(self.margin)));
+                        let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((Arc::from(asset.name.clone()), self.margin)));
                     },
                     MarketCommand::Toggle =>{
                        self.senders.exec_tx.send_async(TradeCommand::Toggle).await;  
@@ -306,6 +312,7 @@ pub enum MarketCommand{
     EditIndicators(Vec<Entry>),
     UpdateTimeFrame(TimeFrame),
     ReceiveTrade(TradeInfo),
+    UpdateMargin(f32),
     Toggle,
     Resume,
     Pause,
@@ -331,6 +338,7 @@ struct MarketReceivers {
 pub enum MarketUpdate{
     PriceUpdate(AssetPrice),
     TradeUpdate(TradeInfo),
+    MarginUpdate(AssetMargin),
 }
 
 

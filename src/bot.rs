@@ -4,20 +4,21 @@ use ethers::signers::LocalWallet;
 use hyperliquid_rust_sdk::{AssetMeta,BaseUrl, ExchangeClient,Error, InfoClient, Message};
 use crate::{Market, MarketCommand, MarketUpdate,AssetPrice, MARKETS, TradeParams,TradeInfo, TradeFillInfo, Wallet, IndexId, Entry};
 use crate::helper::{get_asset, subscribe_candles};
-
-
 use tokio::{
     sync::mpsc::{channel, Sender, Receiver, UnboundedSender, UnboundedReceiver, unbounded_channel},
 };
+use tokio::time::{sleep, Duration};
+
+use crate::margin::{MarginAllocation, MarginBook, AssetMargin};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 
 pub struct Bot{
     info_client: InfoClient,
-    wallet: Wallet,
+    wallet: Arc<Wallet>,
     markets: HashMap<String, Sender<MarketCommand>>,
     candle_subs: HashMap<String, u32>,
-    margin_map: HashMap<String, f32>,
-    margin: Margin,
     fees: (f32, f32),
     bot_tx: UnboundedSender<BotEvent>,
     bot_rv: UnboundedReceiver<BotEvent>,
@@ -29,7 +30,6 @@ pub struct Bot{
 //TODO: Manage margin accross market, and account
 
 impl Bot{
-
     pub async fn new(wallet: Wallet) -> Result<(Self, UnboundedSender<BotEvent>), Error>{
 
         let mut info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
@@ -41,11 +41,11 @@ impl Bot{
 
         Ok((Self{
             info_client, 
-            wallet,
+            wallet: wallet.into(),
             markets: HashMap::new(),
             candle_subs: HashMap::new(),
-            margin_map: HashMap::new(),
-            margin: Margin{used: 0.0, free: margin_av},
+
+
             fees,
             bot_tx: bot_tx.clone(),
             bot_rv,
@@ -53,7 +53,6 @@ impl Bot{
             update_tx,
         }, bot_tx))
     }
-
 
 
     pub async fn add_market(&mut self, info: AddMarketInfo) -> Result<(), Error>{
@@ -66,11 +65,12 @@ impl Bot{
                 } = info;
         let asset = asset.trim().to_uppercase();
         let asset_str = asset.as_str();
-        let margin_alloc = margin_alloc.min(0.99);
+
         if !MARKETS.contains(&asset_str){
             return Err(Error::AssetNotFound);
         }
         
+        let margin_alloc = 0.1;
         let meta = get_asset(&self.info_client, asset_str).await?;
         let margin = self.wallet.get_user_margin().await?;
         let margin_alloc = margin * margin_alloc;
@@ -100,10 +100,6 @@ impl Bot{
             }
         });         
 
-            self.candle_subs.insert(asset.clone(), sub_id);
-            self.margin_map.insert(asset, margin_alloc);
-            self.margin.free = margin - margin_alloc;
-            self.margin.used = margin + margin_alloc;
         Ok(())
 
 }
@@ -128,10 +124,7 @@ impl Bot{
                    log::warn!("Failed to send Close command: {:?}", e); 
                 }
             });
-            if let Some(freed_margin) = self.margin_map.remove(&asset){
-                self.margin.free += freed_margin;
-                self.margin.used -= freed_margin;
-            }
+            
         }else{
             info!("Failed: Close {} market, it doesn't exist", asset);
         }
@@ -211,7 +204,39 @@ impl Bot{
         use BotEvent::*; 
         use MarketUpdate::*;
         use UpdateFrontend::*;
+        
+        let user = self.wallet.clone();
+        let mut margin_book= MarginBook::new(user);
+        let margin_arc = Arc::new(Mutex::new(margin_book)); 
+        let margin_sync = margin_arc.clone();
+        let margin_user_edit = margin_arc.clone();
+        let margin_market_edit = margin_arc.clone();
+        
+        let app_tx_margin = app_tx.clone();
 
+        tokio::spawn(async move{
+           loop{
+                let result = {
+                let mut book = margin_sync.lock().await;
+                book.sync().await
+                };
+
+            match result {
+                Ok(_) => {
+                    let total = {
+                        let book = margin_sync.lock().await;
+                        book.total_on_chain
+                    };
+                    let _ = app_tx_margin.send(UpdateTotalMargin(total));
+                }
+                Err(e) => {
+                    let _ = app_tx_margin.send(UserError(e));
+                    continue;
+                }
+                }
+        } 
+    });
+        
         loop{
             tokio::select!(
 
@@ -222,6 +247,16 @@ impl Bot{
                         ToggleMarket(asset) => {self.pause_or_resume_market(&asset).await;},
                         RemoveMarket(asset) => {self.remove_market(&asset).await;},
                         MarketComm(command) => {self.send_cmd(&command.asset, command.cmd).await;},
+                        ManualUpdateMargin(asset_margin) => {
+                            let result = {
+                                let mut book = margin_user_edit.lock().await;
+                                book.update_asset(asset_margin.clone())
+                            };
+                            if let Ok(new_margin) = result{
+                                let cmd = MarketCommand::UpdateMargin(new_margin);
+                                self.send_cmd(&asset_margin.0.to_string(), cmd).await;
+                            }
+                        },
                         ResumeAll =>{self.resume_all().await},
                         PauseAll => {self.pause_all().await;},
                         CloseAll => {self.close_all().await;},
@@ -232,9 +267,24 @@ impl Bot{
                     match market_update{
                         PriceUpdate(asset_price) => {app_tx.send(UpdatePrice(asset_price));},
                         TradeUpdate(trade_info) => {app_tx.send(NewTradeInfo(trade_info));},
+                        MarginUpdate(asset_margin) => {
+                            let result = {
+                                let mut book = margin_market_edit.lock().await; 
+                                book.update_asset(asset_margin.clone())
+                            };
+
+                            match result {
+                                Ok(_) => {
+                                    let _ = app_tx.send(UpdateMarketMargin(asset_margin));
+                                }
+                                Err(e) => {
+                                    let _ = app_tx.send(UserError(e));
+                                }
+                                }
+                            },
+                    }
                 }
-            }
-        )}
+            )}
 
     }   
 
@@ -249,6 +299,7 @@ pub enum BotEvent{
     ToggleMarket(String),
     RemoveMarket(String),
     MarketComm(BotToMarket),
+    ManualUpdateMargin(AssetMargin),
     ResumeAll,
     PauseAll,
     CloseAll,
@@ -267,13 +318,16 @@ pub struct BotToMarket{
 pub enum UpdateFrontend{
     UpdatePrice(AssetPrice),
     NewTradeInfo(TradeInfo),
+    UpdateTotalMargin(f32),
+    UpdateMarketMargin(AssetMargin),
+    UserError(Error),
 }
 
 
 #[derive(Clone, Debug)]
 pub struct AddMarketInfo {
     pub asset: String,
-    pub margin_alloc: f32,
+    pub margin_alloc: MarginAllocation,
     pub trade_params: TradeParams,
     pub config: Option<Vec<IndexId>>,
 }
@@ -281,11 +335,9 @@ pub struct AddMarketInfo {
 
 
 
-#[derive(Clone,Copy,Debug)]
-pub struct Margin{
-    free: f32,
-    used: f32,
-}
+
+
+
 
 
 
