@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+
 use ethers::signers::LocalWallet;
 use flume::Receiver;
 use log::info;
@@ -19,7 +20,6 @@ use crate::market::MarketCommand;
 
 
 pub struct Executor {
-    wallet: LocalWallet,
     trade_rv: Receiver<TradeCommand>,
     market_tx: Sender<MarketCommand>,
     asset: String,
@@ -41,9 +41,8 @@ impl Executor {
         market_tx: Sender<MarketCommand>,
     ) -> Result<Executor, Error>{
         
-        let exchange_client = Arc::new(ExchangeClient::new(None, wallet.clone(), Some(BaseUrl::Mainnet), None, None).await?);
+        let exchange_client = Arc::new(ExchangeClient::new(None, wallet, Some(BaseUrl::Mainnet), None, None).await?);
         Ok(Executor{
-            wallet,
             trade_rv,
             market_tx,
             asset,
@@ -221,7 +220,7 @@ impl Executor {
     }
 
     async fn is_active(&self) -> bool{
-        let mut guard = self.open_position.lock().await;
+        let guard = self.open_position.lock().await;
         guard.is_some()
     }
 

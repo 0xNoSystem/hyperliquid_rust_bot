@@ -10,7 +10,7 @@ pub mod signal;
 pub mod strategy;
 pub mod trade_setup;
 pub mod bot;
-pub(crate) mod margin;
+pub mod margin;
 
 pub use bot::Bot;
 pub use wallet::Wallet;

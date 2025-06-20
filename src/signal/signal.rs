@@ -1,21 +1,17 @@
 use std::collections::HashMap;
 use log::info;
 
-use kwant::indicators::{Rsi, Atr, Price, Indicator, Ema, EmaCross, Sma, Adx, Value};
+use kwant::indicators::{Price, Indicator, Value};
 
 use crate::trade_setup::{TimeFrame,TradeParams, TradeCommand};
-use crate::strategy::{Strategy, CustomStrategy, Style, Stance};
-use crate::MAX_HISTORY;
+use crate::strategy::Strategy;
 
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
-use tokio::time::{sleep, Duration};
-use flume::{Sender, TrySendError, bounded};
+use flume::{Sender, bounded};
 
 use super::types::{
     Tracker,
-    Handler,
     IndexId,
-    IndicatorKind,
     ExecParam,
     ExecParams,
     TimeFrameData,
@@ -111,7 +107,7 @@ impl SignalEngine{
 
     pub fn get_active_values(&self) -> Vec<Value>{
         let mut values = Vec::new();
-            for (tf, tracker) in &self.trackers{
+            for (_tf, tracker) in &self.trackers{
                 values.extend(tracker.get_active_values()); 
             }
         values
@@ -121,7 +117,7 @@ impl SignalEngine{
         for (tf, tracker) in &self.trackers{
             for (kind, handler) in &tracker.indicators{
                 if handler.is_active{
-                    //println!("\nKind: {:?} TF: {}\nValue: {:?}\n", kind, tf.as_str(), handler.get_value());
+                    info!("\nKind: {:?} TF: {}\nValue: {:?}\n", kind, tf.as_str(), handler.get_value());
                 }
             }
         }
@@ -144,8 +140,7 @@ impl SignalEngine{
 
 
     fn get_signal(&self, price: f32) -> Option<TradeCommand>{
-        use Value::*;
-        let risk_pct = 0.02;
+        //use Value::*;
         let values = self.get_active_values();
        
         match self.strategy{
@@ -169,7 +164,7 @@ impl SignalEngine{
                         }
                     self.display_indicators(price.close);
                     if let Some(trade) = self.get_signal(price.close){
-                        self.trade_tx.try_send(trade);
+                        let _ = self.trade_tx.try_send(trade);
                     }
                 }, 
 
@@ -223,7 +218,7 @@ impl SignalEngine{
     }
 
     pub fn display_indicators(&mut self, price: f32){
-            //info!("\nPrice => {}\n", price);
+            info!("\nPrice => {}\n", price);
             //let vec = self.get_active_indicators();      
             self.display_values(); 
             //Update 

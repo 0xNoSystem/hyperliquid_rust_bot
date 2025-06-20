@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use crate::TradeCommand;
-use crate::signal::{IndicatorKind};
+//use crate::signal::IndicatorKind;
 use kwant::indicators::Value;
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize)]

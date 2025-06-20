@@ -1,4 +1,4 @@
-use std::hash::{Hash, BuildHasherDefault};
+use std::hash::BuildHasherDefault;
 use rustc_hash::FxHasher;
 use hyperliquid_rust_sdk::{Error};
 use std::sync::Arc;
@@ -12,11 +12,11 @@ pub enum MarginAllocation{
     Amount(f32),
 }
 
-pub(crate) type MarginMap = HashMap<String, f32, BuildHasherDefault<FxHasher>>;
+pub type MarginMap = HashMap<String, f32, BuildHasherDefault<FxHasher>>;
 
-pub(crate) struct MarginBook{
+pub struct MarginBook{
     user: Arc<Wallet>,
-    pub map: MarginMap,
+    map: MarginMap,
     pub total_on_chain: f32,
 }
 
@@ -95,6 +95,9 @@ impl MarginBook{
         self.total_on_chain - self.used()
     }
 
+    pub fn reset(&mut self) {
+        self.map.clear();
+    }
 
 
 

@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use arraydeque::{ArrayDeque, behavior::Wrapping};
 use kwant::indicators::{Rsi, Atr, StochasticRsi, Price, Indicator, Ema, EmaCross, Sma, SmaRsi, Adx, Value};
@@ -161,7 +160,7 @@ impl Tracker{
 
     fn update_indicators(&mut self,price: Price, after_close: bool){
 
-        for (kind, handler) in &mut self.indicators{
+        for (_kind, handler) in &mut self.indicators{
             handler.update(price, after_close);
         }
     }

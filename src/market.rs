@@ -1,3 +1,4 @@
+#![allow(unused_variables)]
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use log::info;
@@ -9,20 +10,18 @@ use hyperliquid_rust_sdk::{AssetMeta,Error, BaseUrl, ExchangeClient, InfoClient,
 use kwant::indicators::Price;
 
 use crate::MAX_HISTORY;
-use crate::MARKETS;
+//use crate::MARKETS;
 
-use crate::wallet::Wallet;
+//use crate::wallet::Wallet;
 use crate::executor::Executor;
 use crate::signal::{SignalEngine, ExecParam, EngineCommand, TimeFrameData, Entry, EditType, IndexId};
-use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, TradeInfo, TradeFillInfo};
+use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, TradeInfo};
 use crate::strategy::Strategy;
-use crate::helper::{get_asset, load_candles, subscribe_candles};
-use crate::bot::BotEvent;
+use crate::helper::load_candles;
 use crate::AssetMargin;
 
 use tokio::{
     sync::mpsc::{channel, Sender, Receiver, UnboundedSender, UnboundedReceiver, unbounded_channel},
-    time::{sleep, Duration},
 };
 
 use flume::{bounded, Sender as FlumeSender};
@@ -59,7 +58,7 @@ impl Market{
                     asset: AssetMeta,
                     margin: f32,
                     fees: (f32, f32),
-                    mut trade_params: TradeParams,
+                    trade_params: TradeParams,
                     config: Option<Vec<IndexId>>
     ) -> Result<(Self, Sender<MarketCommand>), Error>{
 
@@ -159,7 +158,7 @@ impl Market{
         self.init().await?;
 
         let mut signal_engine = self.signal_engine;
-        let mut executor = self.executor;
+        let executor = self.executor;
         
         //Start engine 
         let engine_handle = tokio::spawn(async move {
@@ -170,7 +169,7 @@ impl Market{
             executor.start().await;
         });
         //Subscribe candles
-                //Candle Stream
+        //Candle Stream
         let engine_price_tx = self.senders.engine_tx.clone();
         let bot_price_update = self.senders.bot_tx.clone();
 
@@ -245,15 +244,15 @@ impl Market{
                         let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((Arc::from(asset.name.clone()), self.margin)));
                     },
                     MarketCommand::Toggle =>{
-                       self.senders.exec_tx.send_async(TradeCommand::Toggle).await;  
+                       let _ = self.senders.exec_tx.send_async(TradeCommand::Toggle).await;  
                     },
                 
                     MarketCommand::Pause =>{
-                       self.senders.exec_tx.send_async(TradeCommand::Pause).await;  
+                       let _ = self.senders.exec_tx.send_async(TradeCommand::Pause).await;  
                     },
                     
                     MarketCommand::Resume => {
-                        self.senders.exec_tx.send_async(TradeCommand::Resume).await;
+                        let _ = self.senders.exec_tx.send_async(TradeCommand::Resume).await;
                     },
                     
 

@@ -1,11 +1,9 @@
 use log::info;
-use hyperliquid_rust_sdk::{Error,AssetMeta, BaseUrl,ExchangeClient, InfoClient, Message, Subscription, UserFillsResponse};
+use hyperliquid_rust_sdk::{Error,AssetMeta, InfoClient, Message, Subscription};
 use tokio::sync::mpsc::{UnboundedReceiver};
-use tokio::sync::watch::{Sender, Receiver};
 use std::time::{SystemTime, UNIX_EPOCH};
 use kwant::indicators::{Price};
 use ethers::types::H160;
-use serde::Deserialize;
 use crate::TimeFrame;
 use log::warn;
 
@@ -16,7 +14,6 @@ pub async fn subscribe_candles(
 ) -> Result<(u32,UnboundedReceiver<Message>), Error> {
     
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
 
     let subscription_id = info_client

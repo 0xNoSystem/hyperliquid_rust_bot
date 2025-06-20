@@ -1,11 +1,10 @@
 use log::info;
 use std::collections::HashMap;
-use ethers::signers::LocalWallet;
-use hyperliquid_rust_sdk::{AssetMeta,BaseUrl, ExchangeClient,Error, InfoClient, Message};
-use crate::{Market, MarketCommand, MarketUpdate,AssetPrice, MARKETS, TradeParams,TradeInfo, TradeFillInfo, Wallet, IndexId, Entry};
+use hyperliquid_rust_sdk::{Error, InfoClient};
+use crate::{Market, MarketCommand, MarketUpdate,AssetPrice, MARKETS, TradeParams,TradeInfo, Wallet, IndexId};
 use crate::helper::{get_asset, subscribe_candles};
 use tokio::{
-    sync::mpsc::{channel, Sender, Receiver, UnboundedSender, UnboundedReceiver, unbounded_channel},
+    sync::mpsc::{Sender, UnboundedSender, UnboundedReceiver, unbounded_channel},
 };
 use tokio::time::{sleep, Duration};
 
@@ -27,13 +26,11 @@ pub struct Bot{
 }
 
 
-//TODO: Manage margin accross market, and account
 
 impl Bot{
     pub async fn new(wallet: Wallet) -> Result<(Self, UnboundedSender<BotEvent>), Error>{
 
         let mut info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
-        let margin_av = wallet.get_user_margin().await?;
         let fees = wallet.get_user_fees().await?;
 
         let (bot_tx, mut bot_rv) = unbounded_channel::<BotEvent>();
@@ -44,8 +41,6 @@ impl Bot{
             wallet: wallet.into(),
             markets: HashMap::new(),
             candle_subs: HashMap::new(),
-
-
             fees,
             bot_tx: bot_tx.clone(),
             bot_rv,
@@ -93,6 +88,7 @@ impl Bot{
         ).await?;
 
         self.markets.insert(asset.clone(), market_tx);
+        self.candle_subs.insert(asset.clone(), sub_id);
 
         let cancel_margin = margin_book.clone();
         tokio::spawn(async move {
@@ -112,7 +108,7 @@ impl Bot{
         let asset = asset.trim().to_uppercase();
       
         if let Some(sub_id) = self.candle_subs.remove(&asset){
-            self.info_client.unsubscribe(sub_id).await?;
+            let _ = self.info_client.unsubscribe(sub_id).await?;
             info!("Removed {} market successfully", asset);
         }else{
             info!("Couldn't remove {} market, it doesn't exist", asset);
@@ -176,10 +172,10 @@ impl Bot{
     pub async fn close_all(&mut self){
         info!("CLOSING ALL MARKETS");
         for (_asset, id) in self.candle_subs.drain(){
-                self.info_client.unsubscribe(id).await;
+                let _ = self.info_client.unsubscribe(id).await;
             } 
         self.candle_subs.clear();
-        for (asset, tx) in self.markets.drain(){
+        for (_asset, tx) in self.markets.drain(){
             let _ = tx.send(MarketCommand::Close).await;
         }
         
@@ -215,7 +211,7 @@ impl Bot{
         use UpdateFrontend::*;
         
         let user = self.wallet.clone();
-        let mut margin_book= MarginBook::new(user);
+        let margin_book= MarginBook::new(user);
         let margin_arc = Arc::new(Mutex::new(margin_book)); 
         let margin_sync = margin_arc.clone();
         let margin_user_edit = margin_arc.clone();
@@ -223,7 +219,7 @@ impl Bot{
         
         let app_tx_margin = app_tx.clone();
 
-        //keep marginbook in sync with DEX
+        //keep marginbook in sync with DEX 
         tokio::spawn(async move{
            loop{
                 let result = {
@@ -255,9 +251,9 @@ impl Bot{
                 Some(event) = self.bot_rv.recv() => {
             
                     match event{
-                        AddMarket(add_market_info) => {self.add_market(add_market_info, &margin_user_edit).await;},
+                        AddMarket(add_market_info) => {let _ = self.add_market(add_market_info, &margin_user_edit).await;},
                         ToggleMarket(asset) => {self.pause_or_resume_market(&asset).await;},
-                        RemoveMarket(asset) => {self.remove_market(&asset, &margin_user_edit).await;},
+                        RemoveMarket(asset) => {let _ = self.remove_market(&asset, &margin_user_edit).await;},
                         MarketComm(command) => {self.send_cmd(&command.asset, command.cmd).await;},
                         ManualUpdateMargin(asset_margin) => {
                             let result = {
@@ -271,14 +267,18 @@ impl Bot{
                         },
                         ResumeAll =>{self.resume_all().await},
                         PauseAll => {self.pause_all().await;},
-                        CloseAll => {self.close_all().await;},
+                        CloseAll => {
+                            self.close_all().await;
+                            let mut book = margin_user_edit.lock().await;
+                            book.reset();
+                        },
                     }
             },
 
                 Some(market_update) = self.update_rv.recv() => {
                     match market_update{
-                        PriceUpdate(asset_price) => {app_tx.send(UpdatePrice(asset_price));},
-                        TradeUpdate(trade_info) => {app_tx.send(NewTradeInfo(trade_info));},
+                        PriceUpdate(asset_price) => {let _ = app_tx.send(UpdatePrice(asset_price));},
+                        TradeUpdate(trade_info) => {let _ = app_tx.send(NewTradeInfo(trade_info));},
                         MarginUpdate(asset_margin) => {
                             let result = {
                                 let mut book = margin_market_edit.lock().await; 
