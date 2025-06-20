@@ -55,7 +55,7 @@ impl Bot{
     }
 
 
-    pub async fn add_market(&mut self, info: AddMarketInfo) -> Result<(), Error>{
+    pub async fn add_market(&mut self, info: AddMarketInfo, margin_book: &Arc<Mutex<MarginBook>>) -> Result<(), Error>{
        
         let AddMarketInfo {
             asset,
@@ -69,11 +69,11 @@ impl Bot{
         if !MARKETS.contains(&asset_str){
             return Err(Error::AssetNotFound);
         }
+
+        let mut book = margin_book.lock().await;
+        let margin = book.allocate(asset.clone(), margin_alloc).await?;
         
-        let margin_alloc = 0.1;
         let meta = get_asset(&self.info_client, asset_str).await?;
-        let margin = self.wallet.get_user_margin().await?;
-        let margin_alloc = margin * margin_alloc;
         let (sub_id, mut receiver) = subscribe_candles(&mut self.info_client,
                                                         asset_str,
                                                         trade_params.time_frame.as_str())
@@ -86,17 +86,20 @@ impl Bot{
             self.update_tx.clone(),
             receiver,
             meta,     
-            margin_alloc,
+            margin,
             self.fees,
             trade_params,
             config,
         ).await?;
 
         self.markets.insert(asset.clone(), market_tx);
-        let ass = asset.clone();
+
+        let cancel_margin = margin_book.clone();
         tokio::spawn(async move {
             if let Err(e) = market.start().await {
-                eprintln!("Market {} exited with error: {:?}", ass, e);
+                eprintln!("Market {} exited with error: {:?}", &asset, e);
+                let mut book = cancel_margin.lock().await;
+                book.remove(&asset);
             }
         });         
 
@@ -105,7 +108,7 @@ impl Bot{
 }
 
 
-    pub async fn remove_market(&mut self, asset: &String) -> Result<(), Error>{
+    pub async fn remove_market(&mut self, asset: &String, margin_book: &Arc<Mutex<MarginBook>>) -> Result<(), Error>{
         let asset = asset.trim().to_uppercase();
       
         if let Some(sub_id) = self.candle_subs.remove(&asset){
@@ -119,12 +122,18 @@ impl Bot{
         if let Some(tx) = self.markets.remove(&asset){
             let tx = tx.clone();
             let cmd = MarketCommand::Close;
-            tokio::spawn(async move {
+            let close = tokio::spawn(async move {
                 if let Err(e) = tx.send(cmd).await{
-                   log::warn!("Failed to send Close command: {:?}", e); 
+                    log::warn!("Failed to send Close command: {:?}", e); 
+                    return false;
                 }
-            });
+                true
+            }).await.unwrap();
             
+            if close{
+                let mut book = margin_book.lock().await;
+                book.remove(&asset);
+            }
         }else{
             info!("Failed: Close {} market, it doesn't exist", asset);
         }
@@ -214,6 +223,7 @@ impl Bot{
         
         let app_tx_margin = app_tx.clone();
 
+        //keep marginbook in sync with DEX
         tokio::spawn(async move{
            loop{
                 let result = {
@@ -230,10 +240,12 @@ impl Bot{
                     let _ = app_tx_margin.send(UpdateTotalMargin(total));
                 }
                 Err(e) => {
+                    log::warn!("Failed to fetch User Margin");
                     let _ = app_tx_margin.send(UserError(e));
                     continue;
                 }
-                }
+            }
+                let _ = sleep(Duration::from_millis(500)).await;
         } 
     });
         
@@ -243,14 +255,14 @@ impl Bot{
                 Some(event) = self.bot_rv.recv() => {
             
                     match event{
-                        AddMarket(add_market_info) => {self.add_market(add_market_info).await;},
+                        AddMarket(add_market_info) => {self.add_market(add_market_info, &margin_user_edit).await;},
                         ToggleMarket(asset) => {self.pause_or_resume_market(&asset).await;},
-                        RemoveMarket(asset) => {self.remove_market(&asset).await;},
+                        RemoveMarket(asset) => {self.remove_market(&asset, &margin_user_edit).await;},
                         MarketComm(command) => {self.send_cmd(&command.asset, command.cmd).await;},
                         ManualUpdateMargin(asset_margin) => {
                             let result = {
                                 let mut book = margin_user_edit.lock().await;
-                                book.update_asset(asset_margin.clone())
+                                book.update_asset(asset_margin.clone()).await
                             };
                             if let Ok(new_margin) = result{
                                 let cmd = MarketCommand::UpdateMargin(new_margin);
@@ -270,7 +282,7 @@ impl Bot{
                         MarginUpdate(asset_margin) => {
                             let result = {
                                 let mut book = margin_market_edit.lock().await; 
-                                book.update_asset(asset_margin.clone())
+                                book.update_asset(asset_margin.clone()).await
                             };
 
                             match result {

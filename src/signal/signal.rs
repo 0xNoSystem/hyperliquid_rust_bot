@@ -121,7 +121,7 @@ impl SignalEngine{
         for (tf, tracker) in &self.trackers{
             for (kind, handler) in &tracker.indicators{
                 if handler.is_active{
-                    println!("\nKind: {:?} TF: {}\nValue: {:?}\n", kind, tf.as_str(), handler.get_value());
+                    //println!("\nKind: {:?} TF: {}\nValue: {:?}\n", kind, tf.as_str(), handler.get_value());
                 }
             }
         }

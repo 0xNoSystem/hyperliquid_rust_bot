@@ -25,7 +25,7 @@ use tokio::{
 };
 
 use hyperliquid_rust_bot::{
-    Wallet, Market,MarketCommand, Executor, SignalEngine, IndexId, IndicatorKind, EditType, Entry, Bot
+    Wallet, Market,MarketCommand, Executor, SignalEngine, IndexId, IndicatorKind, EditType, Entry, Bot, MarginAllocation
 };
 use hyperliquid_rust_bot::bot::{BotEvent, UpdateFrontend, AddMarketInfo, BotToMarket};
 use hyperliquid_rust_bot::trade_setup::{TimeFrame, TradeInfo, TradeParams};
@@ -111,19 +111,19 @@ async fn main() -> Result<(), Error>{
     tokio::spawn(async move {
      let market_add = AddMarketInfo{
         asset: COIN.to_string(), 
-        margin_alloc: 0.1,
+        margin_alloc: MarginAllocation::Alloc(0.1),
         trade_params: trade_params.clone(),
         config: Some(config),
     };
         let market_add2 = AddMarketInfo{
         asset: "SOL".to_string(), 
-        margin_alloc: 0.1,
+        margin_alloc: MarginAllocation::Alloc(0.1),
         trade_params: TradeParams::default(),
         config: None,
     };
         let market_add3 = AddMarketInfo{
         asset: "xrp ".to_string(), 
-        margin_alloc: 0.03,
+        margin_alloc: MarginAllocation::Amount(50.0),
         trade_params: trade_params,
         config: None,
     };

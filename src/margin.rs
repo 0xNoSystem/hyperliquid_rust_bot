@@ -37,8 +37,9 @@ impl MarginBook{
     }
 
 
-    pub fn update_asset(&mut self, update: AssetMargin) -> Result<f32, Error>{
+    pub async fn update_asset(&mut self, update: AssetMargin) -> Result<f32, Error>{
         let (asset, requested_margin) = update;
+        self.sync().await?;
         let free = self.free();
          
         if requested_margin > free{
@@ -49,32 +50,41 @@ impl MarginBook{
         Ok(requested_margin)
     }
 
-    pub async fn allocate(&mut self, asset: String, alloc: MarginAllocation) -> Result<(), Error>{
+    pub async fn allocate(&mut self, asset: String, alloc: MarginAllocation) -> Result<f32, Error>{
         self.sync().await?;
         let free = self.free();
 
+
         match alloc{
             MarginAllocation::Alloc(ptc)=>{
+                if ptc <= 0.0{
+                    return Err(Error::InvalidMarginAmount);
+                }
                 let requested_margin = self.total_on_chain * ptc;
                 if requested_margin > free{
+                    log::warn!("Error::InsufficientFreeMargin({})", free);
                     return Err(Error::InsufficientFreeMargin(free));
                 }
                 self.map.insert(asset, requested_margin);
+                return Ok(requested_margin);
             },
 
             MarginAllocation::Amount(amount)=>{
+                 if amount <= 0.0{
+                    return Err(Error::InvalidMarginAmount);
+                }
                 if amount > free{
+                    log::warn!("Error::InsufficientFreeMargin({})", free);
                     return Err(Error::InsufficientFreeMargin(free));
                 }
                 self.map.insert(asset, amount);
+                return Ok(amount);
             },
         }
-
-        Ok(())
     } 
 
-    pub fn remove(&mut self, asset: String) {
-        self.map.remove(&asset);
+    pub fn remove(&mut self, asset: &String) {
+        self.map.remove(asset);
     }
 
     pub fn used(&self) -> f32{
