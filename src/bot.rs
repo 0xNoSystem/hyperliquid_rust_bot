@@ -172,7 +172,7 @@ impl Bot{
     pub async fn close_all(&mut self){
         info!("CLOSING ALL MARKETS");
         for (_asset, id) in self.candle_subs.drain(){
-                let _ = self.info_client.unsubscribe(id).await;
+                self.info_client.unsubscribe(id).await;
             } 
         self.candle_subs.clear();
         for (_asset, tx) in self.markets.drain(){
@@ -211,7 +211,7 @@ impl Bot{
         use UpdateFrontend::*;
         
         let user = self.wallet.clone();
-        let margin_book= MarginBook::new(user);
+        let mut margin_book= MarginBook::new(user);
         let margin_arc = Arc::new(Mutex::new(margin_book)); 
         let margin_sync = margin_arc.clone();
         let margin_user_edit = margin_arc.clone();

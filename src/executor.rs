@@ -355,3 +355,16 @@ impl Executor {
 
 }
 
+
+/*
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum UserData {
+    Fills(Vec<TradeInfo>),
+    Funding(UserFunding),
+    Liquidation(Liquidation),
+    NonUserCancel(Vec<NonUserCancel>),
+}
+
+*/

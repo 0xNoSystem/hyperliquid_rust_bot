@@ -1,6 +1,6 @@
 use ethers::signers::LocalWallet;
 use crate::helper::{address};
-use hyperliquid_rust_sdk::{Error,InfoClient, UserFillsResponse, BaseUrl};
+use hyperliquid_rust_sdk::{Error,InfoClient, UserFillsResponse, BaseUrl, AssetPosition};
 
 pub struct Wallet{
     info_client: InfoClient,
@@ -47,10 +47,17 @@ impl Wallet{
         let info = self.info_client.user_state(user)
         .await?;
 
-        let res =  info.cross_margin_summary.account_value
+        let res =  info.margin_summary.account_value
         .parse::<f32>()
         .map_err(|e| Error::GenericParse(format!("FATAL: failed to parse account balance to f32, {}",e)))?;
-        Ok(res) 
+
+        let upnl: f32 = info.asset_positions.into_iter().filter_map(|p|{
+            let u = p.position.unrealized_pnl.parse::<f32>().ok()?;
+            let f =  p.position.cum_funding.since_open.parse::<f32>().ok()?;
+            Some(u - f)
+        }).sum();
+
+        Ok(res - upnl) 
 }
 
 
