@@ -2,7 +2,7 @@ use std::fmt;
 
 use log::info;
 use serde::Deserialize;
-use hyperliquid_rust_sdk::{ExchangeClient, ExchangeResponseStatus};
+use hyperliquid_rust_sdk::{ExchangeClient, ExchangeResponseStatus, Error};
 //use kwant::indicators::Price;
 
 use crate::strategy::{Strategy, CustomStrategy};
@@ -21,24 +21,23 @@ pub struct TradeParams {
 
 impl TradeParams{
 
-    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient, asset: &str) -> Option<u32>{   
+    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient, asset: &str) -> Result<u32, Error>{   
+            if self.lev == lev{
+                return Err(Error::Custom(format!("Leverage is unchanged")));
+            }
             
             let response = client
             .update_leverage(lev, asset, false, None)
-            .await.unwrap();
+            .await?;
 
             info!("Update leverage response: {response:?}");
             match response{
                 ExchangeResponseStatus::Ok(_) => {
-                    if self.lev == lev{
-                        return None;
-                    }else{
-                        self.lev = lev;
-                        return Some(lev);
-                    }
+                    self.lev = lev;
+                    return Ok(lev);
             },
-                ExchangeResponseStatus::Err(_)=>{
-                    return None;
+                ExchangeResponseStatus::Err(e)=>{
+                    return Err(Error::Custom(e));
             },
         }
     }

@@ -91,6 +91,7 @@ pub async fn load_candles(info_client: &InfoClient,coin: &str,tf: TimeFrame, can
 
 pub fn address(address: &String) -> H160 {
     address.parse().unwrap()
+
 }
 
 

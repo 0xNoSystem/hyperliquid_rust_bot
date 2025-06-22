@@ -113,7 +113,7 @@ impl Market{
         //check if lev > max_lev
         let lev = self.trade_params.lev.min(self.asset.max_leverage);
         let upd = self.trade_params.update_lev(lev ,&self.exchange_client, self.asset.name.as_str()).await;
-        if let Some(lev) = upd{
+        if let Ok(lev) = upd{
             let engine_tx = self.senders.engine_tx.clone();
             let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
         };
@@ -196,7 +196,7 @@ impl Market{
                    MarketCommand::UpdateLeverage(lev)=>{
                         let lev = lev.min(asset.max_leverage);
                         let upd = self.trade_params.update_lev(lev ,&self.exchange_client, asset.name.as_str()).await;
-                        if let Some(lev) = upd{
+                        if let Ok(lev) = upd{
                             let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
                     };
                 },
