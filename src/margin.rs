@@ -8,16 +8,16 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug, Copy)]
 pub enum MarginAllocation{
-    Alloc(f32),
-    Amount(f32),
+    Alloc(f64),
+    Amount(f64),
 }
 
-pub type MarginMap = HashMap<String, f32, BuildHasherDefault<FxHasher>>;
+pub type MarginMap = HashMap<String, f64, BuildHasherDefault<FxHasher>>;
 
 pub struct MarginBook{
     user: Arc<Wallet>,
     map: MarginMap,
-    pub total_on_chain: f32,
+    pub total_on_chain: f64,
 }
 
 
@@ -37,7 +37,7 @@ impl MarginBook{
     }
 
 
-    pub async fn update_asset(&mut self, update: AssetMargin) -> Result<f32, Error>{
+    pub async fn update_asset(&mut self, update: AssetMargin) -> Result<f64, Error>{
         let (asset, requested_margin) = update;
         self.sync().await?;
         let free = self.free();
@@ -50,7 +50,7 @@ impl MarginBook{
         Ok(requested_margin)
     }
 
-    pub async fn allocate(&mut self, asset: String, alloc: MarginAllocation) -> Result<f32, Error>{
+    pub async fn allocate(&mut self, asset: String, alloc: MarginAllocation) -> Result<f64, Error>{
         self.sync().await?;
         let free = self.free();
 
@@ -87,11 +87,11 @@ impl MarginBook{
         self.map.remove(asset);
     }
 
-    pub fn used(&self) -> f32{
+    pub fn used(&self) -> f64{
         self.map.values().copied().sum()
     }
 
-    pub fn free(&self) -> f32{
+    pub fn free(&self) -> f64{
         self.total_on_chain - self.used()
     }
 
@@ -104,7 +104,7 @@ impl MarginBook{
 }
 
 
-pub type AssetMargin = (Arc<str>, f32);
+pub type AssetMargin = (Arc<str>, f64);
 
 
 

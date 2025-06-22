@@ -29,11 +29,11 @@ async fn main() {
     let info =  info_client.user_state(address()).await.unwrap();
     
     let res =  info.margin_summary.account_value
-        .parse::<f32>().unwrap();
+        .parse::<f64>().unwrap();
 
-    let upnl: f32 = info.asset_positions.into_iter().filter_map(|p|{
-        let u = p.position.unrealized_pnl.parse::<f32>().ok()?;
-        let f =  p.position.cum_funding.since_open.parse::<f32>().ok()?;
+    let upnl: f64 = info.asset_positions.into_iter().filter_map(|p|{
+        let u = p.position.unrealized_pnl.parse::<f64>().ok()?;
+        let f =  p.position.cum_funding.since_open.parse::<f64>().ok()?;
         Some(u - f)
     }).sum();
 

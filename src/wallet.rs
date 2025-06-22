@@ -23,11 +23,11 @@ impl Wallet{
         })
     }
 
-    pub async fn get_user_fees(&self) -> Result<(f32, f32), Error>{
+    pub async fn get_user_fees(&self) -> Result<(f64, f64), Error>{
         let user = address(&self.pubkey);
         let user_fees = self.info_client.user_fees(user).await?;
-        let add_fee: f32 = user_fees.user_add_rate.parse().unwrap();
-        let cross_fee: f32 = user_fees.user_cross_rate.parse().unwrap();
+        let add_fee: f64 = user_fees.user_add_rate.parse().unwrap();
+        let cross_fee: f64 = user_fees.user_cross_rate.parse().unwrap();
     
         Ok((add_fee, cross_fee))
     }
@@ -41,19 +41,19 @@ impl Wallet{
     
     }
 
-    pub async fn get_user_margin(&self) -> Result<f32, Error> {
+    pub async fn get_user_margin(&self) -> Result<f64, Error> {
         let user = address(&self.pubkey);
 
         let info = self.info_client.user_state(user)
         .await?;
 
         let res =  info.margin_summary.account_value
-        .parse::<f32>()
-        .map_err(|e| Error::GenericParse(format!("FATAL: failed to parse account balance to f32, {}",e)))?;
+        .parse::<f64>()
+        .map_err(|e| Error::GenericParse(format!("FATAL: failed to parse account balance to f64, {}",e)))?;
 
-        let upnl: f32 = info.asset_positions.into_iter().filter_map(|p|{
-            let u = p.position.unrealized_pnl.parse::<f32>().ok()?;
-            let f =  p.position.cum_funding.since_open.parse::<f32>().ok()?;
+        let upnl: f64 = info.asset_positions.into_iter().filter_map(|p|{
+            let u = p.position.unrealized_pnl.parse::<f64>().ok()?;
+            let f =  p.position.cum_funding.since_open.parse::<f64>().ok()?;
             Some(u - f)
         }).sum();
 

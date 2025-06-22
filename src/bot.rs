@@ -18,7 +18,7 @@ pub struct Bot{
     wallet: Arc<Wallet>,
     markets: HashMap<String, Sender<MarketCommand>>,
     candle_subs: HashMap<String, u32>,
-    fees: (f32, f32),
+    fees: (f64, f64),
     bot_tx: UnboundedSender<BotEvent>,
     bot_rv: UnboundedReceiver<BotEvent>,
     update_rv: UnboundedReceiver<MarketUpdate>,
@@ -330,7 +330,7 @@ pub struct BotToMarket{
 pub enum UpdateFrontend{
     UpdatePrice(AssetPrice),
     NewTradeInfo(TradeInfo),
-    UpdateTotalMargin(f32),
+    UpdateTotalMargin(f64),
     UpdateMarketMargin(AssetMargin),
     UserError(Error),
 }
