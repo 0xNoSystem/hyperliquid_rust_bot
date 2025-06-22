@@ -50,7 +50,7 @@ async fn main() -> Result<(), Error>{
     /// 
     let wallet: LocalWallet = env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
         .parse()
-        .unwrap();
+        .unwrap(); //SUSSSSSSSSSSSSSSSSSSSSS
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
 
     let wallet = Wallet::new(URL, pubkey, wallet).await?;
