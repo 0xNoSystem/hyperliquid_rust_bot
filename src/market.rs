@@ -91,6 +91,7 @@ impl Market{
             market_rv,
         };
 
+
         Ok((Market{ 
             info_client,
             exchange_client,

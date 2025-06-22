@@ -23,7 +23,7 @@ use super::types::{
 pub struct SignalEngine{
     engine_rv: UnboundedReceiver<EngineCommand>,
     trade_tx: Sender<TradeCommand>,
-    trackers: HashMap<TimeFrame, Box<Tracker>>, 
+    trackers: HashMap<TimeFrame, Tracker>, 
     strategy: Strategy,
     exec_params: ExecParams,
 }
@@ -39,8 +39,8 @@ impl SignalEngine{
         trade_tx: Sender<TradeCommand>, 
         margin: f64,
     ) -> Self{
-        let mut trackers:HashMap<TimeFrame, Box<Tracker>> = HashMap::new();
-        trackers.insert(trade_params.time_frame, Box::new(Tracker::new(trade_params.time_frame)));
+        let mut trackers:HashMap<TimeFrame, Tracker> = HashMap::new();
+        trackers.insert(trade_params.time_frame,Tracker::new(trade_params.time_frame));
 
         if let Some(list) = config{
             if !list.is_empty(){
@@ -50,7 +50,7 @@ impl SignalEngine{
                     }else{
                     let mut new_tracker = Tracker::new(id.1);
                     new_tracker.add_indicator(id.0, false); 
-                    trackers.insert(id.1, Box::new(new_tracker));
+                    trackers.insert(id.1, new_tracker);
                     }
                 }
             }};
@@ -77,7 +77,7 @@ impl SignalEngine{
         }else{
             let mut new_tracker = Tracker::new(id.1);
             new_tracker.add_indicator(id.0, false); 
-            self.trackers.insert(id.1, Box::new(new_tracker));
+            self.trackers.insert(id.1, new_tracker);
      }
     }
 
@@ -227,8 +227,8 @@ impl SignalEngine{
 
 
         pub fn new_backtest(trade_params: TradeParams, config: Option<Vec<IndexId>>, margin: f64) -> Self{
-            let mut trackers:HashMap<TimeFrame, Box<Tracker>> = HashMap::new();
-            trackers.insert(trade_params.time_frame, Box::new(Tracker::new(trade_params.time_frame)));
+            let mut trackers:HashMap<TimeFrame, Tracker> = HashMap::new();
+            trackers.insert(trade_params.time_frame, Tracker::new(trade_params.time_frame));
 
             if let Some(list) = config{
                 if !list.is_empty(){
@@ -238,7 +238,7 @@ impl SignalEngine{
                         }else{
                             let mut new_tracker = Tracker::new(id.1);
                             new_tracker.add_indicator(id.0, false); 
-                            trackers.insert(id.1, Box::new(new_tracker));
+                            trackers.insert(id.1, new_tracker);
                     }
                 }
             }}

@@ -122,7 +122,7 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
 }
 
 
-type History = ArrayDeque<Price, MAX_HISTORY, Wrapping>;
+type History = Box<ArrayDeque<Price, MAX_HISTORY, Wrapping>>;
 
 #[derive(Debug)]
 pub struct Tracker{
@@ -137,7 +137,7 @@ pub struct Tracker{
 impl Tracker{
     pub fn new(tf: TimeFrame) -> Self{
         Tracker{
-            price_data: ArrayDeque::new(),
+            price_data: Box::new(ArrayDeque::new()),
             indicators: HashMap::new(),
             tf,
             next_close: Self::calc_next_close(tf),
@@ -187,7 +187,7 @@ impl Tracker{
     pub fn add_indicator(&mut self, kind: IndicatorKind, load: bool){
         let mut handler = Handler::new(kind);
         if load{
-            handler.load(&self.price_data);
+            handler.load(&*self.price_data);
         }
         self.indicators.insert(kind, handler);
     }
