@@ -41,18 +41,18 @@ pub struct CustomStrategy {
 }
 
 pub struct RsiRange{
-    pub low: f32,
-    pub high: f32,
+    pub low: f64,
+    pub high: f64,
 }
 
 pub struct AtrRange{
-    pub low: f32,
-    pub high: f32,
+    pub low: f64,
+    pub high: f64,
 }
 
 pub struct StochRange{
-    pub low: f32,
-    pub high: f32,
+    pub low: f64,
+    pub high: f64,
 }
 
 
@@ -84,7 +84,7 @@ impl CustomStrategy{
         match self.risk{
             Risk::Low => AtrRange{low: 0.2, high: 1.0},
             Risk::Normal => AtrRange{low: 0.5, high: 3.0},
-            Risk::High => AtrRange{low: 0.8, high: f32::INFINITY},
+            Risk::High => AtrRange{low: 0.8, high: f64::INFINITY},
         }
     }
 
@@ -107,7 +107,7 @@ impl CustomStrategy{
     }
 
 
-    pub fn generate_signal(&self, data: Vec<Value>, price: f32) -> Option<TradeCommand> {
+    pub fn generate_signal(&self, data: Vec<Value>, price: f64) -> Option<TradeCommand> {
     // Extract indicator values from the data
     let mut rsi_value = None;
     let mut stoch_rsi = None;
@@ -133,20 +133,20 @@ impl CustomStrategy{
 
 fn scalping_strategy(
     &self,
-    rsi: Option<f32>,
-    stoch_rsi: Option<(f32, f32)>,
-    ema_cross: Option<(f32, f32, bool)>,
-    adx: Option<f32>,
-    atr: Option<f32>,
-    price: f32,
+    rsi: Option<f64>,
+    stoch_rsi: Option<(f64, f64)>,
+    ema_cross: Option<(f64, f64, bool)>,
+    adx: Option<f64>,
+    atr: Option<f64>,
+    price: f64,
 ) -> Option<TradeCommand> {
     // Scalping parameters
-    const RSI_OVERSOLD: f32 = 30.0;
-    const RSI_OVERBOUGHT: f32 = 70.0;
-    const STOCH_OVERSOLD: f32 = 20.0;
-    const STOCH_OVERBOUGHT: f32 = 80.0;
-    const ADX_TREND_THRESHOLD: f32 = 25.0;
-    const BASE_POSITION_SIZE: f32 = 0.1; // 10% of available capital
+    const RSI_OVERSOLD: f64 = 30.0;
+    const RSI_OVERBOUGHT: f64 = 70.0;
+    const STOCH_OVERSOLD: f64 = 20.0;
+    const STOCH_OVERBOUGHT: f64 = 80.0;
+    const ADX_TREND_THRESHOLD: f64 = 25.0;
+    const BASE_POSITION_SIZE: f64 = 0.1; // 10% of available capital
     const SCALP_DURATION: u64 = 300; // 5 minutes for scalping
     
     // Determine trend direction from EMA cross

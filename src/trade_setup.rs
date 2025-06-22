@@ -74,10 +74,10 @@ impl fmt::Display for TradeParams {
 
 #[derive(Clone, Debug, Copy)]
 pub enum TradeCommand{
-    ExecuteTrade {size: f32, is_long: bool, duration: u64},
-    OpenTrade {size: f32, is_long: bool},
-    CloseTrade{size: f32},
-    BuildPosition {size: f32, is_long: bool, interval: u64},
+    ExecuteTrade {size: f64, is_long: bool, duration: u64},
+    OpenTrade {size: f64, is_long: bool},
+    CloseTrade{size: f64},
+    BuildPosition {size: f64, is_long: bool, interval: u64},
     CancelTrade,
     Toggle,
     Resume,
@@ -87,10 +87,10 @@ pub enum TradeCommand{
 
 #[derive(Clone, Debug, Copy)]
 pub struct TradeInfo{
-    pub open: f32,
-    pub close: f32,
-    pub pnl: f32,
-    pub fee: f32,
+    pub open: f64,
+    pub close: f64,
+    pub pnl: f64,
+    pub fee: f64,
     pub is_long: bool,
     pub duration: Option<u64>,
     pub oid: (u64, u64),
@@ -101,9 +101,9 @@ pub struct TradeInfo{
 
 #[derive(Clone, Debug)]
 pub struct TradeFillInfo{
-    pub price: f32,
+    pub price: f64,
     pub fill_type: String,
-    pub sz: f32,
+    pub sz: f64,
     pub oid: u64,  
     pub is_long: bool,
 }

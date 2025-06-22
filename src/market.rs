@@ -35,7 +35,7 @@ pub struct Market {
     info_client: InfoClient, 
     exchange_client: ExchangeClient,
     pub trade_history: Vec<TradeInfo>,
-    pub pnl: f32,
+    pub pnl: f64,
     pub trade_params: TradeParams,
     pub asset: AssetMeta,
     signal_engine: SignalEngine,
@@ -43,7 +43,7 @@ pub struct Market {
     receivers: MarketReceivers,
     senders: MarketSenders,
     pub active_tfs: HashSet<TimeFrame>,
-    pub margin: f32,
+    pub margin: f64,
 }
 
 
@@ -56,8 +56,8 @@ impl Market{
                     bot_tx: UnboundedSender<MarketUpdate>,
                     price_rv: UnboundedReceiver<Message>,
                     asset: AssetMeta,
-                    margin: f32,
-                    fees: (f32, f32),
+                    margin: f64,
+                    fees: (f64, f64),
                     trade_params: TradeParams,
                     config: Option<Vec<IndexId>>
     ) -> Result<(Self, Sender<MarketCommand>), Error>{
@@ -96,7 +96,7 @@ impl Market{
             exchange_client,
             margin,
             trade_history: Vec::with_capacity(MAX_HISTORY),
-            pnl: 0_f32,
+            pnl: 0_f64,
             trade_params : trade_params.clone(),
             asset: asset.clone(), 
             signal_engine: SignalEngine::new(config, trade_params,engine_rv,exec_tx, margin).await,
@@ -176,10 +176,10 @@ impl Market{
         let asset_name: Arc<str> = Arc::from(self.asset.name.clone());
         let candle_stream_handle = tokio::spawn(async move {
                 while let Some(Message::Candle(candle)) = self.receivers.price_rv.recv().await{
-                    let close = candle.data.close.parse::<f32>().ok().unwrap();
-                    let high = candle.data.high.parse::<f32>().ok().unwrap();
-                    let low = candle.data.low.parse::<f32>().ok().unwrap();            
-                    let open = candle.data.open.parse::<f32>().ok().unwrap();
+                    let close = candle.data.close.parse::<f64>().ok().unwrap();
+                    let high = candle.data.high.parse::<f64>().ok().unwrap();
+                    let low = candle.data.low.parse::<f64>().ok().unwrap();            
+                    let open = candle.data.open.parse::<f64>().ok().unwrap();
                     let price = Price{open,high, low, close};
                     //info!("{:?}", price);
                     let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
@@ -311,7 +311,7 @@ pub enum MarketCommand{
     EditIndicators(Vec<Entry>),
     UpdateTimeFrame(TimeFrame),
     ReceiveTrade(TradeInfo),
-    UpdateMargin(f32),
+    UpdateMargin(f64),
     Toggle,
     Resume,
     Pause,
@@ -341,7 +341,7 @@ pub enum MarketUpdate{
 }
 
 
-pub type AssetPrice = (Arc<str>, f32);
+pub type AssetPrice = (Arc<str>, f64);
 
 
 

@@ -25,7 +25,7 @@ pub struct Executor {
     asset: String,
     exchange_client: Arc<ExchangeClient>,
     is_paused: bool,
-    fees: (f32, f32),
+    fees: (f64, f64),
     open_position: Arc<Mutex<Option<TradeFillInfo>>>,
 }
 
@@ -36,7 +36,7 @@ impl Executor {
     pub async fn new(
         wallet: LocalWallet,
         asset: String,
-        fees: (f32, f32),
+        fees: (f64, f64),
         trade_rv: Receiver<TradeCommand>, 
         market_tx: Sender<MarketCommand>,
     ) -> Result<Executor, Error>{
@@ -78,7 +78,7 @@ impl Executor {
         Ok(status)
 
     }
-    pub async fn open_order(&self,size: f32, is_long: bool) -> Result<TradeFillInfo, String>{
+    pub async fn open_order(&self,size: f64, is_long: bool) -> Result<TradeFillInfo, String>{
         
         let market_open_params = MarketOrderParams {
             asset: self.asset.as_str(),
@@ -98,8 +98,8 @@ impl Executor {
             ExchangeDataStatus::Filled(ref order) =>  {
             
                 println!("Open order filled: {order:?}");
-                let sz: f32 = order.total_sz.parse::<f32>().unwrap();
-                let price: f32 = order.avg_px.parse::<f32>().unwrap(); 
+                let sz: f64 = order.total_sz.parse::<f64>().unwrap();
+                let price: f64 = order.avg_px.parse::<f64>().unwrap(); 
                 let fill_info = TradeFillInfo{fill_type: "Open".to_string(),sz, price, oid: order.oid, is_long};
                 
                 Ok(fill_info)
@@ -110,7 +110,7 @@ impl Executor {
 
 
     }
-    pub async fn close_order(&self, size: f32, is_long: bool) -> Result<TradeFillInfo, String>   {
+    pub async fn close_order(&self, size: f64, is_long: bool) -> Result<TradeFillInfo, String>   {
 
         let market_close_params = MarketOrderParams{
             asset: self.asset.as_str(),
@@ -130,8 +130,8 @@ impl Executor {
             ExchangeDataStatus::Filled(ref order) =>  {
 
                 println!("Close order filled: {order:?}");
-                let sz: f32 = order.total_sz.parse::<f32>().unwrap();
-                let price: f32 = order.avg_px.parse::<f32>().unwrap(); 
+                let sz: f64 = order.total_sz.parse::<f64>().unwrap();
+                let price: f64 = order.avg_px.parse::<f64>().unwrap(); 
                 let fill_info = TradeFillInfo{fill_type: "Close".to_string(),sz, price, oid: order.oid, is_long};
                 return Ok(fill_info);
             },
@@ -141,7 +141,7 @@ impl Executor {
     }
 
 
-    pub async fn close_order_static(client: Arc<ExchangeClient>,asset: String, size: f32, is_long: bool) -> Result<TradeFillInfo, String>{
+    pub async fn close_order_static(client: Arc<ExchangeClient>,asset: String, size: f64, is_long: bool) -> Result<TradeFillInfo, String>{
         
  
         let market_close_params = MarketOrderParams {
@@ -160,8 +160,8 @@ impl Executor {
             ExchangeDataStatus::Filled(ref order) =>  {
 
                 println!("Close order filled: {order:?}");
-                let sz: f32 = order.total_sz.parse::<f32>().unwrap();
-                let price: f32 = order.avg_px.parse::<f32>().unwrap(); 
+                let sz: f64 = order.total_sz.parse::<f64>().unwrap();
+                let price: f64 = order.avg_px.parse::<f64>().unwrap(); 
                 let fill_info = TradeFillInfo{fill_type: "Close".to_string(),sz, price, oid: order.oid, is_long};
                 return Ok(fill_info);
             },
@@ -173,7 +173,7 @@ impl Executor {
 }
 
 
-        fn get_trade_info(open: TradeFillInfo, close: TradeFillInfo, fees: &(f32, f32)) -> TradeInfo{
+        fn get_trade_info(open: TradeFillInfo, close: TradeFillInfo, fees: &(f64, f64)) -> TradeInfo{
             let is_long = open.is_long;
             let (fee, pnl) = Self::calculate_pnl(fees,is_long, &open, &close);
 
@@ -192,7 +192,7 @@ impl Executor {
      
 
 
-    fn calculate_pnl(fees: &(f32, f32) ,is_long: bool, trade_fill_open: &TradeFillInfo, trade_fill_close: &TradeFillInfo) -> (f32, f32){
+    fn calculate_pnl(fees: &(f64, f64) ,is_long: bool, trade_fill_open: &TradeFillInfo, trade_fill_close: &TradeFillInfo) -> (f64, f64){
         let fee_open = trade_fill_open.sz * trade_fill_open.price * fees.1;
         let fee_close = trade_fill_close.sz * trade_fill_close.price * fees.1;
         

@@ -37,7 +37,7 @@ impl SignalEngine{
         trade_params: TradeParams,
         engine_rv: UnboundedReceiver<EngineCommand>,
         trade_tx: Sender<TradeCommand>, 
-        margin: f32,
+        margin: f64,
     ) -> Self{
         let mut trackers:HashMap<TimeFrame, Box<Tracker>> = HashMap::new();
         trackers.insert(trade_params.time_frame, Box::new(Tracker::new(trade_params.time_frame)));
@@ -139,7 +139,7 @@ impl SignalEngine{
     }
 
 
-    fn get_signal(&self, price: f32) -> Option<TradeCommand>{
+    fn get_signal(&self, price: f64) -> Option<TradeCommand>{
         //use Value::*;
         let values = self.get_active_values();
        
@@ -217,7 +217,7 @@ impl SignalEngine{
         }
     }
 
-    pub fn display_indicators(&mut self, price: f32){
+    pub fn display_indicators(&mut self, price: f64){
             info!("\nPrice => {}\n", price);
             //let vec = self.get_active_indicators();      
             self.display_values(); 
@@ -226,7 +226,7 @@ impl SignalEngine{
 
 
 
-        pub fn new_backtest(trade_params: TradeParams, config: Option<Vec<IndexId>>, margin: f32) -> Self{
+        pub fn new_backtest(trade_params: TradeParams, config: Option<Vec<IndexId>>, margin: f64) -> Self{
             let mut trackers:HashMap<TimeFrame, Box<Tracker>> = HashMap::new();
             trackers.insert(trade_params.time_frame, Box::new(Tracker::new(trade_params.time_frame)));
 

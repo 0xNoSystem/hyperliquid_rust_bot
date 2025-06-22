@@ -56,13 +56,13 @@ async fn candles_snapshot(info_client: &InfoClient,coin: &str,time_frame: TimeFr
 
     let mut res: Vec<Price> = Vec::with_capacity(vec.len());
     for candle in vec {
-        let h = candle.high.parse::<f32>()
+        let h = candle.high.parse::<f64>()
                 .map_err(|e| Error::GenericParse(format!("Failed to parse high: {}", e)))?;
-        let l = candle.low.parse::<f32>()
+        let l = candle.low.parse::<f64>()
                 .map_err(|e| Error::GenericParse(format!("Failed to parse low: {}", e)))?;
-        let o = candle.open.parse::<f32>()
+        let o = candle.open.parse::<f64>()
                 .map_err(|e| Error::GenericParse(format!("Failed to parse open: {}", e)))?;
-        let c = candle.close.parse::<f32>()
+        let c = candle.close.parse::<f64>()
                 .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
 
         res.push(Price {

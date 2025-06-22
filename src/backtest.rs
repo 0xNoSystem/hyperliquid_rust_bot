@@ -20,7 +20,7 @@ pub struct BackTester{
 
 impl BackTester{
 
-    pub fn new(asset: &str,params: TradeParams, config: Option<Vec<IndexId>>, margin: f32) -> Self{
+    pub fn new(asset: &str,params: TradeParams, config: Option<Vec<IndexId>>, margin: f64) -> Self{
         if !MARKETS.contains(&asset){
             panic!("ASSET ISN'T TRADABLE, MARKET CAN'T BE INITILIAZED");
         }

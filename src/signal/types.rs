@@ -11,13 +11,13 @@ use crate::MAX_HISTORY;
 
 #[derive(Debug, Copy, Clone)]
 pub struct ExecParams{
-    pub margin: f32,
+    pub margin: f64,
     pub lev: u32,
     pub tf: TimeFrame,
 } 
 
 impl ExecParams{
-    pub fn new(margin: f32, lev:u32, tf: TimeFrame)-> Self{
+    pub fn new(margin: f64, lev:u32, tf: TimeFrame)-> Self{
        Self{
             margin,
             lev,
@@ -27,7 +27,7 @@ impl ExecParams{
 }
 
 pub enum ExecParam{
-    Margin(f32),
+    Margin(f64),
     Lev(u32),
     Tf(TimeFrame),
 }
