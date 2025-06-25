@@ -13,7 +13,7 @@ use hyperliquid_rust_sdk::{
     Error,BaseUrl, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams,
 };
 
-use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo};
+use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo, LiquidationFillInfo};
 use crate::market::MarketCommand;
 
 
@@ -326,6 +326,25 @@ impl Executor {
                         return;
 
                     },
+                    
+                    TradeCommand::Liquidation(liq_fill) => {
+                            let maybe_open = {
+                                let mut pos = self.open_position.lock().await;
+                                pos.take()
+                            }; 
+                            
+                            if let Some(open_pos) = maybe_open{
+                                let liq_fill: TradeFillInfo = liq_fill.into();
+                                println!("MAKE SURE SIZES ARE THE SAME: \nLocal {open_pos:?}\nLiquidation: {liq_fill:?}");
+                                let trade_info = Self::get_trade_info(
+                                                    open_pos,
+                                                    liq_fill,
+                                                    &self.fees);
+                                
+                                    let _ = info_sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
+                                    info!("LIQUIDATION INFO: {:?}", trade_info);
+                            }
+                },
 
                     TradeCommand::Toggle=> {
                         

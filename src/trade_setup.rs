@@ -2,7 +2,7 @@ use std::fmt;
 
 use log::info;
 use serde::Deserialize;
-use hyperliquid_rust_sdk::{ExchangeClient, ExchangeResponseStatus, Error};
+use hyperliquid_rust_sdk::{ExchangeClient, ExchangeResponseStatus, Error, TradeInfo as HLTradeInfo};
 //use kwant::indicators::Price;
 
 use crate::strategy::{Strategy, CustomStrategy};
@@ -78,6 +78,7 @@ pub enum TradeCommand{
     CloseTrade{size: f64},
     BuildPosition {size: f64, is_long: bool, interval: u64},
     CancelTrade,
+    Liquidation(LiquidationFillInfo),
     Toggle,
     Resume,
     Pause,
@@ -104,8 +105,65 @@ pub struct TradeFillInfo{
     pub fill_type: String,
     pub sz: f64,
     pub oid: u64,  
-    pub is_long: bool,
+    pub is_long: bool, }
+
+impl From<LiquidationFillInfo> for TradeFillInfo{
+
+    fn from(liq: LiquidationFillInfo) -> Self{
+        let LiquidationFillInfo {price, sz, oid, is_long} = liq;
+
+        TradeFillInfo{
+            price,
+            fill_type: "Liquidation".to_string(),
+            sz,
+            oid,
+            is_long,
+        }
+    } 
 }
+
+
+#[derive(Clone, Debug, Copy)]
+pub struct LiquidationFillInfo{
+    pub price: f64,
+    pub sz: f64,
+    pub oid: u64,  
+    pub is_long: bool, //was the user going long ?
+}
+
+
+
+impl From<Vec<HLTradeInfo>> for LiquidationFillInfo{
+
+    fn from(trades: Vec<HLTradeInfo>) -> Self{
+        let n = trades.len();
+        let is_long = match trades[0].side.as_str(){
+            "A" => true,
+            "B" => false,
+            _ => panic!("THIS IS INSANE"),
+        };
+
+        let mut sz: f64 = f64::from_bits(1);
+        let mut total: f64 = f64::from_bits(1);
+        
+        trades.iter().for_each(|t| {
+            let size = t.sz.parse::<f64>().unwrap();
+            total += size * t.px.parse::<f64>().unwrap(); 
+            sz += size;
+        });
+
+        let avg_px = total / sz;
+         
+        Self{
+            price: avg_px,
+            sz,
+            oid: 000000,
+            is_long,
+        }   
+    }
+}
+
+
 
 
 

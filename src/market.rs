@@ -15,7 +15,7 @@ use crate::MAX_HISTORY;
 //use crate::wallet::Wallet;
 use crate::executor::Executor;
 use crate::signal::{SignalEngine, ExecParam, EngineCommand, TimeFrameData, Entry, EditType, IndexId};
-use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, TradeInfo};
+use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, TradeInfo, LiquidationFillInfo};
 use crate::strategy::Strategy;
 use crate::helper::load_candles;
 use crate::AssetMargin;
@@ -233,6 +233,11 @@ impl Market{
                         //maybe send margin to Bot struct ??
                         let _ = bot_update_tx.send(MarketUpdate::TradeUpdate(trade_info));
                     },
+
+                    MarketCommand::ReceiveLiquidation(liq_fill) => {
+                       self.senders.exec_tx.send_async(TradeCommand::Liquidation(liq_fill)).await;
+                    },
+
                     MarketCommand::UpdateTimeFrame(tf)=>{
                         self.trade_params.time_frame = tf;
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Tf(tf)));
@@ -243,6 +248,7 @@ impl Market{
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Margin(self.margin)));
                         let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((Arc::from(asset.name.clone()), self.margin)));
                     },
+                    
                     MarketCommand::Toggle =>{
                        let _ = self.senders.exec_tx.send_async(TradeCommand::Toggle).await;  
                     },
@@ -311,6 +317,7 @@ pub enum MarketCommand{
     EditIndicators(Vec<Entry>),
     UpdateTimeFrame(TimeFrame),
     ReceiveTrade(TradeInfo),
+    ReceiveLiquidation(LiquidationFillInfo),
     UpdateMargin(f64),
     Toggle,
     Resume,

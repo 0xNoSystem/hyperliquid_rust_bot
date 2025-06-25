@@ -108,6 +108,8 @@ async fn main() -> Result<(), Error>{
         bot.start(app_tx).await;
     });
 
+    
+
     tokio::spawn(async move {
      let market_add = AddMarketInfo{
         asset: COIN.to_string(), 

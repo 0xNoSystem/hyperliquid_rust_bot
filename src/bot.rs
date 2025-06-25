@@ -1,7 +1,7 @@
 use log::info;
 use std::collections::HashMap;
-use hyperliquid_rust_sdk::{Error, InfoClient};
-use crate::{Market, MarketCommand, MarketUpdate,AssetPrice, MARKETS, TradeParams,TradeInfo, Wallet, IndexId};
+use hyperliquid_rust_sdk::{Error, InfoClient, Message,Subscription, TradeInfo as HLTradeInfo};
+use crate::{Market, MarketCommand, MarketUpdate,AssetPrice, MARKETS, TradeParams,TradeInfo, Wallet, IndexId, LiquidationFillInfo};
 use crate::helper::{get_asset, subscribe_candles};
 use tokio::{
     sync::mpsc::{Sender, UnboundedSender, UnboundedReceiver, unbounded_channel},
@@ -9,6 +9,7 @@ use tokio::{
 use tokio::time::{sleep, Duration};
 
 use crate::margin::{MarginAllocation, MarginBook, AssetMargin};
+use crate::helper::address;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -205,7 +206,7 @@ impl Bot{
     }
     
  
-    pub async fn start(mut self, app_tx: UnboundedSender<UpdateFrontend>){
+    pub async fn start(mut self, app_tx: UnboundedSender<UpdateFrontend>) -> Result<(), Error>{
         use BotEvent::*; 
         use MarketUpdate::*;
         use UpdateFrontend::*;
@@ -244,6 +245,13 @@ impl Bot{
                 let _ = sleep(Duration::from_millis(500)).await;
         } 
     });
+
+        //listen and send Liquidation events
+        let (liq_tx, mut liq_rv) = unbounded_channel();
+        let _id = self.info_client
+        .subscribe(Subscription::UserFills{user: address(&self.wallet.pubkey) }, liq_tx)
+        .await?;
+
         
         loop{
             tokio::select!(
@@ -295,8 +303,33 @@ impl Bot{
                                 }
                             },
                     }
-                }
-            )}
+                },
+
+                Some(Message::UserFills(update)) = liq_rv.recv() => {
+
+                    if update.data.is_snapshot.is_some(){
+                        continue;
+                    }
+                    let mut liq_map: HashMap<String, Vec<HLTradeInfo>> = HashMap::new(); 
+
+                    for trade in update.data.fills.into_iter(){
+                        if trade.liquidation.is_some(){
+                        liq_map
+                            .entry(trade.coin.clone())
+                            .or_insert_with(Vec::new)
+                            .push(trade);
+                        }
+                    }
+                    println!("\nTRADES  |||||||||| {:?}\n\n", liq_map);
+        
+                    for (coin, fills) in liq_map.into_iter(){
+                        let to_send = LiquidationFillInfo::from(fills);
+                        let cmd = MarketCommand::ReceiveLiquidation(to_send);
+                        self.send_cmd(&coin, cmd).await;
+                    }
+            }
+
+        )}
 
     }   
 
@@ -343,11 +376,6 @@ pub struct AddMarketInfo {
     pub trade_params: TradeParams,
     pub config: Option<Vec<IndexId>>,
 }
-
-
-
-
-
 
 
 

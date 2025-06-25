@@ -19,7 +19,7 @@ pub use market::{Market, MarketCommand, MarketUpdate, AssetPrice};
 pub use consts::{MAX_HISTORY, MARKETS};
 pub use executor::Executor;
 // pub use backtest::BackTester; 
-pub use trade_setup::{TradeParams, TimeFrame, TradeCommand, TradeInfo, TradeFillInfo};
+pub use trade_setup::{TradeParams, TimeFrame, TradeCommand, TradeInfo, TradeFillInfo, LiquidationFillInfo};
 pub use margin::{AssetMargin, MarginAllocation};
 
 //expost HL sdk types

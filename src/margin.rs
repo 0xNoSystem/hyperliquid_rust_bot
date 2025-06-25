@@ -28,7 +28,7 @@ impl MarginBook{
         Self{
             user,
             map: HashMap::default(),
-            total_on_chain: 0.0,
+            total_on_chain: f64::from_bits(1),
         }
     }
     pub async fn sync(&mut self) -> Result<(), Error>{
