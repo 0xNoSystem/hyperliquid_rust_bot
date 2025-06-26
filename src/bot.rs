@@ -13,16 +13,19 @@ use crate::helper::address;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use std::hash::BuildHasherDefault;
+use rustc_hash::FxHasher;
+
 
 pub struct Bot{
     info_client: InfoClient,
     wallet: Arc<Wallet>,
-    markets: HashMap<String, Sender<MarketCommand>>,
+    markets: HashMap<String, Sender<MarketCommand>, BuildHasherDefault<FxHasher>>,
     candle_subs: HashMap<String, u32>,
     fees: (f64, f64),
     bot_tx: UnboundedSender<BotEvent>,
     bot_rv: UnboundedReceiver<BotEvent>,
-    update_rv: UnboundedReceiver<MarketUpdate>,
+    update_rv: Option<UnboundedReceiver<MarketUpdate>>,
     update_tx: UnboundedSender<MarketUpdate>,
 }
 
@@ -40,12 +43,12 @@ impl Bot{
         Ok((Self{
             info_client, 
             wallet: wallet.into(),
-            markets: HashMap::new(),
+            markets: HashMap::default(),
             candle_subs: HashMap::new(),
             fees,
             bot_tx: bot_tx.clone(),
             bot_rv,
-            update_rv,
+            update_rv: Some(update_rv),
             update_tx,
         }, bot_tx))
     }
@@ -210,6 +213,10 @@ impl Bot{
         use BotEvent::*; 
         use MarketUpdate::*;
         use UpdateFrontend::*;
+
+        //safe
+        let mut update_rv = self.update_rv.take().unwrap();
+             
         
         let user = self.wallet.clone();
         let mut margin_book= MarginBook::new(user);
@@ -246,15 +253,67 @@ impl Bot{
         } 
     });
 
-        //listen and send Liquidation events
-        let (liq_tx, mut liq_rv) = unbounded_channel();
-        let _id = self.info_client
-        .subscribe(Subscription::UserFills{user: address(&self.wallet.pubkey) }, liq_tx)
-        .await?;
+        
+        //Market -> Bot 
+        tokio::spawn(async move{
+                while let Some(market_update) = update_rv.recv().await{
 
+                    match market_update{
+                        PriceUpdate(asset_price) => {let _ = app_tx.send(UpdatePrice(asset_price));},
+                        TradeUpdate(trade_info) => {let _ = app_tx.send(NewTradeInfo(trade_info));},
+                        MarginUpdate(asset_margin) => {
+                            let result = {
+                                let mut book = margin_market_edit.lock().await; 
+                                book.update_asset(asset_margin.clone()).await
+                            };
+
+                            match result {
+                                Ok(_) => {
+                                    let _ = app_tx.send(UpdateMarketMargin(asset_margin));
+                                }
+                                Err(e) => {
+                                    let _ = app_tx.send(UserError(e));
+                                }
+                                }
+                            },
+                    }
+                }
+        });
+
+        //listen and send Liquidation events
+            let (liq_tx, mut liq_rv) = unbounded_channel();
+            let _id = self.info_client
+                .subscribe(Subscription::UserFills{user: address(&self.wallet.pubkey) }, liq_tx)
+                .await?;
         
         loop{
             tokio::select!(
+                biased;
+
+                Some(Message::UserFills(update)) = liq_rv.recv() => {
+
+                    if update.data.is_snapshot.is_some(){
+                        continue;
+                    }
+                    let mut liq_map: HashMap<String, Vec<HLTradeInfo>> = HashMap::new(); 
+
+                    for trade in update.data.fills.into_iter(){
+                        if trade.liquidation.is_some(){
+                        liq_map
+                            .entry(trade.coin.clone())
+                            .or_insert_with(Vec::new)
+                            .push(trade);
+                        }
+                    }
+                    println!("\nTRADES  |||||||||| {:?}\n\n", liq_map);
+        
+                    for (coin, fills) in liq_map.into_iter(){
+                        let to_send = LiquidationFillInfo::from(fills);
+                        let cmd = MarketCommand::ReceiveLiquidation(to_send);
+                        self.send_cmd(&coin, cmd).await;
+                    }
+            },
+
 
                 Some(event) = self.bot_rv.recv() => {
             
@@ -283,52 +342,7 @@ impl Bot{
                     }
             },
 
-                Some(market_update) = self.update_rv.recv() => {
-                    match market_update{
-                        PriceUpdate(asset_price) => {let _ = app_tx.send(UpdatePrice(asset_price));},
-                        TradeUpdate(trade_info) => {let _ = app_tx.send(NewTradeInfo(trade_info));},
-                        MarginUpdate(asset_margin) => {
-                            let result = {
-                                let mut book = margin_market_edit.lock().await; 
-                                book.update_asset(asset_margin.clone()).await
-                            };
-
-                            match result {
-                                Ok(_) => {
-                                    let _ = app_tx.send(UpdateMarketMargin(asset_margin));
-                                }
-                                Err(e) => {
-                                    let _ = app_tx.send(UserError(e));
-                                }
-                                }
-                            },
-                    }
-                },
-
-                Some(Message::UserFills(update)) = liq_rv.recv() => {
-
-                    if update.data.is_snapshot.is_some(){
-                        continue;
-                    }
-                    let mut liq_map: HashMap<String, Vec<HLTradeInfo>> = HashMap::new(); 
-
-                    for trade in update.data.fills.into_iter(){
-                        if trade.liquidation.is_some(){
-                        liq_map
-                            .entry(trade.coin.clone())
-                            .or_insert_with(Vec::new)
-                            .push(trade);
-                        }
-                    }
-                    println!("\nTRADES  |||||||||| {:?}\n\n", liq_map);
-        
-                    for (coin, fills) in liq_map.into_iter(){
-                        let to_send = LiquidationFillInfo::from(fills);
-                        let cmd = MarketCommand::ReceiveLiquidation(to_send);
-                        self.send_cmd(&coin, cmd).await;
-                    }
-            }
-
+                
         )}
 
     }   

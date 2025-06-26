@@ -149,7 +149,7 @@ async fn main() -> Result<(), Error>{
    
         let _ = sleep(Duration::from_secs(5)).await;
         sender.send(BotEvent::AddMarket(market_add.clone()));
-        let _ = sleep(Duration::from_secs(5)).await;
+        let _ = sleep(Duration::from_secs(50)).await;
         sender.send(BotEvent::AddMarket(market_add2));
         sender.send(BotEvent::AddMarket(market_add3));
         //let _ = sleep(Duration::from_secs(20)).await;
