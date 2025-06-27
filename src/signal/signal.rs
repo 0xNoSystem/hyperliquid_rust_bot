@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::hash::BuildHasherDefault;
+use rustc_hash::FxHasher;
+
 use log::info;
 
 use kwant::indicators::{Price, Indicator, Value};
@@ -23,7 +26,7 @@ use super::types::{
 pub struct SignalEngine{
     engine_rv: UnboundedReceiver<EngineCommand>,
     trade_tx: Sender<TradeCommand>,
-    trackers: HashMap<TimeFrame, Box<Tracker>>, 
+    trackers: HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>>, 
     strategy: Strategy,
     exec_params: ExecParams,
 }
@@ -39,7 +42,7 @@ impl SignalEngine{
         trade_tx: Sender<TradeCommand>, 
         margin: f64,
     ) -> Self{
-        let mut trackers:HashMap<TimeFrame, Box<Tracker>> = HashMap::new();
+        let mut trackers:HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>> = HashMap::default();
         trackers.insert(trade_params.time_frame, Box::new(Tracker::new(trade_params.time_frame)));
 
         if let Some(list) = config{
@@ -162,6 +165,7 @@ impl SignalEngine{
                     for (_tf, tracker) in &mut self.trackers{
                             tracker.digest(price);
                         }
+
                     self.display_indicators(price.close);
                     if let Some(trade) = self.get_signal(price.close){
                         let _ = self.trade_tx.try_send(trade);
@@ -179,10 +183,7 @@ impl SignalEngine{
 
                     for entry in indicators{
                         match entry.edit{
-                            EditType::Add => {
-                                self.add_indicator(entry.id);
-                                println!("ADDED FINISH");
-                            },
+                            EditType::Add => { self.add_indicator(entry.id);},
                             EditType::Remove => {self.remove_indicator(entry.id);},
                             EditType::Toggle => {self.toggle_indicator(entry.id)},
                         }
@@ -227,7 +228,7 @@ impl SignalEngine{
 
 
         pub fn new_backtest(trade_params: TradeParams, config: Option<Vec<IndexId>>, margin: f64) -> Self{
-            let mut trackers:HashMap<TimeFrame, Box<Tracker>> = HashMap::new();
+            let mut trackers:HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>> = HashMap::default();
             trackers.insert(trade_params.time_frame, Box::new(Tracker::new(trade_params.time_frame)));
 
             if let Some(list) = config{
@@ -244,7 +245,7 @@ impl SignalEngine{
             }}
    
 
-        //channels won't be used in backtest, these are placeholders
+        //channels won't be used in backtesting, these are placeholders
         let (_tx, dummy_rv) = unbounded_channel::<EngineCommand>();
         let (dummy_tx, _rx) = bounded::<TradeCommand>(0);
 

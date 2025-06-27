@@ -81,7 +81,7 @@ impl Handler{
     }
 
     pub fn load<'a,I: IntoIterator<Item=&'a Price>>(&mut self, price_data: I){
-        let data_vec: Vec<Price> = price_data.into_iter().cloned().collect();
+        let data_vec: Vec<Price> = price_data.into_iter().copied().collect();
         self.indicator.load(&data_vec);
     }
 
@@ -179,6 +179,7 @@ impl Tracker{
     
     
     pub async fn load<I: IntoIterator<Item=Price>>(&mut self, price_data: I){
+        let start = std::time::Instant::now();
         let buffer: Vec<Price> = price_data.into_iter().collect();
         let safe_buff: Arc<[Price]> = buffer.clone().into();
 
@@ -204,7 +205,8 @@ impl Tracker{
         
         self.indicators = new_indicators;
         self.price_data.extend(buffer);
-
+        let dur = start.elapsed();
+        println!("PARALLEL loading took took {:?}", dur);
     }
 
 
