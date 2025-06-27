@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use hyperliquid_rust_bot::{
-    TradeFillInfo,
+    LiquidationFillInfo,
 };
 
 #[tokio::main]
@@ -55,7 +55,7 @@ async fn main() {
         println!("\nTRADES  |||||||||| {:?}\n\n", liq_map);
         
         for (coin, fills) in liq_map.into_iter(){
-            let to_send = TradeFillInfo::from_trades(fills);
+            let to_send = LiquidationFillInfo::from(fills);
             println!("\nTRADE FILL INFO: {:?}", to_send);
         }
 
