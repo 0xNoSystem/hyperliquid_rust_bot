@@ -117,7 +117,8 @@ impl Market{
             let engine_tx = self.senders.engine_tx.clone();
             let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
         };
-        self.load_engine(3000).await?;
+
+        self.load_engine(2000).await?;
         println!("\nMarket initialized for {} {:?}\n", self.asset.name, self.trade_params);
         Ok(())
     }
@@ -132,12 +133,13 @@ impl Market{
         
     async fn load_engine(&mut self, candle_count: u64) -> Result<(), Error>{
         
+        info!("---------Loading Engine: this may take some time----------------");
         for tf in &self.active_tfs{
             let price_data = load_candles(&self.info_client, 
                                          self.asset.name.as_str(),
                                          *tf,
                                         candle_count).await?;
-            self.signal_engine.load(*tf, price_data);
+            self.signal_engine.load(*tf, price_data).await;
             }
 
         Ok(())
@@ -155,8 +157,8 @@ impl Market{
 impl Market{
 
     pub async fn start(mut self) -> Result<(), Error>{
-        println!("STARTING HERE");
         self.init().await?;
+        println!("STARTING HERE");
 
         let mut signal_engine = self.signal_engine;
         let executor = self.executor;

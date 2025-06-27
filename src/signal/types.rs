@@ -1,5 +1,9 @@
 use std::fmt::Debug;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+use std::hash::BuildHasherDefault;
+use rustc_hash::FxHasher;
 
 use arraydeque::{ArrayDeque, behavior::Wrapping};
 use kwant::indicators::{Rsi, Atr, StochasticRsi, Price, Indicator, Ema, EmaCross, Sma, SmaRsi, Adx, Value};
@@ -87,7 +91,8 @@ impl Handler{
  
 }
 
-    
+
+unsafe impl Send for Handler {}
 
 
 pub type IndexId = (IndicatorKind, TimeFrame);
@@ -127,7 +132,7 @@ type History = Box<ArrayDeque<Price, MAX_HISTORY, Wrapping>>;
 #[derive(Debug)]
 pub struct Tracker{
     pub price_data: History,
-    pub indicators: HashMap<IndicatorKind, Handler>,
+    pub indicators: HashMap<IndicatorKind, Handler, BuildHasherDefault<FxHasher>>,
     tf: TimeFrame,
     next_close: u64,
 }
@@ -138,7 +143,7 @@ impl Tracker{
     pub fn new(tf: TimeFrame) -> Self{
         Tracker{
             price_data: Box::new(ArrayDeque::new()),
-            indicators: HashMap::new(),
+            indicators: HashMap::default(),
             tf,
             next_close: Self::calc_next_close(tf),
         }
@@ -173,12 +178,31 @@ impl Tracker{
     }
     
     
-    pub fn load<I: IntoIterator<Item=Price>>(&mut self, price_data: I){
+    pub async fn load<I: IntoIterator<Item=Price>>(&mut self, price_data: I){
         let buffer: Vec<Price> = price_data.into_iter().collect();
-        for (_kind, handler) in &mut self.indicators{
-            handler.load(&buffer);
+        let safe_buff: Arc<[Price]> = buffer.clone().into();
+
+        let mut handles: Vec<tokio::task::JoinHandle<(IndicatorKind, Handler)>> = Vec::new();
+        let mut temp_handlers = std::mem::take(&mut self.indicators);
+    
+        for (kind, mut handler) in temp_handlers{
+            let buff = safe_buff.clone();
+
+            let handle = tokio::spawn(async move{
+                handler.load(&*buff);
+                (kind, handler)
+            });
+
+            handles.push(handle);
         }
 
+        let new_indicators: HashMap<IndicatorKind, Handler, BuildHasherDefault<FxHasher>> = futures::future::join_all(handles)
+        .await
+        .into_iter()
+        .map(Result::unwrap) // unwrap JoinHandle
+        .collect();     
+        
+        self.indicators = new_indicators;
         self.price_data.extend(buffer);
 
     }
