@@ -118,7 +118,7 @@ impl Market{
             let engine_tx = self.senders.engine_tx.clone();
             let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
         };
-        self.load_engine(3000).await?;
+        self.load_engine(2000).await?;
         println!("\nMarket initialized for {} {:?}\n", self.asset.name, self.trade_params);
         Ok(())
     }
