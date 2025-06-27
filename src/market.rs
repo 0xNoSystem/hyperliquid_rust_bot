@@ -158,7 +158,6 @@ impl Market{
 
     pub async fn start(mut self) -> Result<(), Error>{
         self.init().await?;
-        println!("STARTING HERE");
 
         let mut signal_engine = self.signal_engine;
         let executor = self.executor;
@@ -176,7 +175,6 @@ impl Market{
         let bot_price_update = self.senders.bot_tx.clone();
 
         let asset_name: Arc<str> = Arc::from(self.asset.name.clone());
-                    println!("HEREREER");
         let candle_stream_handle = tokio::spawn(async move {
                 while let Some(Message::Candle(candle)) = self.receivers.price_rv.recv().await{
                     let close = candle.data.close.parse::<f64>().ok().unwrap();
