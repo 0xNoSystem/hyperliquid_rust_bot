@@ -246,7 +246,6 @@ impl Tracker{
 
 
 
-
 pub type TimeFrameData = HashMap<TimeFrame, Vec<Price>>;
 
 #[derive(Copy, Clone, Debug,PartialEq)]

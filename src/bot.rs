@@ -239,7 +239,7 @@ impl Bot{
                 Ok(_) => {
                     let total = {
                         let book = margin_sync.lock().await;
-                        book.total_on_chain
+                        book.total_on_chain - book.used()
                     };
                     let _ = app_tx_margin.send(UpdateTotalMargin(total));
                 }

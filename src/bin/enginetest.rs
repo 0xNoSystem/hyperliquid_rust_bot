@@ -47,17 +47,7 @@ async fn main() -> Result<(), Error>{
         BaseUrl::Localhost => dotenv::from_filename(".env.test").ok(),
         };
         
-    /// 
-    let wallet: LocalWallet = env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
-        .parse()
-        .unwrap(); //SUSSSSSSSSSSSSSSSSSSSSS
-    let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
-
-    let wallet = Wallet::new(URL, pubkey, wallet).await?;
-
-    let strat = Strategy::Custom(CustomStrategy::default());
-   
-    let trade_params = TradeParams{
+        let trade_params = TradeParams{
         strategy: strat,
         lev: 20,
         trade_time: 300,
@@ -100,6 +90,7 @@ async fn main() -> Result<(), Error>{
     ),
 ]);
     
+    let wallet = load_wallet().await?;
     let (app_tx, mut app_rv) = unbounded_channel::<UpdateFrontend>();
 
     let (mut bot, sender) = Bot::new(wallet).await?;
@@ -219,14 +210,18 @@ async fn main() -> Result<(), Error>{
 
 
 
-fn load_strategy(path: &str) -> Strategy {
+fn load_strategy(path: &str) -> CustomStrategy {
     let content = fs::read_to_string(path).expect("failed to read file");
     toml::from_str(&content).expect("failed to parse toml")
 }
 
+async fn load_wallet() -> Result<Wallet, Error>{
+    let wallet: LocalWallet = env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
+        .parse();
+    let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
 
-
-
+    Ok(Wallet::new(URL, pubkey, wallet).await?)
+}
 
 
 

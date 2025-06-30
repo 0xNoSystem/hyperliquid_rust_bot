@@ -3,66 +3,165 @@
 #![allow(unused_variables)]
 
 use log::info;
-use std::collections::HashMap;
 use std::str::FromStr;
-use ethers::types::H160;
-use hyperliquid_rust_sdk::{BaseUrl, InfoClient, Message, Subscription, TradeInfo};
+use std::sync::Arc;
+use hyperliquid_rust_sdk::Error;
+use hyperliquid_rust_bot::{
+    Bot,
+    BotEvent,
+    MarginAllocation,
+    AssetMargin,
+    BotToMarket,
+    MarketCommand,
+    IndexId, Entry, EditType, IndicatorKind,
+    MARKETS,
+    TradeParams,TimeFrame, AddMarketInfo, UpdateFrontend,
+
+    LocalWallet, Wallet, BaseUrl,
+};
+use hyperliquid_rust_bot::strategy::{Strategy, CustomStrategy, Risk, Style, Stance};
+
 use tokio::{
-    spawn,
-    sync::mpsc::unbounded_channel,
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     time::{sleep, Duration},
 };
 
-use hyperliquid_rust_bot::{
-    LiquidationFillInfo,
-};
+
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Error>{
     env_logger::init();
-    let mut info_client = InfoClient::new(None, Some(BaseUrl::Testnet)).await.unwrap();
-    let user = H160::from_str("0x8b56d7FBC8ad2a90E1C1366CA428efb4b5Bed18F").unwrap();
+    dotenv::dotenv().ok();
 
-    let (sender, mut receiver) = unbounded_channel();
-    let subscription_id = info_client
-        .subscribe(Subscription::UserFills{ user }, sender)
-        .await
-        .unwrap();
+    let wallet = load_wallet(BaseUrl::Mainnet).await?;
 
-    spawn(async move {
-        sleep(Duration::from_secs(30000)).await;
-        info!("Unsubscribing from user events data");
-        info_client.unsubscribe(subscription_id).await.unwrap()
-    });
 
-    // Listen for events, including possible liquidations
-    while let Some(Message::UserFills(update)) = receiver.recv().await {
+    let strategy = Strategy::Custom(load_strategy("./config.toml"));
+    let trade_params = TradeParams{
+        strategy,
+        lev: 10,
+        trade_time: 600,
+        time_frame: TimeFrame::from_str("5m").unwrap_or(TimeFrame::Min1),
+    };
 
-        if update.data.is_snapshot.is_some(){
-            continue;
-        }
+    let change = (IndicatorKind::Rsi(12), TimeFrame::Min5); 
+    let change2 = (IndicatorKind::EmaCross{short: 20, long: 200}, TimeFrame::Day1);
+    let market_info = AddMarketInfo{
+        asset: "BTC".to_string(),
+        margin_alloc: MarginAllocation::Amount(50.5),
+        trade_params,
+        config: Some(Vec::from([change, change2])), //indicators config
+    }; 
 
-        let mut liq_map: HashMap<String, Vec<TradeInfo>> = HashMap::new(); 
+    println!("{:?}", market_info);
 
-        for trade in update.data.fills.into_iter(){
-            if trade.liquidation.is_some(){
-                liq_map
-                    .entry(trade.coin.clone())
-                    .or_insert_with(Vec::new)
-                    .push(trade);
-            }
-        }
-        println!("\nTRADES  |||||||||| {:?}\n\n", liq_map);
-        
-        for (coin, fills) in liq_map.into_iter(){
-            let to_send = LiquidationFillInfo::from(fills);
-            println!("\nTRADE FILL INFO: {:?}", to_send);
-        }
+       
+    let (mut bot, event_tx) = Bot::new(wallet).await?;
+    let (app_tx, mut app_rv) = unbounded_channel::<UpdateFrontend>();
+    
+    tokio::spawn(async move{
+        bot.start(app_tx).await;
+    });     
 
+    let _ = event_tx.send(BotEvent::AddMarket(market_info.clone()));
+    let _ = event_tx.send(BotEvent::AddMarket(market_info));
+    let _ = event_tx.send(BotEvent::ManualUpdateMargin(("BTC".into(),100.0)));
+    let _ = event_tx.send(BotEvent::MarketComm(BotToMarket{
+        asset: "BTC".to_string(),
+        cmd: MarketCommand::UpdateLeverage(33),
+    }));
+
+
+    while let Some(update) = app_rv.recv().await{
+            info!("FRONT END RECEIVED {:?}", update);
+    }
+
+
+    Ok(())
 }
 
+
+fn load_strategy(path: &str) -> CustomStrategy {
+    let content = std::fs::read_to_string(path).expect("failed to read file");
+    toml::from_str(&content).expect("failed to parse toml")
+}
+
+async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error>{
+    let wallet = std::env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
+        .parse();
+
+    if let Err(ref e) = wallet{
+        return Err(Error::Custom(format!("Failed to load wallet: {}", e))); 
+    }
+    let pubkey: String = std::env::var("WALLET").expect("Error fetching WALLET address");
+    Ok(Wallet::new(url , pubkey, wallet.unwrap()).await?)
 }
 
 
+/*
+*
+*
+* pub enum BotEvent{
+    AddMarket(AddMarketInfo),
+    ToggleMarket(String),
+    RemoveMarket(String),
+    MarketComm(BotToMarket),
+    ManualUpdateMargin(AssetMargin),
+    ResumeAll,
+    PauseAll,
+    CloseAll,
+}
+
+#[derive(Clone, Debug)]
+pub struct BotToMarket{
+    pub asset: String,
+    pub cmd: MarketCommand,
+}
 
 
+#[derive(Clone, Debug)]
+pub enum UpdateFrontend{
+    UpdatePrice(AssetPrice),
+    NewTradeInfo(TradeInfo),
+    UpdateTotalMargin(f64),
+    UpdateMarketMargin(AssetMargin),
+    UserError(Error),
+    UpdateMarketInfo .....
+}
+
+
+#[derive(Clone, Debug)]
+pub struct AddMarketInfo {
+    pub asset: String,
+    pub margin_alloc: MarginAllocation,
+    pub trade_params: TradeParams,
+    pub config: Option<Vec<IndexId>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum MarketCommand{
+    UpdateLeverage(u32),
+    UpdateStrategy(Strategy),
+    EditIndicators(Vec<Entry>),
+    UpdateTimeFrame(TimeFrame),
+    ReceiveTrade(TradeInfo),
+    ReceiveLiquidation(LiquidationFillInfo),
+    UpdateMargin(f64),
+    Toggle,
+    Resume,
+    Pause,
+    Close,
+}
+
+????
+MarketInfo{
+    Lev,
+    Strategy,
+    Indicators,
+    TimeFrame,
+    Trades, 
+    Pnl,
+    Margin, 
+    PAUSED ?
+}
+*/

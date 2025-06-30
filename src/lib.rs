@@ -12,7 +12,7 @@ pub mod trade_setup;
 pub mod bot;
 pub mod margin;
 
-pub use bot::Bot;
+pub use bot::{Bot, BotEvent, BotToMarket,AddMarketInfo, UpdateFrontend};
 pub use wallet::Wallet;
 pub use signal::{SignalEngine, IndexId, IndicatorKind, EditType, Entry};
 pub use market::{Market, MarketCommand, MarketUpdate, AssetPrice};

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug, Copy)]
 pub enum MarginAllocation{
-    Alloc(f64),
+    Alloc(f64), //percentage of available margin
     Amount(f64),
 }
 
@@ -98,8 +98,6 @@ impl MarginBook{
     pub fn reset(&mut self) {
         self.map.clear();
     }
-
-
 
 }
 
