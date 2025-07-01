@@ -12,6 +12,7 @@ use crate::trade_setup::TimeFrame;
 use crate::helper::get_time_now;
 use crate::MAX_HISTORY;
 
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone)]
 pub struct ExecParams{
@@ -37,7 +38,8 @@ pub enum ExecParam{
 }
 
 
-#[derive(Debug, Clone,Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone,Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum IndicatorKind{
     Rsi(u32),
     SmaOnRsi{periods: u32, smoothing_length: u32},
@@ -248,13 +250,15 @@ impl Tracker{
 
 pub type TimeFrameData = HashMap<TimeFrame, Vec<Price>>;
 
-#[derive(Copy, Clone, Debug,PartialEq)]
+#[derive(Copy, Clone, Debug,PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Entry{
     pub id: IndexId,
     pub edit: EditType
 }
 
-#[derive(Copy, Clone, Debug,PartialEq)]
+#[derive(Copy, Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum EditType{
     Toggle,
     Add,

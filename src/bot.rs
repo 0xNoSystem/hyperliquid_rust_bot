@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 
 use std::hash::BuildHasherDefault;
 use rustc_hash::FxHasher;
+use serde::{Deserialize, Serialize};
 
 
 pub struct Bot{
@@ -245,7 +246,7 @@ impl Bot{
                 }
                 Err(e) => {
                     log::warn!("Failed to fetch User Margin");
-                    let _ = app_tx_margin.send(UserError(e));
+                    let _ = app_tx_margin.send(UserError(e.to_string()));
                     continue;
                 }
             }
@@ -272,7 +273,7 @@ impl Bot{
                                     let _ = app_tx.send(UpdateMarketMargin(asset_margin));
                                 }
                                 Err(e) => {
-                                    let _ = app_tx.send(UserError(e));
+                                    let _ = app_tx.send(UserError(e.to_string()));
                                 }
                                 }
                             },
@@ -352,7 +353,8 @@ impl Bot{
 
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum BotEvent{
     AddMarket(AddMarketInfo),
     ToggleMarket(String),
@@ -366,24 +368,27 @@ pub enum BotEvent{
 
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BotToMarket{
     pub asset: String,
     pub cmd: MarketCommand,
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum UpdateFrontend{
     UpdatePrice(AssetPrice),
     NewTradeInfo(TradeInfo),
     UpdateTotalMargin(f64),
     UpdateMarketMargin(AssetMargin),
-    UserError(Error),
+    UserError(String),
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AddMarketInfo {
     pub asset: String,
     pub margin_alloc: MarginAllocation,

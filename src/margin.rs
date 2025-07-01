@@ -6,7 +6,10 @@ use std::sync::Arc;
 use crate::Wallet;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum MarginAllocation{
     Alloc(f64), //percentage of available margin
     Amount(f64),
@@ -45,7 +48,7 @@ impl MarginBook{
         if requested_margin > free{
             return Err(Error::InsufficientFreeMargin(free));
         }
-        self.map.insert(asset.to_string(), requested_margin);
+        self.map.insert(asset, requested_margin);
 
         Ok(requested_margin)
     }
@@ -102,7 +105,7 @@ impl MarginBook{
 }
 
 
-pub type AssetMargin = (Arc<str>, f64);
+pub type AssetMargin = (String, f64);
 
 
 

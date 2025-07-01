@@ -1,15 +1,16 @@
 use std::fmt;
 
 use log::info;
-use serde::Deserialize;
 use hyperliquid_rust_sdk::{ExchangeClient, ExchangeResponseStatus, Error, TradeInfo as HLTradeInfo};
 //use kwant::indicators::Price;
 
 use crate::strategy::{Strategy, CustomStrategy};
+use serde::{Deserialize, Serialize};
 
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TradeParams {
     pub strategy: Strategy, 
     pub lev: u32,
@@ -71,7 +72,8 @@ impl fmt::Display for TradeParams {
 }
 
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum TradeCommand{
     ExecuteTrade {size: f64, is_long: bool, duration: u64},
     OpenTrade {size: f64, is_long: bool},
@@ -85,7 +87,8 @@ pub enum TradeCommand{
 }
 
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TradeInfo{
     pub open: f64,
     pub close: f64,
@@ -99,7 +102,8 @@ pub struct TradeInfo{
 
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TradeFillInfo{
     pub price: f64,
     pub fill_type: String,
@@ -123,7 +127,8 @@ impl From<LiquidationFillInfo> for TradeFillInfo{
 }
 
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LiquidationFillInfo{
     pub price: f64,
     pub sz: f64,
@@ -169,7 +174,8 @@ impl From<Vec<HLTradeInfo>> for LiquidationFillInfo{
 
 
 //TIME FRAME
-#[derive(Debug, Clone, Copy, PartialEq, Eq,Deserialize, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq,Deserialize,Serialize, Hash)]
+#[serde(rename_all = "camelCase")]
 pub enum TimeFrame {
     Min1,
     Min3,

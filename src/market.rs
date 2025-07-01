@@ -2,6 +2,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use log::info;
+use serde::Deserialize;
 
 
 use ethers::signers::LocalWallet;
@@ -184,7 +185,7 @@ impl Market{
                     let price = Price{open,high, low, close};
                     info!("{:?}", price);
                     let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
-                    let _ = bot_price_update.send(MarketUpdate::PriceUpdate((asset_name.clone(), close)));
+                    let _ = bot_price_update.send(MarketUpdate::PriceUpdate((asset_name.clone().to_string(), close)));
             }
         });
 
@@ -247,7 +248,7 @@ impl Market{
                     MarketCommand::UpdateMargin(marge) => {
                         self.margin = marge;
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Margin(self.margin)));
-                        let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((Arc::from(asset.name.clone()), self.margin)));
+                        let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((asset.name.to_string(), self.margin)));
                     },
                     
                     MarketCommand::Toggle =>{
@@ -311,7 +312,8 @@ impl Market{
 
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum MarketCommand{
     UpdateLeverage(u32),
     UpdateStrategy(Strategy),
@@ -349,7 +351,7 @@ pub enum MarketUpdate{
 }
 
 
-pub type AssetPrice = (Arc<str>, f64);
+pub type AssetPrice = (String, f64);
 
 
 

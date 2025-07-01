@@ -1,9 +1,9 @@
-use serde::Deserialize;
 use crate::TradeCommand;
 //use crate::signal::IndicatorKind;
 use kwant::indicators::Value;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum Risk {
     Low,
@@ -11,14 +11,14 @@ pub enum Risk {
     High,
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum Style{
     Scalp,
     Swing,
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum Stance{
     Bull,
@@ -27,12 +27,14 @@ pub enum Stance{
 }
 
 
-#[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq,Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Strategy{
     Custom(CustomStrategy),
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CustomStrategy {
    pub risk: Risk,
    pub style: Style,    

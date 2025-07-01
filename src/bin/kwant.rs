@@ -46,6 +46,9 @@ async fn main() -> Result<(), Error>{
 
     let change = (IndicatorKind::Rsi(12), TimeFrame::Min5); 
     let change2 = (IndicatorKind::EmaCross{short: 20, long: 200}, TimeFrame::Day1);
+
+    let edit1 = Entry{id: (IndicatorKind::Rsi(12), TimeFrame::Min5) ,edit: EditType::Remove};
+
     let market_info = AddMarketInfo{
         asset: "BTC".to_string(),
         margin_alloc: MarginAllocation::Amount(50.5),
@@ -70,7 +73,6 @@ async fn main() -> Result<(), Error>{
         asset: "BTC".to_string(),
         cmd: MarketCommand::UpdateLeverage(33),
     }));
-
 
     while let Some(update) = app_rv.recv().await{
             info!("FRONT END RECEIVED {:?}", update);
