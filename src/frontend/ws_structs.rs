@@ -10,7 +10,7 @@ pub struct AddMarketInfo {
     pub config: Option<Vec<IndexId>>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndicatorData{
     pub id: IndexId,
@@ -32,7 +32,7 @@ pub enum UpdateFrontend{
     NewTradeInfo(TradeInfo),
     UpdateTotalMargin(f64),
     UpdateMarketMargin(AssetMargin),
-    UpdateIndicatorValues{data: Vec<IndicatorData>},
+    UpdateIndicatorValues{asset: String, data: Vec<IndicatorData>},
     MarketInfoEdit((String, EditMarketInfo)),
     UserError(String),
 }

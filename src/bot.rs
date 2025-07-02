@@ -285,6 +285,8 @@ impl Bot{
                                 }
                                 }
                             },
+                        RelayToFrontend(cmd) => {let _ = app_tx.send(cmd);
+                        },
                     }
                 }
         });

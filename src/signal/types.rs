@@ -11,6 +11,7 @@ use kwant::indicators::{Rsi, Atr, StochasticRsi, Price, Indicator, Ema, EmaCross
 use crate::trade_setup::TimeFrame;
 use crate::helper::get_time_now;
 use crate::MAX_HISTORY;
+use crate::IndicatorData;
 
 use serde::{Deserialize, Serialize};
 
@@ -232,6 +233,22 @@ impl Tracker{
         for (_kind, handler) in &self.indicators{
             if let Some(val) = handler.get_value(){
                 values.push(val);
+            }
+        }
+        values
+    }
+
+    
+    pub fn get_indicators_data(&self) -> Vec<IndicatorData>{
+        let mut values = Vec::new();
+        for (kind, handler) in &self.indicators{
+            if let Some(val) = handler.get_value(){
+                values.push(
+                    IndicatorData{
+                        id: (*kind, self.tf),
+                        value: Some(val),
+                    }
+                );
             }
         }
         values

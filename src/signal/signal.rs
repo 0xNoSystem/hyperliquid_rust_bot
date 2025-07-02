@@ -8,8 +8,9 @@ use kwant::indicators::{Price, Indicator, Value};
 
 use crate::trade_setup::{TimeFrame,TradeParams, TradeCommand};
 use crate::strategy::Strategy;
+use crate::{IndicatorData, MarketCommand};
 
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio::sync::mpsc::{UnboundedReceiver, Sender as tokioSender, unbounded_channel};
 use flume::{Sender, bounded};
 
 use super::types::{
@@ -26,6 +27,7 @@ use super::types::{
 pub struct SignalEngine{
     engine_rv: UnboundedReceiver<EngineCommand>,
     trade_tx: Sender<TradeCommand>,
+    data_tx: Option<tokioSender<MarketCommand>>,
     trackers: HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>>, 
     strategy: Strategy,
     exec_params: ExecParams,
@@ -39,6 +41,7 @@ impl SignalEngine{
         config: Option<Vec<IndexId>>,
         trade_params: TradeParams,
         engine_rv: UnboundedReceiver<EngineCommand>,
+        data_tx: Option<tokioSender<MarketCommand>>,
         trade_tx: Sender<TradeCommand>, 
         margin: f64,
     ) -> Self{
@@ -61,6 +64,7 @@ impl SignalEngine{
         SignalEngine{
             engine_rv,
             trade_tx,
+            data_tx,
             trackers,
             strategy: trade_params.strategy,
             exec_params: ExecParams::new(margin, trade_params.lev, trade_params.time_frame),
@@ -114,7 +118,15 @@ impl SignalEngine{
                 values.extend(tracker.get_active_values()); 
             }
         values
-        }
+    }
+
+    pub fn get_indicators_data(&self) -> Vec<IndicatorData>{
+        let mut values = Vec::new();
+            for (_tf, tracker) in &self.trackers{
+                values.extend(tracker.get_indicators_data()); 
+            }
+        values
+    }
 
     pub fn display_values(&self){
         for (tf, tracker) in &self.trackers{
@@ -142,9 +154,7 @@ impl SignalEngine{
     }
 
 
-    fn get_signal(&self, price: f64) -> Option<TradeCommand>{
-        //use Value::*;
-        let values = self.get_active_values();
+    fn get_signal(&self, price: f64, values: Vec<Value>) -> Option<TradeCommand>{
        
         match self.strategy{
             Strategy::Custom(brr) => brr.generate_signal(values, price)
@@ -166,8 +176,15 @@ impl SignalEngine{
                             tracker.digest(price);
                         }
 
-                    self.display_indicators(price.close);
-                    if let Some(trade) = self.get_signal(price.close){
+                    //self.display_indicators(price.close);
+                    let ind = self.get_indicators_data();
+                    let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
+
+                    if let Some(sender) = &self.data_tx{
+                        sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
+                    }
+
+                    if let Some(trade) = self.get_signal(price.close, values){
                         let _ = self.trade_tx.try_send(trade);
                     }
                 }, 
@@ -252,6 +269,7 @@ impl SignalEngine{
         SignalEngine{
             engine_rv: dummy_rv,
             trade_tx: dummy_tx,
+            data_tx: None,
             trackers,
             strategy: trade_params.strategy,
             exec_params: ExecParams{margin, lev: trade_params.lev, tf: trade_params.time_frame},

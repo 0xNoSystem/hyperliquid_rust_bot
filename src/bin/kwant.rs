@@ -57,7 +57,6 @@ async fn main() -> Result<(), Error>{
     }; 
 
     println!("{:?}", market_info);
-
        
     let (mut bot, event_tx) = Bot::new(wallet).await?;
     let (app_tx, mut app_rv) = unbounded_channel::<UpdateFrontend>();
@@ -75,7 +74,7 @@ async fn main() -> Result<(), Error>{
     }));
 
     while let Some(update) = app_rv.recv().await{
-            let json_update = serde_json::to_string(&update).unwrap();
+            let json_update = serde_json::to_string_pretty(&update).unwrap();
             println!("FRONT END RECEIVED SERIALIZED DATA: {}", json_update);
     }
 

@@ -19,7 +19,7 @@ use crate::signal::{SignalEngine, ExecParam, EngineCommand, TimeFrameData, Entry
 use crate::trade_setup::{TimeFrame, TradeParams, TradeCommand, TradeInfo, LiquidationFillInfo};
 use crate::strategy::Strategy;
 use crate::helper::load_candles;
-use crate::AssetMargin;
+use crate::{IndicatorData,AssetMargin, UpdateFrontend};
 
 use tokio::{
     sync::mpsc::{channel, Sender, Receiver, UnboundedSender, UnboundedReceiver, unbounded_channel},
@@ -100,7 +100,7 @@ impl Market{
             pnl: 0_f64,
             trade_params : trade_params.clone(),
             asset: asset.clone(), 
-            signal_engine: SignalEngine::new(config, trade_params,engine_rv,exec_tx, margin).await,
+            signal_engine: SignalEngine::new(config, trade_params,engine_rv, Some(market_tx.clone()),exec_tx, margin).await,
             executor: Executor::new(wallet, asset.name, fees,exec_rv ,market_tx.clone()).await?,
             receivers,
             senders,
@@ -250,6 +250,16 @@ impl Market{
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Margin(self.margin)));
                         let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((asset.name.to_string(), self.margin)));
                     },
+
+                    MarketCommand::UpdateIndicatorData(data) =>{
+                            let _ = bot_update_tx.send(
+                                MarketUpdate::RelayToFrontend(
+                                        UpdateFrontend::UpdateIndicatorValues{
+                                                asset: asset.name.to_string(),
+                                                data,
+                                })
+                    );
+                    },
                     
                     MarketCommand::Toggle =>{
                        let _ = self.senders.exec_tx.send_async(TradeCommand::Toggle).await;  
@@ -322,6 +332,7 @@ pub enum MarketCommand{
     ReceiveTrade(TradeInfo),
     ReceiveLiquidation(LiquidationFillInfo),
     UpdateMargin(f64),
+    UpdateIndicatorData(Vec<IndicatorData>),
     Toggle,
     Resume,
     Pause,
@@ -348,6 +359,7 @@ pub enum MarketUpdate{
     PriceUpdate(AssetPrice),
     TradeUpdate(TradeInfo),
     MarginUpdate(AssetMargin),
+    RelayToFrontend(UpdateFrontend),
 }
 
 
