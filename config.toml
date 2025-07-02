@@ -1,4 +1,5 @@
 #Three trading styles: Scalp - Swing - build_position
+
 style = "Scalp"
 
 #Risk: Low - Normal - High
@@ -8,5 +9,5 @@ risk = "High"
 stance = "Neutral"
 
 #Follow trend: true - false
-follow_trend= false
+followTrend= false
 

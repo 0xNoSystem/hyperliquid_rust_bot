@@ -1,7 +1,15 @@
 use log::info;
 use std::collections::HashMap;
 use hyperliquid_rust_sdk::{Error, InfoClient, Message,Subscription, TradeInfo as HLTradeInfo};
-use crate::{Market, MarketCommand, MarketUpdate,AssetPrice, MARKETS, TradeParams,TradeInfo, Wallet, IndexId, LiquidationFillInfo};
+use crate::{Market,
+    MarketCommand,
+    MarketUpdate,AssetPrice,
+    MARKETS,
+    TradeParams,TradeInfo,
+    Wallet, IndexId, LiquidationFillInfo,
+    UpdateFrontend, AddMarketInfo,
+};
+
 use crate::helper::{get_asset, subscribe_candles};
 use tokio::{
     sync::mpsc::{Sender, UnboundedSender, UnboundedReceiver, unbounded_channel},
@@ -374,30 +382,6 @@ pub struct BotToMarket{
     pub asset: String,
     pub cmd: MarketCommand,
 }
-
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum UpdateFrontend{
-    UpdatePrice(AssetPrice),
-    NewTradeInfo(TradeInfo),
-    UpdateTotalMargin(f64),
-    UpdateMarketMargin(AssetMargin),
-    UserError(String),
-}
-
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AddMarketInfo {
-    pub asset: String,
-    pub margin_alloc: MarginAllocation,
-    pub trade_params: TradeParams,
-    pub config: Option<Vec<IndexId>>,
-}
-
-
-
 
 
 

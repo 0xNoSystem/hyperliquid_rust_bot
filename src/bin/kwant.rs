@@ -75,7 +75,8 @@ async fn main() -> Result<(), Error>{
     }));
 
     while let Some(update) = app_rv.recv().await{
-            info!("FRONT END RECEIVED {:?}", update);
+            let json_update = serde_json::to_string(&update).unwrap();
+            println!("FRONT END RECEIVED SERIALIZED DATA: {}", json_update);
     }
 
 

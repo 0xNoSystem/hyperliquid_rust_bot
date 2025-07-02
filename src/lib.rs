@@ -5,6 +5,7 @@ mod wallet;
 // mod backtest; 
 
 
+pub mod frontend;
 pub mod helper;
 pub mod signal;
 pub mod strategy;
@@ -12,7 +13,8 @@ pub mod trade_setup;
 pub mod bot;
 pub mod margin;
 
-pub use bot::{Bot, BotEvent, BotToMarket,AddMarketInfo, UpdateFrontend};
+pub use frontend::*;
+pub use bot::{Bot, BotEvent, BotToMarket};
 pub use wallet::Wallet;
 pub use signal::{SignalEngine, IndexId, IndicatorKind, EditType, Entry};
 pub use market::{Market, MarketCommand, MarketUpdate, AssetPrice};
@@ -25,3 +27,4 @@ pub use margin::{AssetMargin, MarginAllocation};
 //expost HL sdk types
 pub use hyperliquid_rust_sdk::{BaseUrl, Error};
 pub use ethers::signers::LocalWallet;
+pub use kwant::indicators::Value;
