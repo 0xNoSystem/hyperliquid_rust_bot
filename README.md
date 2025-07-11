@@ -32,6 +32,7 @@ works.
 
    ```bash
    cargo run --bin enginetest
+   cargo run --bin kwant
    ```
 
    The example spawns a bot, allocates margin to a few markets and shows how
