@@ -6,32 +6,32 @@
 use std::{
     env, fs,
     str::FromStr,
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
-    thread,
 };
 
+//
 use dotenv::dotenv;
-use ethers::signers::LocalWallet;
-use flume::{bounded, TrySendError};
-use hyperliquid_rust_sdk::{
-    BaseUrl, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus,
-    InfoClient, MarketOrderParams, Message, Subscription, Error
+use log::info;
+use std::sync::Arc;
+use hyperliquid_rust_sdk::Error;
+use hyperliquid_rust_bot::{
+    Bot,
+    BotEvent,
+    MarginAllocation,
+    AssetMargin,
+    BotToMarket,
+    MarketCommand,
+    IndexId, Entry, EditType, IndicatorKind,
+    MARKETS,
+    TradeParams,TimeFrame, AddMarketInfo, UpdateFrontend,
+
+    LocalWallet, Wallet, BaseUrl,
 };
-use kwant::indicators::{Price, Rsi, Indicator};
-use log::{error, info};
+use hyperliquid_rust_bot::strategy::{Strategy, CustomStrategy, Risk, Style, Stance};
+
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     time::{sleep, Duration},
 };
-
-use hyperliquid_rust_bot::{
-    Wallet, Market,MarketCommand, Executor, SignalEngine, IndexId, IndicatorKind, EditType, Entry, Bot, MarginAllocation
-};
-use hyperliquid_rust_bot::bot::{BotEvent, UpdateFrontend, AddMarketInfo, BotToMarket};
-use hyperliquid_rust_bot::trade_setup::{TimeFrame, TradeInfo, TradeParams};
-use hyperliquid_rust_bot::strategy::{Strategy, CustomStrategy, Style, Stance, Risk};
-use hyperliquid_rust_bot::helper::{subscribe_candles, load_candles};
-
 
 
 const COIN: &str = "BTC";
@@ -46,6 +46,8 @@ async fn main() -> Result<(), Error>{
         BaseUrl::Testnet => dotenv::from_filename("testnet").ok(),
         BaseUrl::Localhost => dotenv::from_filename(".env.test").ok(),
         };
+        let wallet = load_wallet(BaseUrl::Mainnet).await?;
+        let strat = Strategy::Custom(load_strategy("./config.toml"));
         
         let trade_params = TradeParams{
         strategy: strat,
@@ -90,7 +92,6 @@ async fn main() -> Result<(), Error>{
     ),
 ]);
     
-    let wallet = load_wallet().await?;
     let (app_tx, mut app_rv) = unbounded_channel::<UpdateFrontend>();
 
     let (mut bot, sender) = Bot::new(wallet).await?;
@@ -215,13 +216,19 @@ fn load_strategy(path: &str) -> CustomStrategy {
     toml::from_str(&content).expect("failed to parse toml")
 }
 
-async fn load_wallet() -> Result<Wallet, Error>{
-    let wallet: LocalWallet = env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
-        .parse();
-    let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
 
-    Ok(Wallet::new(URL, pubkey, wallet).await?)
+async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error>{
+    let wallet = std::env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
+        .parse();
+
+    if let Err(ref e) = wallet{
+        return Err(Error::Custom(format!("Failed to load wallet: {}", e))); 
+    }
+    let pubkey: String = std::env::var("WALLET").expect("Error fetching WALLET address");
+    Ok(Wallet::new(url , pubkey, wallet.unwrap()).await?)
 }
+
+
 
 
 

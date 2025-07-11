@@ -78,7 +78,6 @@ async fn main() -> Result<(), Error>{
             println!("FRONT END RECEIVED SERIALIZED DATA: {}", json_update);
     }
 
-
     Ok(())
 }
 
