@@ -156,10 +156,10 @@ impl Bot{
         
         if let Some(tx) = self.markets.get(&asset){
             let tx = tx.clone();
-            let cmd = MarketCommand::Pause;
+            let cmd = MarketCommand::Toggle;
             tokio::spawn(async move{
                 if let Err(e) =  tx.send(cmd).await{
-                    log::warn!("Failed to send Pause command: {:?}", e);
+                    log::warn!("Failed to send Toggle command: {:?}", e);
                 }
             });
 
