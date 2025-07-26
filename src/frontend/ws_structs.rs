@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::{TradeInfo, MarginAllocation, IndexId, TradeParams, Value, AssetPrice, AssetMargin};
+use std::collections::HashMap;
+
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -9,6 +11,19 @@ pub struct AddMarketInfo {
     pub trade_params: TradeParams,
     pub config: Option<Vec<IndexId>>,
 }
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketInfo{
+    pub asset: String,
+    pub lev: u32,
+    pub price: f64,
+    pub margin: f64,
+    pub pnl: f64,
+    pub is_paused: bool,
+    pub indicators: Vec<IndexId>,
+}
+
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +43,7 @@ pub enum EditMarketInfo{
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum UpdateFrontend{
+    ConfirmMarket(MarketInfo),
     UpdatePrice(AssetPrice),
     NewTradeInfo(TradeInfo),
     UpdateTotalMargin(f64),

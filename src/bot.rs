@@ -7,7 +7,7 @@ use crate::{Market,
     MARKETS,
     TradeParams,TradeInfo,
     Wallet, IndexId, LiquidationFillInfo,
-    UpdateFrontend, AddMarketInfo,
+    UpdateFrontend, AddMarketInfo, MarketInfo,
 };
 
 use crate::helper::{get_asset, subscribe_candles};
@@ -36,6 +36,7 @@ pub struct Bot{
     bot_rv: UnboundedReceiver<BotEvent>,
     update_rv: Option<UnboundedReceiver<MarketUpdate>>,
     update_tx: UnboundedSender<MarketUpdate>,
+    app_tx: Option<UnboundedSender<UpdateFrontend>>,
 }
 
 
@@ -59,6 +60,7 @@ impl Bot{
             bot_rv,
             update_rv: Some(update_rv),
             update_tx,
+            app_tx: None,
         }, bot_tx))
     }
 
@@ -100,17 +102,23 @@ impl Bot{
             config,
         ).await?;
 
+
         self.markets.insert(asset.clone(), market_tx);
         self.candle_subs.insert(asset.clone(), sub_id);
-
         let cancel_margin = margin_book.clone();
+        let app_tx = self.app_tx.clone(); 
+
         tokio::spawn(async move {
             if let Err(e) = market.start().await {
-                eprintln!("Market {} exited with error: {:?}", &asset, e);
+                if let Some(tx) = app_tx{
+                    tx.send(UpdateFrontend::UserError(format!("Market {} exited with error: {:?}", &asset, e)));
+                }
                 let mut book = cancel_margin.lock().await;
                 book.remove(&asset);
             }
         });         
+
+        
 
         Ok(())
 
@@ -223,6 +231,8 @@ impl Bot{
         use MarketUpdate::*;
         use UpdateFrontend::*;
 
+        self.app_tx = Some(app_tx.clone());
+
         //safe
         let mut update_rv = self.update_rv.take().unwrap();
              
@@ -268,6 +278,9 @@ impl Bot{
                 while let Some(market_update) = update_rv.recv().await{
 
                     match market_update{
+                        InitMarket(info) => {
+                            let _ = app_tx.send(ConfirmMarket(info));     
+                        },
                         PriceUpdate(asset_price) => {let _ = app_tx.send(UpdatePrice(asset_price));},
                         TradeUpdate(trade_info) => {let _ = app_tx.send(NewTradeInfo(trade_info));},
                         MarginUpdate(asset_margin) => {

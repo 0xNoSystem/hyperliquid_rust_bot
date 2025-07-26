@@ -10,7 +10,7 @@ use hyperliquid_rust_sdk::{AssetMeta,Error, BaseUrl, ExchangeClient, InfoClient,
 
 use kwant::indicators::Price;
 
-use crate::MAX_HISTORY;
+use crate::{MAX_HISTORY, MarketInfo};
 //use crate::MARKETS;
 
 //use crate::wallet::Wallet;
@@ -160,6 +160,17 @@ impl Market{
     pub async fn start(mut self) -> Result<(), Error>{
         self.init().await?;
 
+        let info = MarketInfo{
+            asset: self.asset.name.clone(),
+            lev: self.trade_params.lev,
+            price: 0.0,
+            margin: self.margin,
+            pnl: 0.0,
+            is_paused: false,
+            indicators: self.signal_engine.get_active_indicators(),
+        };
+        let _ = self.senders.bot_tx.send(MarketUpdate::InitMarket(info));
+
         let mut signal_engine = self.signal_engine;
         let executor = self.executor;
         
@@ -193,6 +204,9 @@ impl Market{
         let engine_update_tx = self.senders.engine_tx.clone();
         let bot_update_tx = self.senders.bot_tx;
         let asset = self.asset.clone();
+
+
+
         while let Some(cmd) = self.receivers.market_rv.recv().await{
              match cmd {
                    MarketCommand::UpdateLeverage(lev)=>{
@@ -356,6 +370,7 @@ struct MarketReceivers {
 
 #[derive(Debug, Clone)]
 pub enum MarketUpdate{
+    InitMarket(MarketInfo),
     PriceUpdate(AssetPrice),
     TradeUpdate(TradeInfo),
     MarginUpdate(AssetMargin),
