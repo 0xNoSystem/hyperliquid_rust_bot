@@ -76,6 +76,10 @@ impl Bot{
         let asset = asset.trim().to_uppercase();
         let asset_str = asset.as_str();
 
+        if self.markets.contains_key(&asset){
+            return Ok(());
+        }
+
         if !MARKETS.contains(&asset_str){
             return Err(Error::AssetNotFound);
         }
