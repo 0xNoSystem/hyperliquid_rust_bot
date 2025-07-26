@@ -1,4 +1,5 @@
 use log::info;
+use tokio::time::{sleep, interval, Duration};
 use std::collections::HashMap;
 use hyperliquid_rust_sdk::{Error, InfoClient, Message,Subscription, TradeInfo as HLTradeInfo};
 use crate::{Market,
@@ -14,7 +15,6 @@ use crate::helper::{get_asset, subscribe_candles};
 use tokio::{
     sync::mpsc::{Sender, UnboundedSender, UnboundedReceiver, unbounded_channel},
 };
-use tokio::time::{sleep, Duration};
 
 use crate::margin::{MarginAllocation, MarginBook, AssetMargin};
 use crate::helper::address;
@@ -252,8 +252,9 @@ impl Bot{
 
         //keep marginbook in sync with DEX 
         tokio::spawn(async move{
+            let mut ticker = interval(Duration::from_secs(2));
            loop{
-                let mut tick: u64 = 0;
+                ticker.tick().await;
                 let result = {
                 let mut book = margin_sync.lock().await;
                 book.sync().await
@@ -265,10 +266,7 @@ impl Bot{
                         let book = margin_sync.lock().await;
                         book.total_on_chain - book.used()
                     };
-                    if tick % 5 == 0{
-                        let _ = app_tx_margin.send(UpdateTotalMargin(total));
-                    }
-                    tick += 1;
+                    let _ = app_tx_margin.send(UpdateTotalMargin(total));
                 }
                 Err(e) => {
                     log::warn!("Failed to fetch User Margin");
