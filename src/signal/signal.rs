@@ -166,6 +166,8 @@ impl SignalEngine{
 impl SignalEngine{
 
     pub async fn start(&mut self){
+
+            let mut tick: u64 = 0;
             
             while let Some(cmd) = self.engine_rv.recv().await{
            
@@ -180,13 +182,17 @@ impl SignalEngine{
                     let ind = self.get_indicators_data();
                     let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
 
-                    if let Some(sender) = &self.data_tx{
-                        sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
+                    if tick % 5 == 0{
+                        if let Some(sender) = &self.data_tx{
+                            sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
+                        }
                     }
 
                     if let Some(trade) = self.get_signal(price.close, values){
                         let _ = self.trade_tx.try_send(trade);
                     }
+
+                    tick += 1;
                 }, 
 
                 EngineCommand::UpdateStrategy(new_strat) =>{

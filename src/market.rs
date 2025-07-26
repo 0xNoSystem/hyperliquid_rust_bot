@@ -188,6 +188,7 @@ impl Market{
 
         let asset_name: Arc<str> = Arc::from(self.asset.name.clone());
         let candle_stream_handle = tokio::spawn(async move {
+                let mut curr = f64::from_bits(1);
                 while let Some(Message::Candle(candle)) = self.receivers.price_rv.recv().await{
                     let close = candle.data.close.parse::<f64>().ok().unwrap();
                     let high = candle.data.high.parse::<f64>().ok().unwrap();
@@ -195,8 +196,12 @@ impl Market{
                     let open = candle.data.open.parse::<f64>().ok().unwrap();
                     let price = Price{open,high, low, close};
                     info!("{:?}", price);
+                     
                     let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
-                    let _ = bot_price_update.send(MarketUpdate::PriceUpdate((asset_name.clone().to_string(), close)));
+                    if close != curr {
+                        let _ = bot_price_update.send(MarketUpdate::PriceUpdate((asset_name.clone().to_string(), close)));
+                        curr = close;
+                    };
             }
         });
 

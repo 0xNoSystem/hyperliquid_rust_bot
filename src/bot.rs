@@ -249,6 +249,7 @@ impl Bot{
         //keep marginbook in sync with DEX 
         tokio::spawn(async move{
            loop{
+                let mut tick: u64 = 0;
                 let result = {
                 let mut book = margin_sync.lock().await;
                 book.sync().await
@@ -260,7 +261,10 @@ impl Bot{
                         let book = margin_sync.lock().await;
                         book.total_on_chain - book.used()
                     };
-                    let _ = app_tx_margin.send(UpdateTotalMargin(total));
+                    if tick % 5 == 0{
+                        let _ = app_tx_margin.send(UpdateTotalMargin(total));
+                    }
+                    tick += 1;
                 }
                 Err(e) => {
                     log::warn!("Failed to fetch User Margin");
