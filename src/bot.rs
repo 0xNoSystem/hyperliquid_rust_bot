@@ -81,6 +81,7 @@ impl Bot{
         }
 
         if !MARKETS.contains(&asset_str){
+
             return Err(Error::AssetNotFound);
         }
 
@@ -249,6 +250,7 @@ impl Bot{
         let margin_market_edit = margin_arc.clone();
         
         let app_tx_margin = app_tx.clone();
+        let err_tx = app_tx.clone();
 
         //keep marginbook in sync with DEX 
         tokio::spawn(async move{
@@ -348,7 +350,11 @@ impl Bot{
                 Some(event) = self.bot_rv.recv() => {
             
                     match event{
-                        AddMarket(add_market_info) => {let _ = self.add_market(add_market_info, &margin_user_edit).await;},
+                        AddMarket(add_market_info) => {
+                            if let Err(e) = self.add_market(add_market_info, &margin_user_edit).await{
+                                let _ = err_tx.send(UserError(e.to_string()));
+                        }
+                    },
                         ToggleMarket(asset) => {self.pause_or_resume_market(&asset).await;},
                         RemoveMarket(asset) => {let _ = self.remove_market(&asset, &margin_user_edit).await;},
                         MarketComm(command) => {self.send_cmd(&command.asset, command.cmd).await;},
