@@ -2,3 +2,4 @@
 /target
 Cargo.lock
 testnet
+src/bin/actix-back/
