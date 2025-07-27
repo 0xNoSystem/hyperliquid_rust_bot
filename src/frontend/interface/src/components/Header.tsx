@@ -1,8 +1,8 @@
 import React from 'react';
 
 const Header: React.FC = () => (
-  <header className="flex items-center justify-between py-6 px-12 border-b-[5px] border-[#50E3C2] bg-[#1D1D1D]">
-    <h1 className="text-2xl font-mono text-white tracking-wide flex items-center gap-2">
+  <header className="flex items-center justify-between py-10 px-12 border-b-[5px] border-orange-400 bg-[#1D1D1D] pb-14">
+    <h1 className="text-3xl font-mono text-white tracking-wide flex items-center gap-2">
       Kwant
       <a 
         href="https://app.hyperliquid.xyz"
@@ -11,7 +11,7 @@ const Header: React.FC = () => (
       <svg width="21" height="16" viewBox="0 0 21 16" xmlns="http://www.w3.org/2000/svg">
         <path
           d="M20.4523 7.53888C20.471 9.21764 20.1196 10.8218 19.4292 12.3544C18.4434 14.5368 16.0799 16.3213 13.9218 14.4218C12.1616 12.8736 11.8351 9.73059 9.19798 9.27049C5.7088 8.84769 5.62483 12.8923 3.34536 13.3492C0.804661 13.8653 -0.0380915 9.59381 -0.000774032 7.65391C0.0365434 5.71401 0.552769 2.98759 2.76072 2.98759C5.30142 2.98759 5.47245 6.83318 8.69731 6.62489C11.8911 6.40728 11.947 2.40624 14.0337 0.693288C15.8343 -0.786505 17.952 0.298469 19.0125 2.07982C19.9952 3.72749 20.4274 5.66116 20.4492 7.53888H20.4523Z"
-          fill="#50E3C2"
+          fill="orange"
         />
       </svg>
       </a>
@@ -28,7 +28,7 @@ const Header: React.FC = () => (
         width="32"
         height="32"
         viewBox="0 0 24 24"
-        className="fill-[#50E3C2]"
+        className="fill-white"
       >
         <path d="M12 0c-6.626 0-12 5.373-12 12 
                  0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 
