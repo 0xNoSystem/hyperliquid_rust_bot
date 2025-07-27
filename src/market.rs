@@ -164,6 +164,7 @@ impl Market{
             asset: self.asset.name.clone(),
             lev: self.trade_params.lev,
             price: 0.0,
+            params: self.trade_params.clone(),
             margin: self.margin,
             pnl: 0.0,
             is_paused: false,

@@ -18,6 +18,7 @@ pub struct MarketInfo{
     pub asset: String,
     pub lev: u32,
     pub price: f64,
+    pub params: TradeParams,
     pub margin: f64,
     pub pnl: f64,
     pub is_paused: bool,
