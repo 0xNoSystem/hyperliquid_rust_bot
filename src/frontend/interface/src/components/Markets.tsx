@@ -63,7 +63,8 @@ export default function MarketsPage() {
           const [asset, margin] = payload.updateMarketMargin as assetMargin;
           setMarkets(prev => prev.map(m => m.asset === asset ? { ...m, margin } : m));
         } else if ('updateIndicatorValues' in payload) {
-          const { asset, data } = payload.updateIndicatorValues as {asset:string, data:indicatorData[]};
+          const { asset, indicators } = payload.updateIndicatorValues as {asset:string, indicators:indicatorData[]};
+            setMarkets(prev => prev.map(m => m.asset === asset ? { ...m, indicators} : m));
           console.log('Indicator update', asset, data);
         }else if ('userError' in payload) {
             setErrorMsg(payload.userError);

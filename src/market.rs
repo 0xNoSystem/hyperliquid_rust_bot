@@ -168,7 +168,7 @@ impl Market{
             margin: self.margin,
             pnl: 0.0,
             is_paused: false,
-            indicators: self.signal_engine.get_active_indicators(),
+            indicators: self.signal_engine.get_indicators_data(),
         };
         let _ = self.senders.bot_tx.send(MarketUpdate::InitMarket(info));
 

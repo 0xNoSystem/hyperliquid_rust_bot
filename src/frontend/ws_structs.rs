@@ -22,7 +22,7 @@ pub struct MarketInfo{
     pub margin: f64,
     pub pnl: f64,
     pub is_paused: bool,
-    pub indicators: Vec<IndexId>,
+    pub indicators: Vec<IndicatorData>,
 }
 
 

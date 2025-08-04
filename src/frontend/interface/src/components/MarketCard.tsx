@@ -78,20 +78,27 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
       </div>
 
       {/* Indicators */}
-      <div className="flex flex-wrap gap-3 px-4 pb-2">
-        {indicators.map(([ind, tf], i) => {
-          const kind = Object.keys(ind)[0] as IndicatorKind;
-          return (
-            <div key={i} className="flex items-center gap-2">
-              <span className={`${indicatorColors[kind]} px-3 py-1 rounded-full text-xs`}>
-                {indicatorLabels[kind] || kind}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+     <div className="flex flex-wrap gap-3 px-4 pb-2">
+  {indicators.map(({ id, value }, i) => {
+    if (!Array.isArray(id) || id.length !== 2) return null;
 
-      {/* Strategy */}
+    const [indicator, _tf] = id;
+    const kind = Object.keys(indicator)[0] as keyof typeof indicatorLabels;
+
+    return (
+      <div key={i} className="flex items-center gap-2">
+        <span
+          className={`${indicatorColors[kind]} px-3 py-1 rounded-full text-xs`}
+          title={value !== undefined ? value.toFixed(2) : "N/A"}
+        >
+          {indicatorLabels[kind] || kind}
+        </span>
+      </div>
+    );
+  })}
+</div>
+{/* Strategy */}
+
       <div className="px-4 pb-4 pt-2 text-sm text-gray-300">
         <div className="mb-1">
           <span className="font-semibold text-white">Strategy:</span> {style} / {stance}

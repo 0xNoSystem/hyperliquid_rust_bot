@@ -16,10 +16,15 @@ export interface MarketInfo{
     params: TradeParams,
     pnl: number,
     is_paused: boolean,
-    indicators: IndexId[],
+    indicators: indicatorData[],
 }
 
+export interface indicatorData {
+    id: IndexId,
+    value?: number 
+};
 
+export type IndexId = [IndicatorKind, TimeFrame];
 
 
 export type TimeFrame =
@@ -83,7 +88,6 @@ export type MarginAllocation =
   | {amount: number };
 
 
-export type IndexId = [IndicatorKind, TimeFrame];
 
 
 export interface AddMarketInfo {
@@ -107,11 +111,6 @@ export type Message =
 export type assetPrice = [string, number];
 export type assetMargin = [string, number];
 
-
-export interface indicatorData {
-    id: IndexId,
-    value?: number 
-};
 
 export type editMarketInfo = 
     | {lev: number}
