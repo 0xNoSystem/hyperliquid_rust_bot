@@ -1,8 +1,8 @@
 import React from 'react';
 
 const Header: React.FC = () => (
-  <header className="flex items-center justify-between py-10 px-12 border-b-[5px] border-orange-400 bg-[#1D1D1D] pb-14">
-    <h1 className="text-3xl font-mono text-white tracking-wide flex items-center gap-2">
+  <header className="flex items-center justify-between py-4 px-12 border-b-[2px] border-orange-400 bg-[#1D1D1D]">
+    <h1 className="text-2xl font-mono text-white tracking-wide flex items-center gap-2">
       Kwant
       <a 
         href="https://app.hyperliquid.xyz"

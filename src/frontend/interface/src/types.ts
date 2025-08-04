@@ -22,8 +22,6 @@ export interface MarketInfo{
 
 
 
-
-
 export type TimeFrame =
   | "min1"
   | "min3"
