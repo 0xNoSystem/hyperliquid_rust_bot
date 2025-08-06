@@ -20,7 +20,7 @@ works.
 ## Getting started
 
 1. Install a recent Rust toolchain.
-2. Create a `.env` file in the project root based on `.env.test`:
+2. Create a `.env` file in the src/bin/actix-web folder`:
 
    ```env
    PRIVATE_KEY=<your API private key> -> https://app.hyperliquid.xyz/API
@@ -31,12 +31,8 @@ works.
 3. Run the demonstration:
 
    ```bash
-   cargo run --bin enginetest
-   cargo run --bin kwant
+   ./run.sh
    ```
-
-   The example spawns a bot, allocates margin to a few markets and shows how
-   indicators can be edited on the fly.
 
 ## Strategy
 
