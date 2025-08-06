@@ -17,6 +17,7 @@ export interface MarketInfo{
     pnl: number,
     is_paused: boolean,
     indicators: indicatorData[],
+    trades: TradeInfo[],
 }
 
 export interface indicatorData {
@@ -34,11 +35,26 @@ export type Value =
   | { adxValue: number }
   | { atrValue: number }
 
+export function get_value(v?: Value): string {
+  if (!v) return "No value";
+  if ("rsiValue" in v) return `RSI: ${v.rsiValue.toFixed(2)}`;
+  if ("stochRsiValue" in v) return `StochRSI: K=${v.stochRsiValue.k.toFixed(2)}, D=${v.stochRsiValue.d.toFixed(2)}`;
+  if ("emaValue" in v) return `EMA: ${v.emaValue.toFixed(2)}`;
+  if ("emaCrossValue" in v) return `EMA Cross: short=${v.emaCrossValue.short.toFixed(2)}, long=${v.emaCrossValue.long.toFixed(2)}, trend=${v.emaCrossValue.trend ? "↑" : "↓"}`;
+  if ("smaValue" in v) return `SMA: ${v.smaValue.toFixed(2)}`;
+  if ("smaRsiValue" in v) return `SMA on RSI: ${v.smaRsiValue.toFixed(2)}`;
+  if ("adxValue" in v) return `ADX: ${v.adxValue.toFixed(2)}`;
+  if ("atrValue" in v) return `ATR: ${v.atrValue.toFixed(2)}`;
+  return "Unknown";
+}
+
 export type Decomposed = {
   kind: IndicatorKind
   timeframe: TimeFrame
   value?: Value
 }
+
+
 
 export function decompose(ind: indicatorData): Decomposed {
   const [kind, timeframe] = ind.id
@@ -79,9 +95,21 @@ export const TIMEFRAME_CAMELCASE: Record<string, TimeFrame> = {
   "m": "month",
 };
 
+const TIMEFRAME_SHORT: Record<TimeFrame, string> = Object.entries(TIMEFRAME_CAMELCASE)
+  .reduce((acc, [short, tf]) => {
+    acc[tf] = short;
+    return acc;
+  }, {} as Record<TimeFrame, string>);
+
+export function fromTimeFrame(tf: TimeFrame): string {
+  return TIMEFRAME_SHORT[tf];
+}
+
 export function into(tf: string): TimeFrame {
   return TIMEFRAME_CAMELCASE[tf];
 }
+
+
 
 
 export type Risk = "Low" | "Normal" | "High";

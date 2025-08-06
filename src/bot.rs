@@ -320,7 +320,10 @@ impl Bot{
                             let _ = app_tx.send(ConfirmMarket(info));     
                         },
                         PriceUpdate(asset_price) => {let _ = app_tx.send(UpdatePrice(asset_price));},
-                        TradeUpdate(trade_info) => {let _ = app_tx.send(NewTradeInfo(trade_info));},
+                        TradeUpdate(trade_info) => {
+                            let _ = app_tx.send(NewTradeInfo(trade_info));
+                            
+                    },
                         MarginUpdate(asset_margin) => {
                             let result = {
                                 let mut book = margin_market_edit.lock().await; 

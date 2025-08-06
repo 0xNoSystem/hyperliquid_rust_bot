@@ -128,6 +128,7 @@ impl Actor for MyWebSocket {
                 match rx.recv().await {
                     Ok(update) => {
                         if let Ok(text) = serde_json::to_string(&update) {
+                            println!("\n{}\n", text);
                             addr.do_send(ServerMessage(text));
                         }
                     }

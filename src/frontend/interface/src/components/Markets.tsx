@@ -3,6 +3,7 @@ import MarketCard from './MarketCard';
 import { AddMarket } from './AddMarket';
 import type { MarketInfo, IndicatorKind, Message, assetPrice, TradeInfo, assetMargin, indicatorData, editMarketInfo } from '../types';
 
+/*
 const sampleMarket: MarketInfo = {
   asset: 'BTC', price: 27345.12, lev: 10, margin: 500, pnl: -25.5, is_paused: false,
   indicators: [
@@ -28,6 +29,7 @@ const fartMarket: MarketInfo = {
   ] as IndicatorKind[],
 };
 const initialMarkets: MarketInfo[] = [sampleMarket, solMarket, fartMarket];
+*/
 
 export default function MarketsPage() {
 
@@ -48,7 +50,10 @@ export default function MarketsPage() {
       const ws = new WebSocket('ws://localhost:8090/ws');
       wsRef.current = ws;
 
-      ws.onopen = () => console.log('WebSocket connected');
+      ws.onopen = () => {
+          console.log('WebSocket connected');
+          load_session();
+      }
       ws.onmessage = (event: MessageEvent) => {
         const payload = JSON.parse(event.data) as Message;
         if ('confirmMarket' in payload) {
@@ -72,9 +77,7 @@ export default function MarketsPage() {
             if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
                 errorTimeoutRef.current = setTimeout(() => setErrorMsg(null), 5000); 
         }else if ('loadSession' in payload){
-           if (markets.length === 0){
-               setMarkets(payload.loadSession);
-           } 
+            setMarkets(payload.loadSession);
         }
 
       };
@@ -91,7 +94,8 @@ export default function MarketsPage() {
     };
   }, []);
 
-  const remove_market = async (asset: string) => {
+
+const remove_market = async (asset: string) => {
     await fetch('http://localhost:8090/command', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ removeMarket: asset.toUpperCase() }),
@@ -105,6 +109,7 @@ export default function MarketsPage() {
   };
 
   const load_session = async () => {
+      console.log("REQUEST SESSION");
       await fetch('http://localhost:8090/command', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ getSession: null}),
