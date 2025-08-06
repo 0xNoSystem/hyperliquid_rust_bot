@@ -47,6 +47,7 @@ export default function MarketsPage() {
     const connect = () => {
       const ws = new WebSocket('ws://localhost:8090/ws');
       wsRef.current = ws;
+
       ws.onopen = () => console.log('WebSocket connected');
       ws.onmessage = (event: MessageEvent) => {
         const payload = JSON.parse(event.data) as Message;
@@ -69,7 +70,12 @@ export default function MarketsPage() {
         }else if ('userError' in payload) {
             setErrorMsg(payload.userError);
             if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
-                errorTimeoutRef.current = setTimeout(() => setErrorMsg(null), 5000);        }
+                errorTimeoutRef.current = setTimeout(() => setErrorMsg(null), 5000); 
+        }else if ('loadSession' in payload){
+           if (markets.length === 0){
+               setMarkets(payload.loadSession);
+           } 
+        }
 
       };
       ws.onerror = err => console.error('WebSocket error', err);
@@ -97,6 +103,14 @@ export default function MarketsPage() {
       body: JSON.stringify({ toggleMarket: asset.toUpperCase() }),
     });
   };
+
+  const load_session = async () => {
+      await fetch('http://localhost:8090/command', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ getSession: null}),
+    });
+  };
+
   const handleConfirmToggle = (asset: string, isPaused: boolean) => {
     if (isPaused) {
       toggle_market(asset);

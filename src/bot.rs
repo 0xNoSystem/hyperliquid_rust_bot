@@ -31,6 +31,7 @@ pub struct Bot{
     wallet: Arc<Wallet>,
     markets: HashMap<String, Sender<MarketCommand>, BuildHasherDefault<FxHasher>>,
     candle_subs: HashMap<String, u32>,
+    session: Arc<Mutex<HashMap<String, MarketInfo, BuildHasherDefault<FxHasher>>>>,
     fees: (f64, f64),
     bot_tx: UnboundedSender<BotEvent>,
     bot_rv: UnboundedReceiver<BotEvent>,
@@ -55,6 +56,7 @@ impl Bot{
             wallet: wallet.into(),
             markets: HashMap::default(),
             candle_subs: HashMap::new(),
+            session: Arc::new(Mutex::new(HashMap::default())),
             fees,
             bot_tx: bot_tx.clone(),
             bot_rv,
@@ -153,6 +155,8 @@ impl Bot{
             }).await.unwrap();
             
             if close{
+                let mut sess_guard = self.session.lock().await;
+                let _ = sess_guard.remove(&asset);
                 let mut book = margin_book.lock().await;
                 book.remove(&asset);
             }
@@ -178,6 +182,12 @@ impl Bot{
 
         }else{
             info!("Failed: Pause {} market, it doesn't exist", asset);
+            return;
+        }
+
+        let mut sess_guard = self.session.lock().await;
+        if let Some(info) = sess_guard.get_mut(&asset){
+            info.is_paused = !info.is_paused;
         }
     }
 
@@ -187,7 +197,12 @@ impl Bot{
         for (_asset, tx) in &self.markets{
             let _ = tx.send(MarketCommand::Pause).await;
         }
-
+        
+        let mut session = self.session.lock().await;
+        for (_asset, info) in session.iter_mut(){
+           info.is_paused = true; 
+        }
+        
     }
     pub async fn resume_all(&self){
         info!("RESUMING ALL MARKETS");
@@ -205,6 +220,8 @@ impl Bot{
             let _ = tx.send(MarketCommand::Close).await;
         }
         
+        let mut session = self.session.lock().await;
+        session.clear();
     }
 
 
@@ -229,6 +246,15 @@ impl Bot{
 
         assets
     }
+
+    pub async fn get_session(&self) -> Vec<MarketInfo>{
+
+        let mut guard = self.session.lock().await;
+        let session: Vec<MarketInfo> = guard.values().cloned().collect();
+        
+        session
+        
+    }
     
  
     pub async fn start(mut self, app_tx: UnboundedSender<UpdateFrontend>) -> Result<(), Error>{
@@ -237,6 +263,7 @@ impl Bot{
         use UpdateFrontend::*;
 
         self.app_tx = Some(app_tx.clone());
+
 
         //safe
         let mut update_rv = self.update_rv.take().unwrap();
@@ -282,11 +309,14 @@ impl Bot{
 
         
         //Market -> Bot 
+        let session_adder = self.session.clone();
         tokio::spawn(async move{
                 while let Some(market_update) = update_rv.recv().await{
 
                     match market_update{
                         InitMarket(info) => {
+                            let mut session_guard = session_adder.lock().await;
+                            session_guard.insert(info.asset.clone(), info.clone());
                             let _ = app_tx.send(ConfirmMarket(info));     
                         },
                         PriceUpdate(asset_price) => {let _ = app_tx.send(UpdatePrice(asset_price));},
@@ -375,6 +405,11 @@ impl Bot{
                             let mut book = margin_user_edit.lock().await;
                             book.reset();
                         },
+                        
+                        GetSession =>{
+                            let session = self.get_session().await;
+                            let _ = err_tx.send(LoadSession(session));   
+                        },
                     }
             },
 
@@ -399,6 +434,7 @@ pub enum BotEvent{
     ResumeAll,
     PauseAll,
     CloseAll,
+    GetSession, 
 }
 
 

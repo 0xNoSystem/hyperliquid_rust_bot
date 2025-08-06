@@ -126,7 +126,8 @@ export type Message =
     | { updateMarketMargin: assetMargin }
     | { updateIndicatorValues: {asset: string, data: indicatorData[] }}
     | { marketInfoEdit: [string, editMarketInfo]}
-    | { userError: string };
+    | { userError: string }
+    | { loadSession: MarketInfo[]};
 
 
 export type assetPrice = [string, number];

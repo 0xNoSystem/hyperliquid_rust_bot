@@ -52,4 +52,5 @@ pub enum UpdateFrontend{
     UpdateIndicatorValues{asset: String, data: Vec<IndicatorData>},
     MarketInfoEdit((String, EditMarketInfo)),
     UserError(String),
+    LoadSession(Vec<MarketInfo>),
 }

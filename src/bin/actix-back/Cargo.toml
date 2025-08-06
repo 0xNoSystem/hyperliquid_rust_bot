@@ -1,0 +1,17 @@
+[package]
+name = "actix-back"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actix = "0.13"
+actix-web = "4.11.0"
+actix-web-actors = "4"
+actix-cors = "0.6"
+dotenv = "0.15.0"
+hyperliquid_rust_bot = { git = "https://github.com/0xNoSystem/hyperliquid_rust_bot.git", branch = "master" }
+log = "0.4.27"
+serde = "1.0.219"
+tokio = { version = "1.29.1", features = ["full"] }
+env_logger = "0.10.0"
+serde_json = "1.0.141"
