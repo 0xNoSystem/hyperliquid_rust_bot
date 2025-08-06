@@ -21,8 +21,29 @@ export interface MarketInfo{
 
 export interface indicatorData {
     id: IndexId,
-    value?: number 
+    value?: Value
 };
+
+export type Value =
+  | { rsiValue: number }
+  | { stochRsiValue: { k: number; d: number } }
+  | { emaValue: number }
+  | { emaCrossValue: { short: number; long: number; trend: boolean } }
+  | { smaValue: number }
+  | { smaRsiValue: number }
+  | { adxValue: number }
+  | { atrValue: number }
+
+export type Decomposed = {
+  kind: IndicatorKind
+  timeframe: TimeFrame
+  value?: Value
+}
+
+export function decompose(ind: indicatorData): Decomposed {
+  const [kind, timeframe] = ind.id
+  return { kind, timeframe, value: ind.value }
+}
 
 export type IndexId = [IndicatorKind, TimeFrame];
 

@@ -196,7 +196,6 @@ impl Market{
                     let low = candle.data.low.parse::<f64>().ok().unwrap();            
                     let open = candle.data.open.parse::<f64>().ok().unwrap();
                     let price = Price{open,high, low, close};
-                    info!("{:?}", price);
                      
                     let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
                     if close != curr {

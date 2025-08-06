@@ -1,7 +1,7 @@
 import React from 'react';
 import { FaPlay, FaPause, FaTrash } from 'react-icons/fa';
-import type { IndicatorKind, MarketInfo } from '../types';
-import { indicatorLabels, indicatorColors } from '../types';
+import type { IndicatorKind, MarketInfo, indicatorData, Decomposed  } from '../types';
+import { indicatorLabels, indicatorColors, decompose } from '../types';
 
 interface MarketCardProps {
   market: MarketInfo;
@@ -15,7 +15,7 @@ const formatPrice = (price: number) => {
 };
 
 const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove }) => {
-  const { asset, price, lev, margin, pnl, is_paused, indicators, params } = market;
+  const { asset, price, lev, margin,params, pnl, is_paused, indicators} = market;
   const actionLabel = is_paused ? 'Resume' : 'Pause';
   const ActionIcon = is_paused ? FaPlay : FaPause;
 
@@ -79,11 +79,9 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
 
       {/* Indicators */}
      <div className="flex flex-wrap gap-3 px-4 pb-2">
-  {indicators.map(({ id, value }, i) => {
-    if (!Array.isArray(id) || id.length !== 2) return null;
-
-    const [indicator, _tf] = id;
-    const kind = Object.keys(indicator)[0] as keyof typeof indicatorLabels;
+  {indicators.map((data, i) => {
+      console.log('full object: %o', data)
+    const {kind, timeframe, value} = decompose(data as indicatorData);
 
     return (
       <div key={i} className="flex items-center gap-2">
@@ -91,7 +89,7 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
           className={`${indicatorColors[kind]} px-3 py-1 rounded-full text-xs`}
           title={value !== undefined ? value.toFixed(2) : "N/A"}
         >
-          {indicatorLabels[kind] || kind}
+          {indicatorLabels[kind] || kind} -- {timeframe}
         </span>
       </div>
     );
