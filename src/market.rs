@@ -246,7 +246,6 @@ impl Market{
                     },
                     
                     MarketCommand::ReceiveTrade(trade_info) =>{
-                        info!("\nMarket received trade result, {:?}\n", &trade_info);
                         self.pnl += trade_info.pnl;
                         self.margin += trade_info.pnl;
                         self.trade_history.push(trade_info);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MarketCard from './MarketCard';
 import { AddMarket } from './AddMarket';
-import type { MarketInfo, IndicatorKind, Message, assetPrice, TradeInfo,MarketTradeInfo, assetMargin, indicatorData, editMarketInfo } from '../types';
+import type { MarketInfo, IndicatorKind, Message, assetPrice, TradeInfo,MarketTradeInfo, assetMargin, indicatorData, editMarketInfo, Strategy, CustomStrategy } from '../types';
 
 /*
 const sampleMarket: MarketInfo = {
@@ -57,14 +57,23 @@ export default function MarketsPage() {
       ws.onmessage = (event: MessageEvent) => {
         const payload = JSON.parse(event.data) as Message;
         if ('confirmMarket' in payload) {
-          setMarkets(prev => [...prev, payload.confirmMarket]);
+          setMarkets(prev => [
+            ...prev,
+            {
+                ...payload.confirmMarket,
+                trades: Array.isArray(payload.confirmMarket.trades)
+                ? payload.confirmMarket.trades
+                : [], 
+            }
+            ]);
         } else if ('updatePrice' in payload) {
           const [asset, price] = payload.updatePrice as assetPrice;
           setMarkets(prev => prev.map(m => m.asset === asset ? { ...m, price } : m));
         } else if ('newTradeInfo' in payload) {
             const {asset, info} = payload.newTradeInfo as MarketTradeInfo;
             setMarkets(prev => prev.map(m => m.asset === asset ? { 
-                trades: m.trades.push(info),
+                ...m,
+                trades: [...(Array.isArray(m.trades) ? m.trades : []), info],
                 pnl: m.pnl += info.pnl 
             }: m))
 

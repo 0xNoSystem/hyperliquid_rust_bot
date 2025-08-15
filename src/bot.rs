@@ -1,4 +1,3 @@
-use log::info;
 use tokio::time::{sleep, interval, Duration};
 use std::collections::HashMap;
 use hyperliquid_rust_sdk::{Error, InfoClient, Message,Subscription, TradeInfo as HLTradeInfo};

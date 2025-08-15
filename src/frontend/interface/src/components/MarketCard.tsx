@@ -1,6 +1,6 @@
 import React from 'react';
 import { FaPlay, FaPause, FaTrash } from 'react-icons/fa';
-import type { IndicatorKind, MarketInfo, indicatorData, Decomposed  } from '../types';
+import type { IndicatorKind, MarketInfo, indicatorData, Decomposed, Strategy, CustomStrategy, Risk, Style, Stance  } from '../types';
 import { indicatorLabels, indicatorColors, decompose, get_value, fromTimeFrame} from '../types';
 
 interface MarketCardProps {
