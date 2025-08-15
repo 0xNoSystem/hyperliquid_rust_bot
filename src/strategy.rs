@@ -147,7 +147,7 @@ impl CustomStrategy{
         Some(TradeCommand::ExecuteTrade {
                 size: 0.2 * max_size,
                 is_long: true,
-                60,
+                duration: 60,
             })
     
 }
