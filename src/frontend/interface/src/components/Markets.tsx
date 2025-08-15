@@ -68,6 +68,8 @@ export default function MarketsPage() {
                 pnl: m.pnl += info.pnl 
             }: m))
 
+            console.log("HERE ARE THE INFO: {}", info);
+
         } else if ('updateTotalMargin' in payload) {
           setTotalMargin(payload.updateTotalMargin)
         } else if ('updateMarketMargin' in payload) {
