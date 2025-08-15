@@ -109,9 +109,10 @@ impl CustomStrategy{
     }
 
 
-    pub fn generate_signal(&self, data: Vec<Value>, price: f64) -> Option<TradeCommand> {
+    pub fn generate_signal(&self, data: Vec<Value>, price: f64, margin: f64) -> Option<TradeCommand> {
     // Extract indicator values from the data
     let mut rsi_value = None;
+    let mut srsi_value = None;
     let mut stoch_rsi = None;
     let mut ema_cross = None;
     let mut adx_value = None;
@@ -120,6 +121,7 @@ impl CustomStrategy{
     for value in data {
         match value {
             Value::RsiValue(rsi) => rsi_value = Some(rsi),
+            Value::SmaRsiValue(srsi) => srsi_value = Some(srsi),
             Value::StochRsiValue { k, d } => stoch_rsi = Some((k, d)),
             Value::EmaCrossValue { short, long, trend } => {
                 ema_cross = Some((short, long, trend))
@@ -130,10 +132,72 @@ impl CustomStrategy{
         }
     }
     
-    self.scalping_strategy(rsi_value, stoch_rsi, ema_cross, adx_value, atr_value, price)
+    //self.standard_strategy(rsi_value, stoch_rsi, ema_cross, adx_value, atr_value, price)
+    if let Some(rsi) = rsi_value{
+        if let Some(srsi) = srsi_value{
+                if let Some(stoch) = stoch_rsi{
+                    return self.rsi_based_scalp(rsi, srsi, stoch, margin);
+                }
+            }
+    }
+
+        None
+    
 }
 
-fn scalping_strategy(
+
+fn rsi_based_scalp(
+    &self,
+    rsi: f64,
+    srsi: f64,
+    stoch_rsi: (f64, f64), // (K, D)
+    margin: f64,
+) -> Option<TradeCommand> {
+    let (k, d) = stoch_rsi;
+    let duration = 420;
+
+    let rsi_dev = match self.risk {
+        Risk::Low => 15.0,
+        Risk::Normal => 30.0,
+        Risk::High => 37.0,
+    };
+
+    const SRSI_OB: f64 = 80.0; 
+    const SRSI_OS: f64 = 20.0; 
+
+    if self.stance != Stance::Bull {
+        let rsi_short = rsi > 100.0 - rsi_dev;
+        let srsi_short = srsi > 100.0 - rsi_dev - 5.0;
+        let stoch_short = k > SRSI_OB && d > SRSI_OB;
+
+        if rsi_short || srsi_short || stoch_short {
+            return Some(TradeCommand::ExecuteTrade {
+                size: 0.9 * margin,
+                is_long: false,
+                duration,
+            });
+        }
+    }
+
+    if self.stance != Stance::Bear {
+        let rsi_long = rsi < rsi_dev;
+        let srsi_long = srsi < rsi_dev + 5.0;
+        let stoch_long = k < SRSI_OS && d < SRSI_OS;
+
+        if rsi_long || srsi_long || stoch_long {
+            return Some(TradeCommand::ExecuteTrade {
+                size: 0.9 * margin,
+                is_long: true,
+                duration,
+            });
+        }
+    }
+
+    None
+}
+
+
+fn standard_strategy(
     &self,
     rsi: Option<f64>,
     stoch_rsi: Option<(f64, f64)>,
