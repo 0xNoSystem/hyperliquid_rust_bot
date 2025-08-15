@@ -157,7 +157,7 @@ impl SignalEngine{
     fn get_signal(&self, price: f64, values: Vec<Value>) -> Option<TradeCommand>{
        
         match self.strategy{
-            Strategy::Custom(brr) => brr.generate_signal(values, price, self.exec_params.margin)
+            Strategy::Custom(brr) => brr.generate_signal(values, price, self.exec_params)
         }
     }
 

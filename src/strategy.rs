@@ -2,6 +2,7 @@ use crate::TradeCommand;
 //use crate::signal::IndicatorKind;
 use kwant::indicators::Value;
 use serde::{Deserialize, Serialize};
+use crate::signal::ExecParams;
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -109,7 +110,7 @@ impl CustomStrategy{
     }
 
 
-    pub fn generate_signal(&self, data: Vec<Value>, price: f64, margin: f64) -> Option<TradeCommand> {
+    pub fn generate_signal(&self, data: Vec<Value>, price: f64, params: ExecParams) -> Option<TradeCommand> {
     // Extract indicator values from the data
     let mut rsi_value = None;
     let mut srsi_value = None;
@@ -136,7 +137,8 @@ impl CustomStrategy{
     if let Some(rsi) = rsi_value{
         if let Some(srsi) = srsi_value{
                 if let Some(stoch) = stoch_rsi{
-                    return self.rsi_based_scalp(rsi, srsi, stoch, margin);
+                    let max_size = (params.margin * params.lev as f64) / price;
+                    return self.rsi_based_scalp(rsi, srsi, stoch, max_size);
                 }
             }
     }
@@ -151,7 +153,7 @@ fn rsi_based_scalp(
     rsi: f64,
     srsi: f64,
     stoch_rsi: (f64, f64), // (K, D)
-    margin: f64,
+    max_size: f64,
 ) -> Option<TradeCommand> {
     let (k, d) = stoch_rsi;
     let duration = 420;
@@ -172,7 +174,7 @@ fn rsi_based_scalp(
 
         if rsi_short || srsi_short || stoch_short {
             return Some(TradeCommand::ExecuteTrade {
-                size: 0.9 * margin,
+                size: 0.9 * max_size,
                 is_long: false,
                 duration,
             });
@@ -186,7 +188,7 @@ fn rsi_based_scalp(
 
         if rsi_long || srsi_long || stoch_long {
             return Some(TradeCommand::ExecuteTrade {
-                size: 0.9 * margin,
+                size: 0.9 * max_size,
                 is_long: true,
                 duration,
             });
