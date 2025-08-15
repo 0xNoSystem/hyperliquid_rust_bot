@@ -101,6 +101,15 @@ pub struct TradeInfo{
 
 
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketTradeInfo{
+    pub asset: String,
+    pub info: TradeInfo,
+}
+
+
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

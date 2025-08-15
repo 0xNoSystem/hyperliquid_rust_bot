@@ -10,7 +10,7 @@ use hyperliquid_rust_sdk::{AssetMeta,Error, BaseUrl, ExchangeClient, InfoClient,
 
 use kwant::indicators::Price;
 
-use crate::{MAX_HISTORY, MarketInfo};
+use crate::{MAX_HISTORY, MarketInfo, MarketTradeInfo};
 //use crate::MARKETS;
 
 //use crate::wallet::Wallet;
@@ -252,7 +252,13 @@ impl Market{
                         self.trade_history.push(trade_info);
                         let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Margin(self.margin)));
                         //maybe send margin to Bot struct ??
-                        let _ = bot_update_tx.send(MarketUpdate::TradeUpdate(trade_info));
+                        let _ = bot_update_tx.send(MarketUpdate::TradeUpdate(
+                            MarketTradeInfo{
+                                asset: asset.name.clone(),
+                                info: trade_info,
+                            }
+                        ));
+                        let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((asset.name.clone(), self.margin)));
                     },
 
                     MarketCommand::ReceiveLiquidation(liq_fill) => {
@@ -307,7 +313,11 @@ impl Market{
                                         self.pnl += trade_info.pnl;
                                         self.margin += trade_info.pnl;
                                         self.trade_history.push(trade_info);
-                                        let _ = bot_update_tx.send(MarketUpdate::TradeUpdate(trade_info));
+                                        let _ = bot_update_tx.send(MarketUpdate::TradeUpdate(
+                                            MarketTradeInfo{
+                                                asset: asset.name.to_string(),
+                                                info: trade_info}
+                                        ));
                                         break;
                                         },
 
@@ -377,14 +387,13 @@ struct MarketReceivers {
 pub enum MarketUpdate{
     InitMarket(MarketInfo),
     PriceUpdate(AssetPrice),
-    TradeUpdate(TradeInfo),
+    TradeUpdate(MarketTradeInfo),
     MarginUpdate(AssetMargin),
     RelayToFrontend(UpdateFrontend),
 }
 
 
 pub type AssetPrice = (String, f64);
-
 
 
 

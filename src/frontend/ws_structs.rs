@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::{TradeInfo, MarginAllocation, IndexId, TradeParams, Value, AssetPrice, AssetMargin};
+use crate::{MarketTradeInfo,MarginAllocation, IndexId, TradeParams, Value, AssetPrice, AssetMargin};
 use std::collections::HashMap;
 
 
@@ -41,12 +41,14 @@ pub enum EditMarketInfo{
     Indicator(Vec<IndexId>),
 }
 
+
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum UpdateFrontend{
     ConfirmMarket(MarketInfo),
     UpdatePrice(AssetPrice),
-    NewTradeInfo(TradeInfo),
+    NewTradeInfo(MarketTradeInfo),
     UpdateTotalMargin(f64),
     UpdateMarketMargin(AssetMargin),
     UpdateIndicatorValues{asset: String, data: Vec<IndicatorData>},
@@ -54,3 +56,7 @@ pub enum UpdateFrontend{
     UserError(String),
     LoadSession(Vec<MarketInfo>),
 }
+
+
+
+

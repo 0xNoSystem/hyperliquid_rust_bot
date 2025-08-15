@@ -149,7 +149,7 @@ export interface AddMarketInfo {
 export type Message = 
     | { confirmMarket: MarketInfo }
     | { updatePrice: assetPrice }
-    | { newTradeInfo: TradeInfo }
+    | { newTradeInfo: MarketTradeInfo }
     | { updateTotalMargin: number}
     | { updateMarketMargin: assetMargin }
     | { updateIndicatorValues: {asset: string, data: indicatorData[] }}
@@ -177,6 +177,12 @@ export interface TradeInfo{
     duration?: number,
     oid: [number, number]
 };
+
+
+export interface MarketTradeInfo{
+    asset: string,
+    info: TradeInfo,
+}
 
 
 export const indicatorLabels: Record<string, string> = {

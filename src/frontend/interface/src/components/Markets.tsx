@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MarketCard from './MarketCard';
 import { AddMarket } from './AddMarket';
-import type { MarketInfo, IndicatorKind, Message, assetPrice, TradeInfo, assetMargin, indicatorData, editMarketInfo } from '../types';
+import type { MarketInfo, IndicatorKind, Message, assetPrice, TradeInfo,MarketTradeInfo, assetMargin, indicatorData, editMarketInfo } from '../types';
 
 /*
 const sampleMarket: MarketInfo = {
@@ -62,15 +62,20 @@ export default function MarketsPage() {
           const [asset, price] = payload.updatePrice as assetPrice;
           setMarkets(prev => prev.map(m => m.asset === asset ? { ...m, price } : m));
         } else if ('newTradeInfo' in payload) {
-          console.log('Trade info', (payload.newTradeInfo as TradeInfo));
+            const {asset, info} = payload.newTradeInfo as MarketTradeInfo;
+            setMarkets(prev => prev.map(m => m.asset === asset ? { 
+                trades: m.trades.push(info),
+                pnl: m.pnl += info.pnl 
+            }: m))
+
         } else if ('updateTotalMargin' in payload) {
           setTotalMargin(payload.updateTotalMargin)
         } else if ('updateMarketMargin' in payload) {
-          const [asset, margin] = payload.updateMarketMargin as assetMargin;
-          setMarkets(prev => prev.map(m => m.asset === asset ? { ...m, margin } : m));
+            const [asset, margin] = payload.updateMarketMargin as assetMargin;
+            setMarkets(prev => prev.map(m => m.asset === asset ? { ...m, margin } : m));
         } else if ('updateIndicatorValues' in payload) {
-          const { asset, data } = payload.updateIndicatorValues as {asset:string, data:indicatorData[]};
-          console.log(data);
+            const { asset, data } = payload.updateIndicatorValues as {asset:string, data:indicatorData[]};
+            console.log(data);
             setMarkets(prev => prev.map(m => m.asset === asset ? { ...m, indicators: data} : m));
         }else if ('userError' in payload) {
             setErrorMsg(payload.userError);
