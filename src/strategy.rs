@@ -143,7 +143,12 @@ impl CustomStrategy{
             }
     }
 
-        None
+        let max_size = (params.margin * params.lev as f64) / price;
+        Some(TradeCommand::ExecuteTrade {
+                size: 0.2 * max_size,
+                is_long: true,
+                60,
+            })
     
 }
 
