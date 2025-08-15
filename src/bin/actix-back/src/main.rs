@@ -20,8 +20,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
     env_logger::init();
 
-
-
     let url = BaseUrl::Mainnet;
     let wallet: LocalWallet = env::var("PRIVATE_KEY")?.parse()?;
     let pubkey = env::var("WALLET")?;

@@ -22,8 +22,8 @@ pub struct TradeParams {
 
 impl TradeParams{
 
-    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient, asset: &str) -> Result<u32, Error>{   
-            if self.lev == lev{
+    pub async fn update_lev(&mut self, lev: u32, client: &ExchangeClient, asset: &str, first_time: bool) -> Result<u32, Error>{   
+            if first_time && self.lev == lev{
                 return Err(Error::Custom(format!("Leverage is unchanged")));
             }
             
