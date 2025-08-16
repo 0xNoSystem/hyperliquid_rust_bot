@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Ban, Power, Pause, Play, X, AlertTriangle, Trash2, PauseCircle } from 'lucide-react';
+import { Plus, Power, Pause, X, AlertCircle } from 'lucide-react';
 import MarketCard from './MarketCard';
 import { AddMarket } from './AddMarket';
 import type { MarketInfo, Message, assetPrice, MarketTradeInfo, assetMargin, indicatorData } from '../types';
 
-// ---------- MarketsPage (Brutalist)
 export default function MarketsPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const errRef = useRef<NodeJS.Timeout | null>(null);
@@ -114,98 +113,103 @@ export default function MarketsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#0a0a0a_0%,#0f0f0f_100%)] text-white">
-      {/* Brutalist Header */}
-      <div className="sticky top-0 z-40 border-b border-white/20 bg-black">
-        <div className="mx-auto max-w-7xl p-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 items-end">
-            <div>
-              <div className="text-[11px] uppercase text-white/60 tracking-widest">Console</div>
-              <h1 className="-mt-1 text-4xl font-black leading-none">KWANT//MARKETS</h1>
-            </div>
-            <div className="hidden md:flex items-center justify-center gap-3">
-              <div className="border border-white/30 px-3 py-2 font-mono text-sm">
-                MARGIN <span className="ml-2 tabular-nums">{totalMargin.toFixed(2)}</span>
-              </div>
-              {markets.length !== 0 && (
-                <button onClick={() => setShowAdd(true)} className="border border-lime-400 bg-lime-400/10 px-3 py-2 text-lime-200 hover:bg-lime-400/20">
-                  <div className="flex items-center gap-2"><Plus className="h-4 w-4" /><span>ADD</span></div>
-                </button>
-              )}
-            </div>
-            <div className="flex items-center justify-end gap-2">
-              <button className="border border-red-500 bg-red-600/20 px-3 py-2 hover:bg-red-600/30" onClick={() => { closeAll(); setMarkets([]); }}>
-                <div className="flex items-center gap-2"><Power className="h-4 w-4" /><span>KILL ALL</span></div>
-              </button>
-              <button className="border border-amber-500 bg-amber-500/20 px-3 py-2 hover:bg-amber-500/30" onClick={() => { pauseAll(); markets.forEach(m => (m.is_paused = true)); }}>
-                <div className="flex items-center gap-2"><Pause className="h-4 w-4" /><span>PAUSE ALL</span></div>
-              </button>
-            </div>
-          </div>
-
-          {/* Ticker strip */}
-          <div className="mt-4 overflow-hidden border-y border-white/10">
-            <div className="whitespace-nowrap [animation:scroll_30s_linear_infinite] text-sm">
-              <span className="mx-6 text-white/70">SYSTEM STATUS: <b className="text-lime-300">ONLINE</b></span>
-              <span className="mx-6 text-white/70">SESSION: REAL‑TIME</span>
-              <span className="mx-6 text-white/70">RISK: MANAGED</span>
-              <span className="mx-6 text-white/70">UI MODE: BRUTALIST</span>
-              <span className="mx-6 text-white/70">TRADES STREAMING…</span>
-            </div>
-          </div>
-        </div>
+    <div className="relative min-h-screen overflow-hidden bg-[#07090B] text-white">
+      {/* layered background */}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.08] [background:radial-gradient(60%_60%_at_0%_0%,rgba(56,189,248,0.5),transparent_60%),radial-gradient(50%_50%_at_100%_0%,rgba(232,121,249,0.5),transparent_60%),radial-gradient(60%_60%_at_50%_100%,rgba(52,211,153,0.4),transparent_60%)]" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.06] bg-[linear-gradient(transparent_23px,rgba(255,255,255,0.06)_24px),linear-gradient(90deg,transparent_23px,rgba(255,255,255,0.06)_24px)] bg-[size:26px_26px]" />
+      <div className="pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,transparent,black_20%,black_80%,transparent)]">
+        <div className="h-[200%] w-[200%] -translate-x-1/4 animate-[scan_9s_linear_infinite] bg-[repeating-linear-gradient(90deg,transparent_0,transparent_48px,rgba(255,255,255,0.04)_49px,rgba(255,255,255,0.04)_50px)]" />
       </div>
 
-      {/* Empty state */}
-      {markets.length === 0 && (
-        <div className="mx-auto max-w-4xl px-4 py-24">
-          <div className="border-2 border-dashed border-white/30 p-10">
-            <div className="text-[11px] uppercase text-white/60">Initialize</div>
-            <div className="mt-1 flex items-end justify-between">
-              <h2 className="text-5xl font-black">NO MARKETS</h2>
-              <button onClick={() => setShowAdd(true)} className="border border-lime-400 bg-lime-400/10 px-4 py-2 text-lime-200 hover:bg-lime-400/20">
-                <div className="flex items-center gap-2"><Plus className="h-4 w-4" /><span>ADD MARKET</span></div>
-              </button>
+      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[280px,1fr]">
+        {/* Command Dock */}
+        <aside className="h-fit rounded-md border border-white/10 bg-[#0B0E12]/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <div className="text-[10px] uppercase text-white/50">Available Margin</div>
+              <div className="font-mono text-3xl tabular-nums tracking-tight">${totalMargin.toFixed(2)}</div>
             </div>
-            <p className="mt-3 max-w-prose text-white/70">Add at least one market to begin streaming quotes and executing strategies.</p>
+            <div className="h-6 w-1 bg-gradient-to-b from-cyan-400 via-fuchsia-400 to-emerald-400" />
           </div>
-        </div>
-      )}
 
-      {/* Markets grid */}
-      {markets.length > 0 && (
-        <div className="mx-auto max-w-7xl px-4 py-10">
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-            {markets.map(m => (
-              <MarketCard key={m.asset} market={m} onTogglePause={() => handleConfirmToggle(m.asset, m.is_paused)} onRemove={() => setMarketToRemove(m.asset)} />
-            ))}
+          <div className="mt-4 grid gap-2">
+            {markets.length !== 0 && (
+              <button onClick={() => setShowAdd(true)} className="w-full rounded-md border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-cyan-200 hover:bg-cyan-500/20">
+                <div className="flex items-center justify-center gap-2"><Plus className="h-4 w-4" /><span className="text-sm">Add Market</span></div>
+              </button>
+            )}
+            <button
+              className="w-full rounded-md border border-red-500/40 bg-red-600/15 px-3 py-2 text-red-200 hover:bg-red-600/25"
+              onClick={() => { closeAll(); setMarkets([]); }}
+            >
+              <div className="flex items-center justify-center gap-2"><Power className="h-4 w-4" /><span className="text-sm">Close All</span></div>
+            </button>
+            <button
+              className="w-full rounded-md border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-amber-200 hover:bg-amber-500/25"
+              onClick={() => { pauseAll(); markets.forEach(m => (m.is_paused = true)); }}
+            >
+              <div className="flex items-center justify-center gap-2"><Pause className="h-4 w-4" /><span className="text-sm">Pause All</span></div>
+            </button>
           </div>
-        </div>
-      )}
 
-      {/* Error banner */}
+          <div className="mt-6 grid gap-2 border-t border-white/10 pt-4 text-[12px] text-white/60">
+            <p className="font-semibold text-white/70">Console</p>
+            <div className="rounded-md border border-white/10 bg-[#0F1115] p-3">
+              <p>• Cards tilt on hover; neon edge = PnL direction.</p>
+              <p>• Chips show indicator & timeframe.</p>
+              <p>• Actions are destructive‑gated in modals.</p>
+            </div>
+          </div>
+        </aside>
+
+        {/* Markets Grid */}
+        <main>
+          {markets.length === 0 && (
+            <div className="grid place-items-center rounded-md border border-white/10 bg-[#0B0E12]/80 p-12 text-center">
+              <div>
+                <h2 className="text-2xl font-semibold">No markets configured</h2>
+                <p className="mt-1 text-white/60">Add a market to begin streaming quotes and executing strategies.</p>
+                <button onClick={() => setShowAdd(true)} className="mt-5 inline-flex items-center gap-2 rounded-md border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-cyan-200 hover:bg-cyan-500/20">
+                  <Plus className="h-4 w-4" /> Add Market
+                </button>
+              </div>
+            </div>
+          )}
+
+          {markets.length > 0 && (
+            <div className="grid grid-cols-1 gap-7 sm:grid-cols-2 xl:grid-cols-3">
+              {markets.map(m => (
+                <motion.div key={m.asset} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                  <MarketCard market={m} onTogglePause={() => handleConfirmToggle(m.asset, m.is_paused)} onRemove={() => setMarketToRemove(m.asset)} />
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* Error toast */}
       <AnimatePresence>
         {errorMsg && (
-          <motion.div initial={{ y: -16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -16, opacity: 0 }} className="fixed left-0 right-0 top-16 z-50">
-            <div className="mx-auto max-w-3xl border border-red-500 bg-[#2a0d0d] px-4 py-3 text-red-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4" /><span className="text-sm">{errorMsg}</span></div>
-                <button onClick={() => setErrorMsg(null)} className="border border-red-400/50 px-2 py-1 text-xs hover:bg-red-500/20">DISMISS</button>
-              </div>
+          <motion.div initial={{ y: -16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -16, opacity: 0 }} className="fixed left-1/2 top-6 z-50 -translate-x-1/2">
+            <div className="flex items-center gap-2 rounded-md border border-red-500/40 bg-[#2A1010] px-3 py-2 text-red-100 shadow">
+              <AlertCircle className="h-4 w-4" />
+              <span className="text-sm">{errorMsg}</span>
+              <button onClick={() => setErrorMsg(null)} className="ml-2 rounded-md px-2 py-1 hover:bg-white/10"><X className="h-4 w-4" /></button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Add Market Modal */}
+      {/* Add Market modal */}
       <AnimatePresence>
         {showAdd && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50">
             <div className="absolute inset-0 bg-black/70" onClick={() => setShowAdd(false)} />
-            <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 10, opacity: 0 }} className="relative mx-auto mt-24 w-full max-w-2xl border border-white/20 bg-[#0d0d0d] p-6">
-              <div className="flex items-center justify-between border-b border-white/20 pb-3">
-                <div className="text-[11px] uppercase text-white/60">Create</div>
-                <button onClick={() => setShowAdd(false)} className="border border-white/30 p-1 hover:bg-white/10"><X className="h-4 w-4" /></button>
+            <motion.div initial={{ rotateX: -8, opacity: 0 }} animate={{ rotateX: 0, opacity: 1 }} exit={{ rotateX: -4, opacity: 0 }} className="relative mx-auto mt-24 w-full max-w-2xl rounded-md border border-white/10 bg-[#0B0E12] p-6">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 className="text-sm text-white/80">Add Market</h3>
+                <button onClick={() => setShowAdd(false)} className="rounded-md p-1 hover:bg-white/10"><X className="h-5 w-5" /></button>
               </div>
               <div className="pt-4">
                 <AddMarket onClose={() => setShowAdd(false)} totalMargin={totalMargin} />
@@ -215,45 +219,41 @@ export default function MarketsPage() {
         )}
       </AnimatePresence>
 
-      {/* Confirm Remove */}
+      {/* Confirm remove */}
       <AnimatePresence>
         {marketToRemove && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50">
             <div className="absolute inset-0 bg-black/70" onClick={() => setMarketToRemove(null)} />
-            <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 10, opacity: 0 }} className="relative mx-auto mt-28 w-full max-w-md border border-red-500 bg-[#1a0c0c] p-6">
-              <div className="text-[11px] uppercase text-red-300">Danger</div>
-              <h3 className="mt-1 text-2xl font-black">REMOVE {marketToRemove} ?</h3>
-              <p className="mt-1 text-red-200/80">Ongoing bot trades will be closed.</p>
+            <motion.div initial={{ y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 10, opacity: 0 }} className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-red-500/40 bg-[#1A0F12] p-6">
+              <h3 className="text-lg font-semibold">Remove <span className="text-red-300">{marketToRemove}</span>?</h3>
+              <p className="mt-1 text-red-200/80">This will close any ongoing trade initiated by the Bot.</p>
               <div className="mt-6 flex justify-end gap-2">
-                <button className="border border-white/30 px-3 py-2 hover:bg-white/10" onClick={() => setMarketToRemove(null)}>CANCEL</button>
-                <button className="border border-red-500 bg-red-600/20 px-3 py-2 hover:bg-red-600/30" onClick={() => handleRemove(marketToRemove)}>YES</button>
+                <button className="rounded-md border border-white/20 px-4 py-2 hover:bg-white/10" onClick={() => setMarketToRemove(null)}>Cancel</button>
+                <button className="rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700" onClick={() => handleRemove(marketToRemove)}>Yes</button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Confirm Pause */}
+      {/* Confirm pause */}
       <AnimatePresence>
         {marketToToggle && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50">
             <div className="absolute inset-0 bg-black/70" onClick={() => setMarketToToggle(null)} />
-            <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 10, opacity: 0 }} className="relative mx-auto mt-28 w-full max-w-md border border-amber-500 bg-[#1a160c] p-6">
-              <div className="text-[11px] uppercase text-amber-300">Control</div>
-              <h3 className="mt-1 text-2xl font-black">PAUSE {marketToToggle} ?</h3>
-              <p className="mt-1 text-amber-200/80">Ongoing bot trades will be closed.</p>
+            <motion.div initial={{ y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 10, opacity: 0 }} className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-amber-500/40 bg-[#1A140A] p-6">
+              <h3 className="text-lg font-semibold">Pause <span className="text-amber-300">{marketToToggle}</span>?</h3>
+              <p className="mt-1 text-amber-200/80">This will close any ongoing trade initiated by the Bot.</p>
               <div className="mt-6 flex justify-end gap-2">
-                <button className="border border-white/30 px-3 py-2 hover:bg-white/10" onClick={() => setMarketToToggle(null)}>CANCEL</button>
-                <button className="border border-amber-500 bg-amber-600/20 px-3 py-2 hover:bg-amber-600/30" onClick={() => handleTogglePause(marketToToggle)}>YES</button>
+                <button className="rounded-md border border-white/20 px-4 py-2 hover:bg-white/10" onClick={() => setMarketToToggle(null)}>Cancel</button>
+                <button className="rounded-md bg-amber-600 px-4 py-2 text-white hover:bg-amber-700" onClick={() => handleTogglePause(marketToToggle)}>Yes</button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* keyframes for ticker */}
-      <style>{`@keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}`}</style>
+      <style>{`@keyframes scan{0%{transform:translateX(0)}100%{transform:translateX(-25%)}}`}</style>
     </div>
   );
 }
-
