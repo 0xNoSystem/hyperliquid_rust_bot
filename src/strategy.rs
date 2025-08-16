@@ -143,14 +143,7 @@ impl CustomStrategy{
             }
     }
 
-        let max_size = (params.margin * params.lev as f64) / price;
-        Some(TradeCommand::ExecuteTrade {
-                size: 0.2 * max_size,
-                is_long: true,
-                duration: 60,
-            })
-    
-}
+       }
 
 
 fn rsi_based_scalp(
