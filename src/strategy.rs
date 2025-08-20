@@ -172,7 +172,7 @@ fn rsi_based_scalp(
         let srsi_short = srsi > 100.0 - rsi_dev - 5.0;
         let stoch_short = k > SRSI_OB && d > SRSI_OB;
 
-        if rsi_short || srsi_short || stoch_short {
+        if rsi_short && srsi_short && stoch_short {
             return Some(TradeCommand::ExecuteTrade {
                 size: 0.9 * max_size,
                 is_long: false,
@@ -186,7 +186,7 @@ fn rsi_based_scalp(
         let srsi_long = srsi < rsi_dev + 5.0;
         let stoch_long = k < SRSI_OS && d < SRSI_OS;
 
-        if rsi_long || srsi_long || stoch_long {
+        if rsi_long && srsi_long && stoch_long {
             return Some(TradeCommand::ExecuteTrade {
                 size: 0.9 * max_size,
                 is_long: true,
