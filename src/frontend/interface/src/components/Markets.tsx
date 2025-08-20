@@ -155,9 +155,7 @@ export default function MarketsPage() {
           <div className="mt-6 grid gap-2 border-t border-white/10 pt-4 text-[12px] text-white/60">
             <p className="font-semibold text-white/70">Console</p>
             <div className="rounded-md border border-white/10 bg-[#0F1115] p-3">
-              <p>• Cards tilt on hover; neon edge = PnL direction.</p>
-              <p>• Chips show indicator & timeframe.</p>
-              <p>• Actions are destructive‑gated in modals.</p>
+                
             </div>
           </div>
         </aside>

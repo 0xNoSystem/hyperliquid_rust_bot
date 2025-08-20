@@ -4,6 +4,7 @@ import MarketsPage from './components/Markets'
 import Header from './components/Header'
 import Footer from './components/footer'
 import type {IndicatorKind, MarketInfo} from './types'
+import viteLogo from '/vite.svg';
 
 
 const handleTogglePause = (asset: string) => {
