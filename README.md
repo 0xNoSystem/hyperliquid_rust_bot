@@ -85,7 +85,7 @@ let market = AddMarketInfo {
 - `src/trade_setup.rs` – trading parameters and trade metadata.
 - `config.toml` – example strategy configuration.
 
-Supported trading pairs can be found in `src/consts.rs` (`MARKETS`).
+Supported trading pairs can be found in `src/assets.rs` (`MARKETS`).
 
 ## Disclaimer
 
