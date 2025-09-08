@@ -1,11 +1,11 @@
-cargo run --bin load #update tradable assets list
+cargo run --release --bin load #update tradable assets list
 
-cd src/bin/actix-back || exit 1
 
-cargo run --release & #PREFIX WITH "RUST_LOG=info" for logging
+cargo run --release --bin kwant & #PREFIX WITH "RUST_LOG=info" for logging
 
-cd ../../frontend/interface
+cd ./src/frontend/interface
 
+npm install
 npm run dev
 
 

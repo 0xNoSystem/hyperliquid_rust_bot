@@ -1,168 +1,169 @@
-#![allow(unused_imports)]
-#![allow(unused_mut)]
-#![allow(unused_variables)]
-
-use log::info;
-use std::str::FromStr;
-use std::sync::Arc;
-use hyperliquid_rust_sdk::Error;
+use std::env;
+use tokio::{sync::{mpsc::{unbounded_channel, UnboundedSender}, broadcast::{self, Sender as BroadcastSender}}, time::Duration};
+use actix::{Actor, StreamHandler, Handler, Message};
+use actix_cors::Cors;
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder, Error as ActixError};
+use actix::ActorContext;
+use actix::AsyncContext;
+use actix_web_actors::ws;
+use dotenv::dotenv;
+use env_logger;
+use log::{error, info};
+use serde_json;
 use hyperliquid_rust_bot::{
-    Bot,
-    BotEvent,
-    MarginAllocation,
-    AssetMargin,
-    BotToMarket,
-    MarketCommand,
-    IndexId, Entry, EditType, IndicatorKind,
-    MARKETS,
-    TradeParams,TimeFrame, AddMarketInfo, UpdateFrontend,
-
-    LocalWallet, Wallet, BaseUrl,
+    Bot, BotEvent, UpdateFrontend, LocalWallet, Wallet, BaseUrl,
 };
 use hyperliquid_rust_bot::strategy::{Strategy, CustomStrategy, Risk, Style, Stance};
 
-use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    time::{sleep, Duration},
-};
-
-
-
-#[tokio::main]
-async fn main() -> Result<(), Error>{
+#[actix_web::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv().ok();
     env_logger::init();
-    dotenv::dotenv().ok();
 
-    let wallet = load_wallet(BaseUrl::Mainnet).await?;
+    let url = BaseUrl::Mainnet;
+    let wallet: LocalWallet = env::var("PRIVATE_KEY")?.parse()?;
+    let pubkey = env::var("WALLET")?;
+    let wallet = Wallet::new(url, pubkey, wallet).await?;
 
+    let (mut bot, cmd_sender) = Bot::new(wallet).await?;
+    let (update_tx, mut update_rx) = unbounded_channel::<UpdateFrontend>();
+    tokio::spawn(async move { bot.start(update_tx).await });
 
-    let strategy = Strategy::Custom(load_strategy("./config.toml"));
-    let trade_params = TradeParams{
-        strategy,
-        lev: 10,
-        trade_time: 600,
-        time_frame: TimeFrame::from_str("5m").unwrap_or(TimeFrame::Min1),
-    };
+    let (bcast_tx, _) = broadcast::channel::<UpdateFrontend>(128);
+    let bcast_cl = bcast_tx.clone();
 
-    let change = (IndicatorKind::Rsi(12), TimeFrame::Min5); 
-    let change2 = (IndicatorKind::EmaCross{short: 20, long: 200}, TimeFrame::Day1);
+    let mut _dummy_rx = bcast_tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            let _ = _dummy_rx.recv().await;
+        }
+    });
 
-    let edit1 = Entry{id: (IndicatorKind::Rsi(12), TimeFrame::Min5) ,edit: EditType::Remove};
+    tokio::spawn(async move {
+        while let Some(update) = update_rx.recv().await {
+            if let Err(err) = bcast_tx.send(update) {
+                error!("broadcast send error: {}", err);
+            }
+        }
+    });
 
-    let market_info = AddMarketInfo{
-        asset: "BTC".to_string(),
-        margin_alloc: MarginAllocation::Amount(50.5),
-        trade_params,
-        config: Some(Vec::from([change, change2])), //indicators config
-    }; 
+    let cmd_data = web::Data::new(cmd_sender.clone());
+    let bcast_data = web::Data::new(bcast_cl.clone());
 
-    println!("{:?}", market_info);
-       
-    let (mut bot, event_tx) = Bot::new(wallet).await?;
-    let (app_tx, mut app_rv) = unbounded_channel::<UpdateFrontend>();
-    
-    tokio::spawn(async move{
-        bot.start(app_tx).await;
-    });     
-
-    let _ = event_tx.send(BotEvent::AddMarket(market_info.clone()));
-    let _ = event_tx.send(BotEvent::AddMarket(market_info));
-    let _ = event_tx.send(BotEvent::ManualUpdateMargin(("BTC".into(),100.0)));
-    let _ = event_tx.send(BotEvent::MarketComm(BotToMarket{
-        asset: "BTC".to_string(),
-        cmd: MarketCommand::UpdateLeverage(33),
-    }));
-
-    while let Some(update) = app_rv.recv().await{
-            let json_update = serde_json::to_string_pretty(&update).unwrap();
-            println!("FRONT END RECEIVED SERIALIZED DATA: {}", json_update);
-    }
+    HttpServer::new(move || {
+        App::new()
+            .app_data(cmd_data.clone())
+            .app_data(bcast_data.clone())
+            .wrap(
+                Cors::default()
+                    .allow_any_origin()
+                    .allow_any_method()
+                    .allow_any_header()
+                    .supports_credentials(),
+            )
+            .route("/command", web::post().to(execute))
+            .route("/ws", web::get().to(ws_route))
+    })
+    .bind(("127.0.0.1", 8090))?
+    .run()
+    .await?;
 
     Ok(())
 }
 
+async fn execute(
+    raw: web::Bytes,
+    sender: web::Data<UnboundedSender<BotEvent>>,
+) -> impl Responder {
+    // Log the raw request body
+    let body_str = String::from_utf8_lossy(&raw);
+    println!("Incoming raw body: {}", body_str);
 
-fn load_strategy(path: &str) -> CustomStrategy {
-    let content = std::fs::read_to_string(path).expect("failed to read file");
-    toml::from_str(&content).expect("failed to parse toml")
-}
-
-async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error>{
-    let wallet = std::env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
-        .parse();
-
-    if let Err(ref e) = wallet{
-        return Err(Error::Custom(format!("Failed to load wallet: {}", e))); 
+    // Try to deserialize
+    match serde_json::from_slice::<BotEvent>(&raw) {
+        Ok(event) => {
+            if let Err(err) = sender.send(event) {
+                error!("failed to send command: {}", err);
+                return HttpResponse::InternalServerError().finish();
+            }
+            HttpResponse::Ok().finish()
+        }
+        Err(err) => {
+            error!("Failed to deserialize BotEvent: {}", err);
+            HttpResponse::BadRequest().body(format!("Invalid BotEvent: {}", err))
+        }
     }
-    let pubkey: String = std::env::var("WALLET").expect("Error fetching WALLET address");
-    Ok(Wallet::new(url , pubkey, wallet.unwrap()).await?)
+}
+
+async fn ws_route(
+    req: HttpRequest,
+    stream: web::Payload,
+    bcast: web::Data<BroadcastSender<UpdateFrontend>>,
+) -> Result<HttpResponse, ActixError> {
+    let rx = bcast.subscribe();
+    let ws = MyWebSocket { rx };
+    ws::start(ws, &req, stream)
+}
+
+#[derive(Message)]
+#[rtype(result = "()")] 
+struct ServerMessage(String);
+
+struct MyWebSocket {
+    rx: broadcast::Receiver<UpdateFrontend>,
+}
+
+impl Actor for MyWebSocket {
+    type Context = ws::WebsocketContext<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.run_interval(Duration::from_secs(30), |_, ctx| ctx.ping(b""));
+
+        let mut rx = self.rx.resubscribe();
+        let addr = ctx.address();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(update) => {
+                        if let Ok(text) = serde_json::to_string(&update) {
+                            println!("\n{}\n", text);
+                            addr.do_send(ServerMessage(text));
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(cnt)) => {
+                        error!("missed {} messages", cnt);
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            addr.do_send(ServerMessage("__SERVER_CLOSED__".into()));
+        });
+    }
+}
+
+impl Handler<ServerMessage> for MyWebSocket {
+    type Result = (); 
+
+    fn handle(&mut self, msg: ServerMessage, ctx: &mut Self::Context) {
+        if msg.0 == "__SERVER_CLOSED__" {
+            ctx.close(None);
+            ctx.stop();
+        } else {
+            ctx.text(msg.0);
+        }
+    }
+}
+
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
+    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
+        if let Ok(ws::Message::Ping(p)) = msg {
+            ctx.pong(&p);
+        } else if let Ok(ws::Message::Close(reason)) = msg {
+            ctx.close(reason);
+            ctx.stop();
+        }
+    }
 }
 
 
-/*
-*
-*
-* pub enum BotEvent{
-    AddMarket(AddMarketInfo),
-    ToggleMarket(String),
-    RemoveMarket(String),
-    MarketComm(BotToMarket),
-    ManualUpdateMargin(AssetMargin),
-    ResumeAll,
-    PauseAll,
-    CloseAll,
-}
-
-#[derive(Clone, Debug)]
-pub struct BotToMarket{
-    pub asset: String,
-    pub cmd: MarketCommand,
-}
-
-
-#[derive(Clone, Debug)]
-pub enum UpdateFrontend{
-    UpdatePrice(AssetPrice),
-    NewTradeInfo(TradeInfo),
-    UpdateTotalMargin(f64),
-    UpdateMarketMargin(AssetMargin),
-    UserError(Error),
-    UpdateMarketInfo .....
-}
-
-
-#[derive(Clone, Debug)]
-pub struct AddMarketInfo {
-    pub asset: String,
-    pub margin_alloc: MarginAllocation,
-    pub trade_params: TradeParams,
-    pub config: Option<Vec<IndexId>>,
-}
-
-#[derive(Debug, Clone)]
-pub enum MarketCommand{
-    UpdateLeverage(u32),
-    UpdateStrategy(Strategy),
-    EditIndicators(Vec<Entry>),
-    UpdateTimeFrame(TimeFrame),
-    ReceiveTrade(TradeInfo),
-    ReceiveLiquidation(LiquidationFillInfo),
-    UpdateMargin(f64),
-    Toggle,
-    Resume,
-    Pause,
-    Close,
-}
-
-????
-MarketInfo{
-    Lev,
-    Strategy,
-    Indicators,
-    TimeFrame,
-    Trades, 
-    Pnl,
-    Margin, 
-    PAUSED ?
-}
-*/

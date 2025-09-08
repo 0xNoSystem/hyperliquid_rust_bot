@@ -31,5 +31,10 @@ rustc-hash = "2.1.1"
 futures = "0.3.31"
 hyperliquid = "0.2.4"
 anyhow = "1.0.98"
+actix = "0.13"
+actix-web = "4.11.0"
+actix-web-actors = "4"
+actix-cors = "0.6"
+
 
 

@@ -2,6 +2,4 @@
 /target
 Cargo.lock
 testnet
-src/bin/actix-back/.env
-src/bin/actix-back/target
 src/frontend/interface/.vite
