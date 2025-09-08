@@ -118,7 +118,7 @@ pub async fn get_asset(info_client: &InfoClient, token: &str) -> Result<AssetMet
     }
 }
 
-
+#[inline]
 pub fn get_time_now() -> u64{
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
