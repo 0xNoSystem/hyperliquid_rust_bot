@@ -20,7 +20,7 @@ works.
 ## Getting started
 
 1. Install a recent Rust toolchain.
-2. Create a `.env` file in the src/bin/actix-web folder`:
+2. Create a `.env` file in the root directory`:
 
    ```env
    PRIVATE_KEY=<your API private key> -> https://app.hyperliquid.xyz/API
@@ -28,7 +28,7 @@ works.
    WALLET=<public wallet address>
    ```
 
-3. Run the demonstration:
+3. Run the app:
 
    ```bash
    ./run.sh
@@ -82,10 +82,11 @@ let market = AddMarketInfo {
   execution.
 - `src/signal/` – indicator trackers and strategy logic.
 - `src/executor.rs` – sends orders via the Hyperliquid API.
+- 'src/strategy.ra' - Implements strategies followed by the signal engine.
 - `src/trade_setup.rs` – trading parameters and trade metadata.
 - `config.toml` – example strategy configuration.
 
-Supported trading pairs can be found in `src/consts.rs` (`MARKETS`).
+Supported trading pairs can be found in `src/assets.rs` (`MARKETS`).
 
 ## Disclaimer
 
