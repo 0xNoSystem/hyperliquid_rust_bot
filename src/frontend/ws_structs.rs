@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use crate::{MarketTradeInfo,MarginAllocation, IndexId, TradeParams, Value, AssetPrice, AssetMargin};
-use std::collections::HashMap;
 use hyperliquid_rust_sdk::AssetMeta;
 
 

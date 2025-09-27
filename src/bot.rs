@@ -4,10 +4,9 @@ use std::collections::HashMap;
 use hyperliquid_rust_sdk::{Error, InfoClient, Message,Subscription,AssetMeta, TradeInfo as HLTradeInfo};
 use crate::{Market,
     MarketCommand,
-    MarketUpdate,AssetPrice,
+    MarketUpdate,
     MARKETS,
-    TradeParams,TradeInfo,
-    Wallet, IndexId, LiquidationFillInfo,
+    Wallet, LiquidationFillInfo,
     UpdateFrontend, AddMarketInfo, MarketInfo,
 };
 
@@ -16,14 +15,15 @@ use tokio::{
     sync::mpsc::{Sender, UnboundedSender, UnboundedReceiver, unbounded_channel},
 };
 
-use crate::margin::{MarginAllocation, MarginBook, AssetMargin};
+
+use crate::margin::{MarginBook, AssetMargin};
 use crate::helper::address;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use std::hash::BuildHasherDefault;
 use rustc_hash::FxHasher;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 
 pub struct Bot{
@@ -33,7 +33,7 @@ pub struct Bot{
     candle_subs: HashMap<String, u32>,
     session: Arc<Mutex<HashMap<String, MarketInfo, BuildHasherDefault<FxHasher>>>>,
     fees: (f64, f64),
-    bot_tx: UnboundedSender<BotEvent>,
+    _bot_tx: UnboundedSender<BotEvent>,
     bot_rv: UnboundedReceiver<BotEvent>,
     update_rv: Option<UnboundedReceiver<MarketUpdate>>,
     update_tx: UnboundedSender<MarketUpdate>,
@@ -46,12 +46,12 @@ pub struct Bot{
 impl Bot{
     pub async fn new(wallet: Wallet) -> Result<(Self, UnboundedSender<BotEvent>), Error>{
 
-        let mut info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
+        let info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
         let fees = wallet.get_user_fees().await?;
         let universe = get_all_assets(&info_client).await?;
 
-        let (bot_tx, mut bot_rv) = unbounded_channel::<BotEvent>();
-        let (update_tx, mut update_rv) = unbounded_channel::<MarketUpdate>();
+        let (bot_tx, bot_rv) = unbounded_channel::<BotEvent>();
+        let (update_tx, update_rv) = unbounded_channel::<MarketUpdate>();
 
         Ok((Self{
             info_client, 
@@ -60,7 +60,7 @@ impl Bot{
             candle_subs: HashMap::new(),
             session: Arc::new(Mutex::new(HashMap::default())),
             fees,
-            bot_tx: bot_tx.clone(),
+            _bot_tx: bot_tx.clone(),
             bot_rv,
             update_rv: Some(update_rv),
             update_tx,
@@ -83,7 +83,7 @@ impl Bot{
 
         if self.markets.contains_key(&asset){
             if let Some(tx) = &self.app_tx{
-                tx.send(UpdateFrontend::UserError(format!("{} market is already added.", &asset)));
+                let _ = tx.send(UpdateFrontend::UserError(format!("{} market is already added.", &asset)));
             }
             return Ok(());
         }
@@ -97,7 +97,7 @@ impl Bot{
         let margin = book.allocate(asset.clone(), margin_alloc).await?;
         
         let meta = get_asset(&self.info_client, asset_str).await?;
-        let (sub_id, mut receiver) = subscribe_candles(&mut self.info_client,
+        let (sub_id, receiver) = subscribe_candles(&mut self.info_client,
                                                         asset_str,
                                                         trade_params.time_frame.as_str())
                                                         .await?;
@@ -124,7 +124,7 @@ impl Bot{
         tokio::spawn(async move {
             if let Err(e) = market.start().await {
                 if let Some(tx) = app_tx{
-                    tx.send(UpdateFrontend::UserError(format!("Market {} exited with error: {:?}", &asset, e)));
+                    let _ = tx.send(UpdateFrontend::UserError(format!("Market {} exited with error: {:?}", &asset, e)));
                 }
                 let mut book = cancel_margin.lock().await;
                 book.remove(&asset);
@@ -219,7 +219,7 @@ impl Bot{
     pub async fn close_all(&mut self){
         info!("CLOSING ALL MARKETS");
         for (_asset, id) in self.candle_subs.drain(){
-                self.info_client.unsubscribe(id).await;
+                let _ = self.info_client.unsubscribe(id).await;
             } 
         self.candle_subs.clear();
         for (_asset, tx) in self.markets.drain(){
@@ -255,7 +255,7 @@ impl Bot{
 
     pub async fn get_session(&self) -> Result<(Vec<MarketInfo>, Vec<AssetMeta>), Error>{
 
-        let mut guard = self.session.lock().await;
+        let guard = self.session.lock().await;
         let session: Vec<MarketInfo> = guard.values().cloned().collect();
         let universe: Vec<AssetMeta>;
 
@@ -282,7 +282,7 @@ impl Bot{
              
         
         let user = self.wallet.clone();
-        let mut margin_book= MarginBook::new(user);
+        let margin_book= MarginBook::new(user);
         let margin_arc = Arc::new(Mutex::new(margin_book)); 
         let margin_sync = margin_arc.clone();
         let margin_user_edit = margin_arc.clone();

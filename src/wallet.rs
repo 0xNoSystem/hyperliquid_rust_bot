@@ -1,6 +1,6 @@
 use ethers::signers::LocalWallet;
 use crate::helper::{address};
-use hyperliquid_rust_sdk::{Error,InfoClient, UserFillsResponse, BaseUrl, AssetPosition};
+use hyperliquid_rust_sdk::{Error,InfoClient, UserFillsResponse, BaseUrl};
 
 pub struct Wallet{
     info_client: InfoClient,
@@ -14,7 +14,7 @@ impl Wallet{
 
     pub async fn new(url: BaseUrl,pubkey: String, wallet: LocalWallet) -> Result<Self, Error>{
 
-        let mut info_client = InfoClient::new(None, Some(url)).await?;
+        let info_client = InfoClient::new(None, Some(url)).await?;
         Ok(Wallet{
             info_client,
             wallet,

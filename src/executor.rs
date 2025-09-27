@@ -13,7 +13,7 @@ use hyperliquid_rust_sdk::{
     Error,BaseUrl, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams,
 };
 
-use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo, LiquidationFillInfo};
+use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo};
 use crate::market::MarketCommand;
 
 
@@ -365,7 +365,8 @@ impl Executor {
                         self.is_paused = false;
                 },
                     
-                TradeCommand::BuildPosition{size, is_long, interval} => {info!("Contacting Bob the builder")},
+                //TradeCommand::BuildPosition{size, is_long, interval} => {info!("Contacting Bob the builder")},
+                _ => {},
                     
         }
 

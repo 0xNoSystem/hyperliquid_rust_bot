@@ -61,7 +61,7 @@ impl Market{
                     config: Option<Vec<IndexId>>
     ) -> Result<(Self, Sender<MarketCommand>), Error>{
 
-        let mut info_client = InfoClient::new(None, Some(url)).await?;
+        let info_client = InfoClient::new(None, Some(url)).await?;
         let exchange_client = ExchangeClient::new(None, wallet.clone(), Some(url), None, None).await?;
         
         //Look up needed tfs for loading 
@@ -75,9 +75,9 @@ impl Market{
         
         info!("\n MARGIN: {}", margin); 
         //setup channels
-        let (market_tx, mut market_rv) = channel::<MarketCommand>(7);
-        let (exec_tx, mut exec_rv) = bounded::<TradeCommand>(0);
-        let (engine_tx, mut engine_rv) = unbounded_channel::<EngineCommand>();
+        let (market_tx, market_rv) = channel::<MarketCommand>(7);
+        let (exec_tx, exec_rv) = bounded::<TradeCommand>(0);
+        let (engine_tx, engine_rv) = unbounded_channel::<EngineCommand>();
 
         let senders = MarketSenders{
             bot_tx,
@@ -258,7 +258,7 @@ impl Market{
                     },
 
                     MarketCommand::ReceiveLiquidation(liq_fill) => {
-                       self.senders.exec_tx.send_async(TradeCommand::Liquidation(liq_fill)).await;
+                       let _ = self.senders.exec_tx.send_async(TradeCommand::Liquidation(liq_fill)).await;
                     },
 
                     MarketCommand::UpdateTimeFrame(tf)=>{

@@ -4,7 +4,7 @@ use rustc_hash::FxHasher;
 
 use log::info;
 
-use kwant::indicators::{Price, Indicator, Value};
+use kwant::indicators::{Price, Value};
 
 use crate::trade_setup::{TimeFrame,TradeParams, TradeCommand};
 use crate::strategy::Strategy;
@@ -184,7 +184,7 @@ impl SignalEngine{
 
                     if tick % 5 == 0{
                         if let Some(sender) = &self.data_tx{
-                            sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
+                            let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
                     }
 
@@ -213,7 +213,7 @@ impl SignalEngine{
                     }
                     if let Some(data) = price_data{
                         for (tf, prices) in data{
-                            self.load(tf, prices);
+                            let _ = self.load(tf, prices);
                         }
                     }
                    

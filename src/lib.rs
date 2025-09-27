@@ -3,7 +3,7 @@ mod executor;
 mod consts;
 mod assets;
 mod wallet;
-mod backtest; 
+//mod backtest; 
 
 
 pub mod frontend;

@@ -8,7 +8,6 @@ use std::{
     str::FromStr,
 };
 
-//
 use dotenv::dotenv;
 use log::info;
 use std::sync::Arc;
@@ -96,13 +95,13 @@ async fn main() -> Result<(), Error>{
 
     let (mut bot, sender) = Bot::new(wallet).await?;
 
-    tokio::spawn(async move {
-        bot.start(app_tx).await;
+    let _ = tokio::spawn(async move {
+        let _ = bot.start(app_tx).await;
     });
 
     
 
-    tokio::spawn(async move {
+    let _ = tokio::spawn(async move {
      let market_add = AddMarketInfo{
         asset: COIN.to_string(), 
         margin_alloc: MarginAllocation::Alloc(0.1),
@@ -140,26 +139,26 @@ async fn main() -> Result<(), Error>{
         };
    
         let _ = sleep(Duration::from_secs(5)).await;
-        sender.send(BotEvent::AddMarket(market_add.clone()));
+        let _ = sender.send(BotEvent::AddMarket(market_add.clone()));
         let _ = sleep(Duration::from_secs(5)).await;
-        sender.send(BotEvent::AddMarket(market_add2));
-        sender.send(BotEvent::AddMarket(market_add3));
+        let _ = sender.send(BotEvent::AddMarket(market_add2));
+        let _ = sender.send(BotEvent::AddMarket(market_add3));
         //let _ = sleep(Duration::from_secs(20)).await;
         //sender.send(BotEvent::RemoveMarket("BTC".to_string()));
         let _ = sleep(Duration::from_secs(5)).await;
-        sender.send(BotEvent::MarketComm(cmd));
-        sender.send(BotEvent::MarketComm(cmd2));
+        let _ =  sender.send(BotEvent::MarketComm(cmd));
+        let _ = sender.send(BotEvent::MarketComm(cmd2));
         let _ = sleep(Duration::from_secs(5)).await;
-        sender.send(BotEvent::MarketComm(cmd3));
+        let _ = sender.send(BotEvent::MarketComm(cmd3));
         let _ = sleep(Duration::from_secs(10)).await;
 
-        sender.send(BotEvent::PauseAll);
+        let _ = sender.send(BotEvent::PauseAll);
         let _ = sleep(Duration::from_secs(10)).await;
-        sender.send(BotEvent::ResumeAll);
+        let _ = sender.send(BotEvent::ResumeAll);
         let _ = sleep(Duration::from_secs(10)).await;
-        sender.send(BotEvent::CloseAll);
+        let _ = sender.send(BotEvent::CloseAll);
         let _ = sleep(Duration::from_secs(10)).await;
-        sender.send(BotEvent::AddMarket(market_add));
+        let _ = sender.send(BotEvent::AddMarket(market_add));
     });
 
 

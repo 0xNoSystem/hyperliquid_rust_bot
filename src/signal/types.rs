@@ -186,7 +186,7 @@ impl Tracker{
         let safe_buff: Arc<[Price]> = buffer.clone().into();
 
         let mut handles: Vec<tokio::task::JoinHandle<(IndicatorKind, Handler)>> = Vec::new();
-        let mut temp_handlers = std::mem::take(&mut self.indicators);
+        let temp_handlers = std::mem::take(&mut self.indicators);
     
         for (kind, mut handler) in temp_handlers{
             let buff = safe_buff.clone();

@@ -150,7 +150,6 @@ pub struct LiquidationFillInfo{
 impl From<Vec<HLTradeInfo>> for LiquidationFillInfo{
 
     fn from(trades: Vec<HLTradeInfo>) -> Self{
-        let n = trades.len();
         let is_long = match trades[0].side.as_str(){
             "A" => true,
             "B" => false,
