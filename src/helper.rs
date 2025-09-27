@@ -118,6 +118,10 @@ pub async fn get_asset(info_client: &InfoClient, token: &str) -> Result<AssetMet
     }
 }
 
+pub async fn get_all_assets(info_client: &InfoClient) -> Result<Vec<AssetMeta>, Error>{
+    Ok(info_client.meta().await?.universe)
+}
+
 #[inline]
 pub fn get_time_now() -> u64{
     SystemTime::now()

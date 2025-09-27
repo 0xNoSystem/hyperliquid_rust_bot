@@ -1,7 +1,7 @@
 use log::info;
 use tokio::time::{sleep, interval, Duration};
 use std::collections::HashMap;
-use hyperliquid_rust_sdk::{Error, InfoClient, Message,Subscription, TradeInfo as HLTradeInfo};
+use hyperliquid_rust_sdk::{Error, InfoClient, Message,Subscription,AssetMeta, TradeInfo as HLTradeInfo};
 use crate::{Market,
     MarketCommand,
     MarketUpdate,AssetPrice,
@@ -11,7 +11,7 @@ use crate::{Market,
     UpdateFrontend, AddMarketInfo, MarketInfo,
 };
 
-use crate::helper::{get_asset, subscribe_candles};
+use crate::helper::*;
 use tokio::{
     sync::mpsc::{Sender, UnboundedSender, UnboundedReceiver, unbounded_channel},
 };
@@ -38,6 +38,7 @@ pub struct Bot{
     update_rv: Option<UnboundedReceiver<MarketUpdate>>,
     update_tx: UnboundedSender<MarketUpdate>,
     app_tx: Option<UnboundedSender<UpdateFrontend>>,
+    universe: Option<Vec<AssetMeta>>,
 }
 
 
@@ -47,6 +48,7 @@ impl Bot{
 
         let mut info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
         let fees = wallet.get_user_fees().await?;
+        let universe = get_all_assets(&info_client).await?;
 
         let (bot_tx, mut bot_rv) = unbounded_channel::<BotEvent>();
         let (update_tx, mut update_rv) = unbounded_channel::<MarketUpdate>();
@@ -63,6 +65,7 @@ impl Bot{
             update_rv: Some(update_rv),
             update_tx,
             app_tx: None,
+            universe: Some(universe),
         }, bot_tx))
     }
 
@@ -250,12 +253,18 @@ impl Bot{
         assets
     }
 
-    pub async fn get_session(&self) -> Vec<MarketInfo>{
+    pub async fn get_session(&self) -> Result<(Vec<MarketInfo>, Vec<AssetMeta>), Error>{
 
         let mut guard = self.session.lock().await;
         let session: Vec<MarketInfo> = guard.values().cloned().collect();
-        
-        session
+        let universe: Vec<AssetMeta>;
+
+        if let Some(assets) = self.universe.clone(){
+           universe = assets; 
+        }else{
+            universe = get_all_assets(&self.info_client).await?;
+        }
+        Ok((session, universe))
         
     }
     
@@ -414,7 +423,9 @@ impl Bot{
                         
                         GetSession =>{
                             let session = self.get_session().await;
-                            let _ = err_tx.send(LoadSession(session));   
+                            if session.is_ok(){
+                                let _ = err_tx.send(LoadSession(session.unwrap()));   
+                            }
                         },
                     }
             },

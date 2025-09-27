@@ -10,7 +10,7 @@ const Header: React.FC = () => (
         </div>
         <div className="leading-tight">
           <h1 className="font-mono text-sm tracking-[0.18em] text-white">KWANT</h1>
-          <p className="text-[10px] uppercase text-white/50">Trading Bot Console</p>
+          <p className="text-[10px] uppercase text-white/50">Trading Bot Terminal</p>
         </div>
       </div>
 

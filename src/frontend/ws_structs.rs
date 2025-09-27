@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::{MarketTradeInfo,MarginAllocation, IndexId, TradeParams, Value, AssetPrice, AssetMargin};
 use std::collections::HashMap;
+use hyperliquid_rust_sdk::AssetMeta;
 
 
 #[derive(Clone, Debug, Deserialize)]
@@ -54,7 +55,7 @@ pub enum UpdateFrontend{
     UpdateIndicatorValues{asset: String, data: Vec<IndicatorData>},
     MarketInfoEdit((String, EditMarketInfo)),
     UserError(String),
-    LoadSession(Vec<MarketInfo>),
+    LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),
 }
 
 

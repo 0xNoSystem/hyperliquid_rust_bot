@@ -6,8 +6,8 @@ Hyperliquid Rust Bot is an experimental trading system built with
 markets on the Hyperliquid exchange and places trades based on signals from
 user-selected indicators.
 
-The repository currently ships a CLI example (`enginetest.rs`). A UI is in the
-works.
+The repository currently ships a React UI (BETA).
+The server instance is in bin/kwant.rs.
 
 ## Features
 
@@ -28,7 +28,7 @@ works.
    WALLET=<public wallet address>
    ```
 
-3. Run the demonstration:
+3. Run the app:
 
    ```bash
    ./run.sh

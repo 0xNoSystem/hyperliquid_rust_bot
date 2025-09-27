@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { into, TIMEFRAME_CAMELCASE, indicatorLabels, indicatorColors } from '../types';
+import { into, TIMEFRAME_CAMELCASE, indicatorLabels, indicatorColors, indicatorParamLabels } from '../types';
 import type {
   TimeFrame,
   Risk,
@@ -18,7 +18,12 @@ const styleOptions: Style[] = ['Scalp', 'Swing'];
 const stanceOptions: Stance[] = ['Bull', 'Bear', 'Neutral'];
 const indicatorKinds: IndicatorKind[] = ['rsi', 'smaOnRsi', 'stochRsi', 'adx', 'atr', 'ema', 'emaCross', 'sma'];
 
-export const AddMarket: React.FC<AddMarketProps> = ({ onClose, totalMargin }) => {
+function getMaxLeverage(name: string): number | undefined {
+  return assets.find(u => u.name === name)?.maxLeverage;
+}
+
+
+export const AddMarket: React.FC<AddMarketProps> = ({ onClose, totalMargin, assets}) => {
   const [asset, setAsset] = useState('');
   const [marginType, setMarginType] = useState<'alloc' | 'amount'>('alloc');
   const [marginValue, setMarginValue] = useState(0.1);
@@ -44,29 +49,37 @@ export const AddMarket: React.FC<AddMarketProps> = ({ onClose, totalMargin }) =>
   );
 
  const handleAddIndicator = () => {
-    let cfg: any;
-    console.log(newKind);
-    switch (newKind) {
-      case 'emaCross':
-        cfg = { emaCross: { short: newParam, long: newParam2 } };
-        break;
-      case 'smaOnRsi':
-        cfg = { smaOnRsi: { periods: newParam, smoothing_length: newParam2 } };
-        break;
-      case 'stochRsi':
-        cfg = { stochRsi: { periods: newParam, k_smoothing: null, dSmoothing: null } };
-        break;
-      case 'adx':
-        cfg = { adx: { periods: newParam, di_length: newParam2 } };
-        break;
-      default:
-        cfg = { [newKind]: newParam };
-    }
-    setConfig([...config, [cfg, newTf]]);
-    setShowConfig(false);
-  };
+  let cfg: any;
+  switch (newKind) {
+    case "emaCross":
+      cfg = { emaCross: { short: newParam, long: newParam2 } };
+      break;
+    case "smaOnRsi":
+      cfg = { smaOnRsi: { periods: newParam, smoothing_length: newParam2 } };
+      break;
+    case "stochRsi":
+      cfg = { stochRsi: { periods: newParam, k_smoothing: null, dSmoothing: null } };
+      break;
+    case "adx":
+      cfg = { adx: { periods: newParam, di_length: newParam2 } };
+      break;
+    default:
+      cfg = { [newKind]: newParam };
+  }
 
-  const handleRemove = (i: number) => setConfig(config.filter((_, idx) => idx !== i));
+  const newItem: [any, string] = [cfg, newTf];
+
+  setConfig((prev) => {
+    const exists = prev.some(
+      (item) => JSON.stringify(item) === JSON.stringify(newItem)
+    );
+    return exists ? prev : [...prev, newItem];
+  });
+
+  setShowConfig(false);
+};
+
+const handleRemove = (i: number) => setConfig(config.filter((_, idx) => idx !== i));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,9 +118,23 @@ export const AddMarket: React.FC<AddMarketProps> = ({ onClose, totalMargin }) =>
         <div className="text-sm text-white">Available Margin: <span className="font-semibold">{totalMargin.toFixed(2)}</span></div>
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
-            <label className="block text-sm text-white">Asset Symbol</label>
-            <input type="text" value={asset} onChange={e => setAsset(e.target.value)} placeholder="e.g. BTC" required className={inputClass} />
-          </div>
+  <label className="block text-sm text-white">Asset Symbol</label>
+  <select
+    value={asset}
+    onChange={(e) => setAsset(e.target.value)}
+    required
+    className={`${inputClass} bg-gray-700 text-white`}
+  >
+    <option value="" disabled>
+      -- select an asset --
+    </option>
+    {assets.map((u) => (
+      <option key={u.name} value={u.name}>
+        {u.name}
+      </option>
+    ))}
+  </select>
+</div>
           <div>
             <label className="block text-sm text-white">Margin Type</label>
             <select value={marginType} onChange={e => setMarginType(e.target.value as any)} className={selectClass}>
@@ -116,7 +143,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({ onClose, totalMargin }) =>
             </select>
           </div>
           <div className="col-span-2">
-            <label className="block text-sm text-white">{marginType === 'alloc' ? 'Percent' : 'Value'}</label>
+            <label className="block text-sm text-white">{marginType === 'alloc' ? 'Margin %' : 'Value'}</label>
             {marginType === 'alloc' ? (
               <>
                 <input type="range" min={0} max={100} step={0.1} value={marginValue} onChange={e => setMarginValue(+e.target.value)} className="w-full h-2 bg-gray-200 cursor-pointer" />
@@ -134,9 +161,35 @@ export const AddMarket: React.FC<AddMarketProps> = ({ onClose, totalMargin }) =>
             </select>
           </div>
           <div>
-            <label className="block text-sm text-white">Leverage</label>
-            <input type="number" value={lev} onChange={e => setLev(+e.target.value)} min={1} className={inputClass} />
-          </div>
+            <label className="block text-sm text-white text-center">Leverage: {lev} (MAX: {assets.find(u => u.name === asset)?.maxLeverage})</label>
+            <input
+  type="range"
+  min={1}
+  max={assets.find(u => u.name === asset)?.maxLeverage}
+  step={1}
+  value={lev}
+  onChange={(e) => setLev(+e.target.value)}
+  className="w-full h-2 cursor-pointer appearance-none rounded-lg
+    bg-gray-200 bg-no-repeat
+    [&::-webkit-slider-thumb]:appearance-none
+    [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4
+    [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-orange-600
+    [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4
+    [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-black
+  "
+  style={{
+    background: `linear-gradient(to right, white 0%, red ${
+      ((lev - 1) /
+        ((assets.find(u => u.name === asset)?.maxLeverage ?? 1) - 1)) *
+      100
+    }%, #e5e7eb ${
+      ((lev - 1) /
+        ((assets.find(u => u.name === asset)?.maxLeverage ?? 1) - 1)) *
+      100
+    }%, #e5e7eb 100%)`,
+  }}
+/> 
+</div>
           <div>
             <label className="block text-sm text-white">Trade Time (sec)</label>
             <input type="number" value={tradeTime} onChange={e => setTradeTime(+e.target.value)} min={0} className={inputClass} />
@@ -172,27 +225,33 @@ export const AddMarket: React.FC<AddMarketProps> = ({ onClose, totalMargin }) =>
         <fieldset className="mt-6 border-t border-white pt-6 relative">
           <legend className="text-lg text-white">Indicators</legend>
           <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap">
             {config.map(([ind, tf], i) => {
               const kind = Object.keys(ind)[0] as IndicatorKind;
               return (
-                <div key={i} className="flex items-center gap-2">
+                <div key={i} className="flex items-center ml-2 mb-3">
                   <span className={`${indicatorColors[kind]} px-3 py-1 rounded-full text-xs`}>{indicatorLabels[kind] || kind} -- {tf}</span>
                   <button type="button" onClick={() => handleRemove(i)} className="text-red-600 cursor-pointer">×</button>
                 </div>
               );
             })}
+            </div>
             <button type="button" onClick={() => setShowConfig(true)} className="mt-2 text-sm text-white font-bold hover:underline cursor-pointer">Add Indicator</button>
           </div>
           {showConfig && (
-            <div className="absolute bottom-10 left-full ml-4 w-64 bg-gray-600 border border-white rounded shadow p-4 z-20">
+            <div className="absolute bottom-10 left-full ml-4 w-64 bg-gray-800 border border-white rounded shadow p-4 z-20">
               <h3 className="text-sm font-semibold text-white">New Indicator</h3>
               <select value={newKind} onChange={e => setNewKind(e.target.value as IndicatorKind)} className={selectClass}>
                 {indicatorKinds.map(k => <option key={k} value={k}>{indicatorLabels[k]}</option>)}
               </select>
-              <div className="mt-2 grid grid-cols-2 gap-2">{(['emaCross','smaOnRsi','adx'].includes(newKind) ?
-                <> <input type="number" value={newParam} onChange={e => setNewParam(+e.target.value)} placeholder="Param1" className={inputClass} />
+              <div className="flex flex-col mt-2 grid grid-cols-2 gap-2 mb-6">{(['emaCross','smaOnRsi','adx'].includes(newKind) ?
+                <> <label className="text-right mt-2">{indicatorParamLabels[newKind][0]}</label>
+              <input type="number" value={newParam} onChange={e => setNewParam(+e.target.value)} placeholder="Param1" className={inputClass} />
+                <label className="text-right mt-2">{indicatorParamLabels[newKind][1]}</label>
                       <input type="number" value={newParam2} onChange={e => setNewParam2(+e.target.value)} placeholder="Param2" className={inputClass} /> </> :
-                <input type="number" value={newParam} onChange={e => setNewParam(+e.target.value)} className={inputClass} />)}</div>
+                <> <label className="text-right mt-2">{indicatorParamLabels[newKind][0]}</label>
+                <input type="number" value={newParam} onChange={e => setNewParam(+e.target.value)} className={inputClass} /></>)}</div>
+                <label>Time Frame</label>
               <select value={newTf} onChange={e => setNewTf(e.target.value as any)} className={selectClass}>
                 {Object.keys(TIMEFRAME_CAMELCASE).map(t => <option key={t} value={t}>{t}</option>)}
               </select>
@@ -203,7 +262,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({ onClose, totalMargin }) =>
             </div>
           )}
         </fieldset>
-        <div className="flex justify-end gap-4 mt-6">
+        <div className="flex justify-end gap-4 mt-14">
           <button type="button" onClick={onClose} className={btnClass}>Cancel</button>
           <button type="submit" className={btnClass}>Add Market</button>
         </div>

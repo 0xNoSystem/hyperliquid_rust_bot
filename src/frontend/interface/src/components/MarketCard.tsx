@@ -35,7 +35,7 @@ const PnlBar: React.FC<{ pnl: number }> = ({ pnl }) => {
 };
 
 const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove }) => {
-  const { asset, price, lev, margin, params, pnl, is_paused, indicators } = market;
+  const { asset, price, lev, margin, params, pnl, isPaused, indicators } = market;
   const { strategy } = params;
   const { risk, style, stance } = strategy.custom;
 
@@ -57,13 +57,13 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
         </a>
 
             </h2>
-            <span className={`relative bottom-1 rounded-md px-2 py-0.5 text-[10px] uppercase ${is_paused ? 'border border-amber-400/60 text-amber-300' : 'border border-orange-500/60 text-orange-300'}`}>{is_paused ? 'Paused' : 'Live'}</span>
+            <span className={`relative bottom-1 rounded-md px-2 py-0.5 text-[10px] uppercase ${isPaused ? 'border border-amber-400/60 text-amber-300' : 'border border-orange-500/60 text-orange-300'}`}>{isPaused ? 'Paused' : 'Live'}</span>
           </div>
           <div className="mt-1 font-mono text-sm text-white/70">{lev}×</div>
         </div>
         <div className="flex gap-2">
           <button onClick={() => onTogglePause(asset)} className="grid h-9 w-9 place-items-center rounded-md border border-white/10 bg-white/[0.04] hover:bg-white/10" title="Toggle">
-            {is_paused ? <Play className="h-4 w-4 text-orange-300" /> : <Pause className="h-4 w-4 text-amber-300" />}
+            {isPaused ? <Play className="h-4 w-4 text-orange-300" /> : <Pause className="h-4 w-4 text-amber-300" />}
           </button>
           <button onClick={() => onRemove(asset)} className="grid h-9 w-9 place-items-center rounded-md border border-white/10 bg-white/[0.04] hover:bg-rose-600/20" title="Remove">
             <Trash2 className="h-4 w-4 text-rose-300" />
@@ -75,7 +75,7 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
       <div className="grid grid-cols-3 gap-3">
         <div>
           <div className="text-[10px] uppercase text-white/50">Price</div>
-          <div className="font-mono text-xl tabular-nums">${formatPrice(price)}</div>
+          <div className="font-mono text-xl tabular-nums">${price === 0? "N/A" :formatPrice(price)}</div>
         </div>
         <div>
           <div className="text-[10px] uppercase text-white/50">Leverage</div>

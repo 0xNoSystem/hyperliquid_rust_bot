@@ -3,13 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Power, Pause, X, AlertCircle } from 'lucide-react';
 import MarketCard from './MarketCard';
 import { AddMarket } from './AddMarket';
-import type { MarketInfo, Message, assetPrice, MarketTradeInfo, assetMargin, indicatorData } from '../types';
+import type { MarketInfo, Message, assetPrice, MarketTradeInfo, assetMargin, indicatorData, assetMeta } from '../types';
 
 export default function MarketsPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const errRef = useRef<NodeJS.Timeout | null>(null);
 
   const [markets, setMarkets] = useState<MarketInfo[]>([]);
+  const [universe, setUniverse] = useState<assetMeta[]>([]);
   const [totalMargin, setTotalMargin] = useState(0);
   const [marketToRemove, setMarketToRemove] = useState<string | null>(null);
   const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
@@ -49,7 +50,8 @@ export default function MarketsPage() {
           if (errRef.current) clearTimeout(errRef.current);
           errRef.current = setTimeout(() => setErrorMsg(null), 5000);
         } else if ('loadSession' in payload) {
-          setMarkets(payload.loadSession);
+          setMarkets(payload.loadSession[0]);
+          setUniverse(payload.loadSession[1] as assetMeta[]);
         }
       };
       ws.onerror = err => console.error('WebSocket error', err);
@@ -63,6 +65,10 @@ export default function MarketsPage() {
       wsRef.current?.close();
     };
   }, []);
+
+  useEffect(() => {
+  console.log("universe updated:", universe);
+}, [universe]);
 
   const remove_market = async (asset: string) => {
     await fetch('http://localhost:8090/command', {
@@ -86,12 +92,12 @@ export default function MarketsPage() {
   const handleConfirmToggle = (asset: string, isPaused: boolean) => {
     if (isPaused) {
       toggle_market(asset);
-      setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, is_paused: false } : m)));
+      setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, isPaused: false } : m)));
     } else setMarketToToggle(asset);
   };
   const handleTogglePause = (asset: string) => {
     toggle_market(asset);
-    setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, is_paused: true } : m)));
+    setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, isPaused: true } : m)));
     setMarketToToggle(null);
   };
   const handleRemove = (asset: string) => {
@@ -146,7 +152,7 @@ export default function MarketsPage() {
             </button>
             <button
               className="w-full rounded-md border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-amber-200 hover:bg-amber-500/25"
-              onClick={() => { pauseAll(); markets.forEach(m => (m.is_paused = true)); }}
+              onClick={() => { pauseAll(); markets.forEach(m => (m.isPaused = true)); }}
             >
               <div className="flex items-center justify-center gap-2"><Pause className="h-4 w-4" /><span className="text-sm">Pause All</span></div>
             </button>
@@ -178,7 +184,7 @@ export default function MarketsPage() {
             <div className="grid grid-cols-1 gap-7 sm:grid-cols-2 xl:grid-cols-3">
               {markets.map(m => (
                 <motion.div key={m.asset} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                  <MarketCard market={m} onTogglePause={() => handleConfirmToggle(m.asset, m.is_paused)} onRemove={() => setMarketToRemove(m.asset)} />
+                  <MarketCard market={m} onTogglePause={() => handleConfirmToggle(m.asset, m.isPaused)} onRemove={() => setMarketToRemove(m.asset)} />
                 </motion.div>
               ))}
             </div>
@@ -210,7 +216,7 @@ export default function MarketsPage() {
                 <button onClick={() => setShowAdd(false)} className="rounded-md p-1 hover:bg-white/10"><X className="h-5 w-5" /></button>
               </div>
               <div className="pt-4">
-                <AddMarket onClose={() => setShowAdd(false)} totalMargin={totalMargin} />
+                <AddMarket onClose={() => setShowAdd(false)} totalMargin={totalMargin} assets={universe}/>
               </div>
             </motion.div>
           </motion.div>

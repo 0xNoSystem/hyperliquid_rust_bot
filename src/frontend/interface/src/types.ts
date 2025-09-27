@@ -8,6 +8,17 @@ export type IndicatorKind =
   | { emaCross: { short: number; long: number } }
   | { sma: number };
 
+export const indicatorParamLabels: Record<string, string[]> = {
+  rsi: ["Periods"],
+  smaOnRsi: ["Periods", "Smoothing"],
+  stochRsi: ["Periods", "kSmoothing", "dSmoothing"],
+  adx: ["Periods", "DiLength"],
+  atr: ["Periods"],
+  ema: ["Periods"],
+  emaCross: ["Short", "Long"],
+  sma: ["Periods"],
+};
+
 export interface MarketInfo{
     asset: string, 
     lev: number,
@@ -15,7 +26,7 @@ export interface MarketInfo{
     margin: number,
     params: TradeParams,
     pnl: number,
-    is_paused: boolean,
+    isPaused: boolean,
     indicators: indicatorData[],
     trades: TradeInfo[],
 }
@@ -208,7 +219,11 @@ export const indicatorColors: Record<string, string> = {
 };
 
 
-
+export interface assetMeta{
+    name: string,
+    szDecimals: number,
+    maxLeverage: number,
+}
 
 
 
