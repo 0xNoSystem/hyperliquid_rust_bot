@@ -79,6 +79,9 @@ impl Bot{
         let asset_str = asset.as_str();
 
         if self.markets.contains_key(&asset){
+            if let Some(tx) = &self.app_tx{
+                tx.send(UpdateFrontend::UserError(format!("{} market is already added.", &asset)));
+            }
             return Ok(());
         }
 

@@ -8,9 +8,10 @@ use hyperliquid_rust_sdk::{InfoClient, BaseUrl};
 
 pub struct BackTester{
     pub asset: String,
-    pub signal_engine: SignalEngine,
+    pub signal_engine: Option<SignalEngine>,
     pub params: TradeParams,
     pub candle_data: Vec<Price>,
+    smallest_tf: TimeFrame,
 }
 
 
@@ -18,18 +19,19 @@ pub struct BackTester{
 
 impl BackTester{
 
-    pub fn new(asset: &str,params: TradeParams, config: Option<Vec<IndexId>>, margin: f64) -> Self{
+
+    pub fn new_with_config(asset: &str,params: TradeParams, config: Option<Vec<IndexId>>, margin: f64) -> Self{
         if !MARKETS.contains(&asset){
             panic!("ASSET ISN'T TRADABLE, MARKET CAN'T BE INITILIAZED");
         }
 
         BackTester{
             asset: asset.to_string(),
-            signal_engine: SignalEngine::new_backtest(params.clone(), config, margin),
+            signal_engine: Some(SignalEngine::new_backtest(params.clone(), config, margin)),
             params,
             candle_data: Vec::new(),
+            smallest_tf: TimeFrame::Min1,
         }
     }
-
 }
 

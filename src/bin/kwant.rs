@@ -11,7 +11,7 @@ use env_logger;
 use log::{error, info};
 use serde_json;
 use hyperliquid_rust_bot::{
-    Bot, BotEvent, UpdateFrontend, LocalWallet, Wallet, BaseUrl,
+    Bot, BotEvent, UpdateFrontend, LocalWallet, Wallet, BaseUrl,Error
 };
 use hyperliquid_rust_bot::strategy::{Strategy, CustomStrategy, Risk, Style, Stance};
 
@@ -21,9 +21,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     let url = BaseUrl::Mainnet;
-    let wallet: LocalWallet = env::var("PRIVATE_KEY")?.parse()?;
-    let pubkey = env::var("WALLET")?;
-    let wallet = Wallet::new(url, pubkey, wallet).await?;
+    let wallet = load_wallet(url).await?;
+
 
     let (mut bot, cmd_sender) = Bot::new(wallet).await?;
     let (update_tx, mut update_rx) = unbounded_channel::<UpdateFrontend>();
@@ -166,4 +165,13 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
     }
 }
 
+pub async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error>{
+    let wallet = std::env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
+        .parse();
 
+    if let Err(ref e) = wallet{
+        return Err(Error::Custom(format!("Failed to load wallet: {}", e))); 
+    }
+    let pubkey: String = std::env::var("WALLET").expect("Error fetching WALLET address");
+    Ok(Wallet::new(url , pubkey, wallet.unwrap()).await?)
+}

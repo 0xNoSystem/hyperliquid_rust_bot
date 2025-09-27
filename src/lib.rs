@@ -14,6 +14,7 @@ pub mod trade_setup;
 pub mod bot;
 pub mod margin;
 
+pub use helper::*;
 pub use frontend::*;
 pub use bot::{Bot, BotEvent, BotToMarket};
 pub use wallet::Wallet;

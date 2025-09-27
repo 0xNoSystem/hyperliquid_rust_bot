@@ -231,6 +231,11 @@ impl TimeFrame{
 
 }
 
+impl Into<u8> for TimeFrame{
+    fn into(self) -> u8{
+        self.to_secs() as u8 
+    }
+}
 impl TimeFrame {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -262,6 +267,7 @@ impl std::fmt::Display for TimeFrame {
         f.write_str(self.as_str())
     }
 }
+
 
 
 

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Pause, Play, Trash2 } from 'lucide-react';
 import type { MarketInfo } from '../types';
 import { indicatorLabels, indicatorColors, decompose, get_value, fromTimeFrame } from '../types';
+import { ExternalLink } from 'lucide-react';
 
 interface MarketCardProps {
   market: MarketInfo;
@@ -10,7 +11,15 @@ interface MarketCardProps {
   onRemove: (asset: string) => void;
 }
 
-const formatPrice = (n: number) => (n < 1 ? n.toFixed(4) : n.toFixed(2));
+const formatPrice = (n: number) =>{
+    if (n > 1 && n < 2){
+        return n.toFixed(4);
+    }else if (n < 1){
+        return n.toFixed(6);
+    }else{
+        return n.toFixed(2);
+    }
+};
 
 const PnlBar: React.FC<{ pnl: number }> = ({ pnl }) => {
   const w = Math.min(100, Math.abs(pnl));
@@ -37,10 +46,20 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
         <div>
           <div className="text-[10px] uppercase text-white/50">Asset</div>
           <div className="-mt-0.5 flex items-baseline gap-3">
-            <h2 className="text-3xl font-semibold tracking-tight">{asset}</h2>
+            <h2 className="text-3xl font-semibold tracking-tight">{asset}
+            <a
+          href={`https://app.hyperliquid.xyz/trade/${asset}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hidden md:inline-flex items-center gap-2 rounded-md border border-white/10 bg-[#111316] ml-3 text-[12px] text-white hover:bg-white/5"
+        >
+          <ExternalLink className="h-3.5 w-3.5 text-orange-400" />
+        </a>
+
+            </h2>
             <span className={`relative bottom-1 rounded-md px-2 py-0.5 text-[10px] uppercase ${is_paused ? 'border border-amber-400/60 text-amber-300' : 'border border-orange-500/60 text-orange-300'}`}>{is_paused ? 'Paused' : 'Live'}</span>
           </div>
-          <div className="mt-1 font-mono text-sm text-white/70">${formatPrice(price)} • {lev}×</div>
+          <div className="mt-1 font-mono text-sm text-white/70">{lev}×</div>
         </div>
         <div className="flex gap-2">
           <button onClick={() => onTogglePause(asset)} className="grid h-9 w-9 place-items-center rounded-md border border-white/10 bg-white/[0.04] hover:bg-white/10" title="Toggle">
