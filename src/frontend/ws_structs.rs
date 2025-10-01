@@ -46,6 +46,7 @@ pub enum EditMarketInfo{
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum UpdateFrontend{
+    PreconfirmMarket(String),
     ConfirmMarket(MarketInfo),
     UpdatePrice(AssetPrice),
     NewTradeInfo(MarketTradeInfo),

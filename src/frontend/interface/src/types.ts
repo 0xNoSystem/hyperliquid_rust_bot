@@ -19,16 +19,17 @@ export const indicatorParamLabels: Record<string, string[]> = {
   sma: ["Periods"],
 };
 
-export interface MarketInfo{
-    asset: string, 
-    lev: number,
-    price: number,
-    margin: number,
-    params: TradeParams,
-    pnl: number,
-    isPaused: boolean,
-    indicators: indicatorData[],
-    trades: TradeInfo[],
+export interface MarketInfo {
+  asset: string;
+  state: 'Loading' | 'Ready';
+  lev: number | null;
+  price: number | null;
+  margin: number | null;
+  pnl: number | null;
+  params: TradeParams;
+  isPaused: boolean;
+  indicators: indicatorData[];
+  trades: TradeInfo[];
 }
 
 export interface indicatorData {
@@ -158,6 +159,7 @@ export interface AddMarketInfo {
 };
 
 export type Message = 
+    | { preconfirmMarket: string }
     | { confirmMarket: MarketInfo }
     | { updatePrice: assetPrice }
     | { newTradeInfo: MarketTradeInfo }
@@ -171,7 +173,6 @@ export type Message =
 
 export type assetPrice = [string, number];
 export type assetMargin = [string, number];
-
 
 export type editMarketInfo = 
     | {lev: number}

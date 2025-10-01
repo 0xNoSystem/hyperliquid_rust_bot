@@ -1,28 +1,18 @@
 import './index.css';
-import MarketCard from './components/MarketCard'
-import MarketsPage from './components/Markets'
-import Header from './components/Header'
-import Footer from './components/footer'
-import type {IndicatorKind, MarketInfo} from './types'
-import viteLogo from '/vite.svg';
-
-
-const handleTogglePause = (asset: string) => {
-  console.log(`Toggled pause for ${asset}`);
-};
-
-const handleRemove = (asset: string) => {
-  console.log(`Removed market ${asset}`);
-};
+import MarketsPage from './components/Markets';
+import Layout from './components/Layout';
+import Settings from "./components/Settings";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 const App: React.FC = () => (
-    <div className= "bg-[#1D1D1D] h-full">
-        <Header />
-        <MarketsPage/>
-        <Footer />
-    </div>
+  <BrowserRouter>
+    <Routes>
+      <Route path="/" element={<Layout />}>
+        <Route index element={<MarketsPage />} />
+        <Route path="settings" element={<Settings />} />
+      </Route>
+    </Routes>
+  </BrowserRouter>
 );
 
 export default App;
-
-

@@ -26,12 +26,32 @@ export default function MarketsPage() {
       ws.onopen = () => load_session();
       ws.onmessage = (event: MessageEvent) => {
         const payload = JSON.parse(event.data) as Message;
-        if ('confirmMarket' in payload) {
-          setMarkets(prev => [
-            ...prev,
-            { ...payload.confirmMarket, trades: Array.isArray(payload.confirmMarket.trades) ? payload.confirmMarket.trades : [] },
-          ]);
-        } else if ('updatePrice' in payload) {
+            if ('confirmMarket' in payload) {
+                const asset = payload.confirmMarket.asset;
+                setMarkets(prev => prev.map(m => (m.asset === asset ? {...payload.confirmMarket, state: 'Ready'} : m)));
+
+        }else if ('preconfirmMarket' in payload){ 
+            const asset = payload.preconfirmMarket;
+            console.log(asset);
+            setMarkets(prev => [
+        ...prev,
+        {
+            asset,
+            state: 'Loading',
+            price: null,
+            lev: null,
+            margin: null,
+            pnl: null,
+            indicators: [],
+            trades: [],
+            params: {
+                strategy: { custom: { risk: 'Normal', style: 'Scalp', stance: 'Bull', followTrend: false } }
+            },
+            isPaused: false,
+        },
+        ]);
+
+        }else if ('updatePrice' in payload) {
           const [asset, price] = payload.updatePrice as assetPrice;
           setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, price } : m)));
         } else if ('newTradeInfo' in payload) {
@@ -119,9 +139,9 @@ export default function MarketsPage() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#07090B] text-white">
+    <div className="relative min-h-screen overflow-hidden pb-120 bg-[#07090B] text-white">
       {/* layered background */}
-      <div className="pointer-events-none absolute inset-0 opacity-[0.08] [background:radial-gradient(60%_60%_at_0%_0%,rgba(56,189,248,0.5),transparent_60%),radial-gradient(50%_50%_at_100%_0%,rgba(232,121,249,0.5),transparent_60%),radial-gradient(60%_60%_at_50%_100%,rgba(52,211,153,0.4),transparent_60%)]" />
+      <div className="pointer-events-none absolute max-h inset-0 opacity-[0.08] [background:radial-gradient(60%_60%_at_0%_0%,rgba(56,189,248,0.5),transparent_60%),radial-gradient(50%_50%_at_100%_0%,rgba(232,121,249,0.5),transparent_60%),radial-gradient(60%_60%_at_50%_100%,rgba(52,211,153,0.4),transparent_60%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.06] bg-[linear-gradient(transparent_23px,rgba(255,255,255,0.06)_24px),linear-gradient(90deg,transparent_23px,rgba(255,255,255,0.06)_24px)] bg-[size:26px_26px]" />
       <div className="pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,transparent,black_20%,black_80%,transparent)]">
         <div className="h-[200%] w-[200%] -translate-x-1/4 animate-[scan_9s_linear_infinite] bg-[repeating-linear-gradient(90deg,transparent_0,transparent_48px,rgba(255,255,255,0.04)_49px,rgba(255,255,255,0.04)_50px)]" />

@@ -38,7 +38,7 @@ pub struct Bot{
     update_rv: Option<UnboundedReceiver<MarketUpdate>>,
     update_tx: UnboundedSender<MarketUpdate>,
     app_tx: Option<UnboundedSender<UpdateFrontend>>,
-    universe: Option<Vec<AssetMeta>>,
+    universe: Vec<AssetMeta>,
 }
 
 
@@ -65,7 +65,7 @@ impl Bot{
             update_rv: Some(update_rv),
             update_tx,
             app_tx: None,
-            universe: Some(universe),
+            universe: universe,
         }, bot_tx))
     }
 
@@ -89,15 +89,22 @@ impl Bot{
         }
 
         if !MARKETS.contains(&asset_str){
-
             return Err(Error::AssetNotFound);
         }
+        if let Some(tx) = &self.app_tx{
+                let _ = tx.send(UpdateFrontend::PreconfirmMarket(asset.clone()));
+            }
 
         let mut book = margin_book.lock().await;
         let margin = book.allocate(asset.clone(), margin_alloc).await?;
         
-        let meta = get_asset(&self.info_client, asset_str).await?;
-        let (sub_id, receiver) = subscribe_candles(&mut self.info_client,
+        let meta = if let Some(cached) = self.universe.iter().find(|a| a.name == asset_str).cloned(){
+            cached
+        }else{
+           get_asset(&self.info_client, asset_str).await.unwrap() 
+        };
+
+                let (sub_id, receiver) = subscribe_candles(&mut self.info_client,
                                                         asset_str,
                                                         trade_params.time_frame.as_str())
                                                         .await?;
@@ -130,9 +137,7 @@ impl Bot{
                 book.remove(&asset);
             }
         });         
-
         
-
         Ok(())
 
 }
@@ -259,11 +264,12 @@ impl Bot{
         let session: Vec<MarketInfo> = guard.values().cloned().collect();
         let universe: Vec<AssetMeta>;
 
-        if let Some(assets) = self.universe.clone(){
-           universe = assets; 
-        }else{
+        if self.universe.is_empty(){
             universe = get_all_assets(&self.info_client).await?;
+        }else{
+            universe = self.universe.clone();
         }
+
         Ok((session, universe))
         
     }

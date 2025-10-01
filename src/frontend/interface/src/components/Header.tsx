@@ -1,8 +1,9 @@
 import React from 'react';
 import { Github, ExternalLink } from 'lucide-react';
+import { Link } from "react-router-dom";
 
 const Header: React.FC = () => (
-  <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0B0C0E]">
+  <header className="top-0 z-40 border-b border-white/10 bg-[#0B0C0E]">
     <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
       <div className="flex items-center gap-3">
         <div className="grid h-8 w-8 place-items-center rounded-md border border-white/10 bg-[#111316]">
@@ -15,7 +16,7 @@ const Header: React.FC = () => (
       </div>
 
       <div className="flex items-center gap-2">
-        <a
+                <a
           href="https://app.hyperliquid.xyz"
           target="_blank"
           rel="noopener noreferrer"
@@ -31,6 +32,14 @@ const Header: React.FC = () => (
         >
           <Github className="h-4 w-4" /> <span className="text-[12px]">Repo</span>
         </a>
+
+<Link
+  to="/settings"
+  className="inline-flex items-center gap-2 cursor-pointer rounded-md border border-orange-400 bg-[#111316] px-3 py-1 text-white hover:bg-white/5"
+>
+  Settings
+</Link>
+        
       </div>
     </div>
   </header>
