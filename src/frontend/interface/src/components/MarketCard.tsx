@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Pause, Play, Trash2, ExternalLink } from 'lucide-react';
 import type { MarketInfo } from '../types';
-import { indicatorLabels, indicatorColors, decompose, get_value, fromTimeFrame } from '../types';
+import { indicatorLabels, indicatorColors, decompose, get_value,get_params, fromTimeFrame } from '../types';
 import LoadingDots from './Loading';
 
 interface MarketCardProps {
@@ -145,15 +145,18 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
         ) : (
           indicators.map((data, i) => {
             const { kind, timeframe, value } = decompose(data);
+            console.log(kind);
             const kindKey = Object.keys(kind)[0] as keyof typeof indicatorColors;
+
             return (
+                <div className={`flex flex-col rounded-md cursor-pointer border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] ${indicatorColors[kindKey]}`}                 title={get_params(kind)}>
               <span
                 key={i}
-                title={get_value(value)}
-                className={`rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] ${indicatorColors[kindKey]}`}
-              >
+                >
                 {indicatorLabels[kindKey] || (kindKey as string)} — {fromTimeFrame(timeframe)}
-              </span>
+                </span>
+                <span className="text-center font-bold text-lg">{get_value(value)}</span>
+              </div>
             );
           })
         )}

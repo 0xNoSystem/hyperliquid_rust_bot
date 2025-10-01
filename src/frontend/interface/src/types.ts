@@ -49,16 +49,49 @@ export type Value =
 
 export function get_value(v?: Value): string {
   if (!v) return "No value";
-  if ("rsiValue" in v) return `RSI: ${v.rsiValue.toFixed(2)}`;
-  if ("stochRsiValue" in v) return `StochRSI: K=${v.stochRsiValue.k.toFixed(2)}, D=${v.stochRsiValue.d.toFixed(2)}`;
-  if ("emaValue" in v) return `EMA: ${v.emaValue.toFixed(2)}`;
-  if ("emaCrossValue" in v) return `EMA Cross: short=${v.emaCrossValue.short.toFixed(2)}, long=${v.emaCrossValue.long.toFixed(2)}, trend=${v.emaCrossValue.trend ? "↑" : "↓"}`;
-  if ("smaValue" in v) return `SMA: ${v.smaValue.toFixed(2)}`;
-  if ("smaRsiValue" in v) return `SMA on RSI: ${v.smaRsiValue.toFixed(2)}`;
-  if ("adxValue" in v) return `ADX: ${v.adxValue.toFixed(2)}`;
-  if ("atrValue" in v) return `ATR: ${v.atrValue.toFixed(2)}`;
+  if ("rsiValue" in v) return `${v.rsiValue.toFixed(2)}`;
+  if ("stochRsiValue" in v) return `K=${v.stochRsiValue.k.toFixed(2)}, D=${v.stochRsiValue.d.toFixed(2)}`;
+  if ("emaValue" in v) return `${v.emaValue.toFixed(2)}`;
+  if ("emaCrossValue" in v) return `short=${v.emaCrossValue.short.toFixed(2)}, long=${v.emaCrossValue.long.toFixed(2)}, trend=${v.emaCrossValue.trend ? "↑" : "↓"}`;
+  if ("smaValue" in v) return `${v.smaValue.toFixed(2)}`;
+  if ("smaRsiValue" in v) return `${v.smaRsiValue.toFixed(2)}`;
+  if ("adxValue" in v) return `${v.adxValue.toFixed(2)}`;
+  if ("atrValue" in v) return `${v.atrValue.toFixed(2)}`;
   return "Unknown";
 }
+
+export function get_params(k: IndicatorKind): string {
+  if ("rsi" in k) {
+    return `Periods: ${k.rsi}`;
+  }
+  if ("smaOnRsi" in k) {
+    const { periods, smoothingLength } = k.smaOnRsi;
+    return `Periods: ${periods}, Smoothing: ${smoothingLength}`;
+  }
+  if ("stochRsi" in k) {
+    const { periods, kSmoothing, dSmoothing } = k.stochRsi;
+    return `Periods: ${periods}, kSmoothing: ${kSmoothing ?? "3"}, dSmoothing: ${dSmoothing ?? "3"}`;
+  }
+  if ("adx" in k) {
+    const { periods, diLength } = k.adx;
+    return `Periods: ${periods}, DiLength: ${diLength ?? periods}`;
+  }
+  if ("atr" in k) {
+    return `Periods: ${k.atr}`;
+  }
+  if ("ema" in k) {
+    return `Periods: ${k.ema}`;
+  }
+  if ("emaCross" in k) {
+    const { short, long } = k.emaCross;
+    return `Short: ${short}, Long: ${long}`;
+  }
+  if ("sma" in k) {
+    return `Periods: ${k.sma}`;
+  }
+  return "Unknown";
+}
+
 
 export type Decomposed = {
   kind: IndicatorKind
