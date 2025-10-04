@@ -15,6 +15,7 @@ export default function MarketsPage() {
   const [marketToRemove, setMarketToRemove] = useState<string | null>(null);
   const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [trades, setTrades] = useState<MarketTradeInfo[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<number>();
 
@@ -56,6 +57,7 @@ export default function MarketsPage() {
           setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, price } : m)));
         } else if ('newTradeInfo' in payload) {
           const { asset, info } = payload.newTradeInfo as MarketTradeInfo;
+          console.log(info);
           setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, trades: [...(Array.isArray(m.trades) ? m.trades : []), info], pnl: (m.pnl += info.pnl) } : m)));
         } else if ('updateTotalMargin' in payload) {
           setTotalMargin(payload.updateTotalMargin);
@@ -139,7 +141,7 @@ export default function MarketsPage() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden pb-120 bg-[#07090B] text-white">
+    <div className="relative min-h-screen overflow-hidden pb-70 bg-[#07090B] text-white">
       {/* layered background */}
       <div className="pointer-events-none absolute max-h inset-0 opacity-[0.08] [background:radial-gradient(60%_60%_at_0%_0%,rgba(56,189,248,0.5),transparent_60%),radial-gradient(50%_50%_at_100%_0%,rgba(232,121,249,0.5),transparent_60%),radial-gradient(60%_60%_at_50%_100%,rgba(52,211,153,0.4),transparent_60%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.06] bg-[linear-gradient(transparent_23px,rgba(255,255,255,0.06)_24px),linear-gradient(90deg,transparent_23px,rgba(255,255,255,0.06)_24px)] bg-[size:26px_26px]" />
@@ -180,6 +182,7 @@ export default function MarketsPage() {
 
           <div className="mt-6 grid gap-2 border-t border-white/10 pt-4 text-[12px] text-white/60">
             <p className="font-semibold text-white/70">Console</p>
+            
             <div className="rounded-md border border-white/10 bg-[#0F1115] p-3">
                 
             </div>

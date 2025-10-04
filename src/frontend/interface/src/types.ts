@@ -1,8 +1,8 @@
 export type IndicatorKind =
   | { rsi: number }
-  | { smaOnRsi: { periods: number; smoothingLength: number } }
-  | { stochRsi: { periods: number; kSmoothing?: number | null; dSmoothing?: number | null } }
-  | { adx: { periods: number; diLength: number } }
+  | { smaOnRsi: { periods: number; smoothing_length: number } }
+  | { stochRsi: { periods: number; k_smoothing?: number | null; d_smoothing?: number | null } }
+  | { adx: { periods: number; di_length: number } }
   | { atr: number }
   | { ema: number }
   | { emaCross: { short: number; long: number } }
@@ -65,16 +65,16 @@ export function get_params(k: IndicatorKind): string {
     return `Periods: ${k.rsi}`;
   }
   if ("smaOnRsi" in k) {
-    const { periods, smoothingLength } = k.smaOnRsi;
-    return `Periods: ${periods}, Smoothing: ${smoothingLength}`;
+    const { periods, smoothing_length } = k.smaOnRsi;
+    return `Periods: ${periods}, Smoothing: ${smoothing_length}`;
   }
   if ("stochRsi" in k) {
-    const { periods, kSmoothing, dSmoothing } = k.stochRsi;
-    return `Periods: ${periods}, kSmoothing: ${kSmoothing ?? "3"}, dSmoothing: ${dSmoothing ?? "3"}`;
+    const { periods, k_smoothing, d_smoothing } = k.stochRsi;
+    return `Periods: ${periods}, kSmoothing: ${k_smoothing ?? "3"}, dSmoothing: ${d_smoothing ?? "3"}`;
   }
   if ("adx" in k) {
-    const { periods, diLength } = k.adx;
-    return `Periods: ${periods}, DiLength: ${diLength ?? periods}`;
+    const { periods, di_length } = k.adx;
+    return `Periods: ${periods}, DiLength: ${di_length}`;
   }
   if ("atr" in k) {
     return `Periods: ${k.atr}`;

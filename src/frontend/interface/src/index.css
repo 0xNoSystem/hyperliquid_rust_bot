@@ -20,7 +20,10 @@
   animation: gradientBG 120s ease infinite;
 }
 
-
-.param-input{
-    
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }
+
+

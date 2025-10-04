@@ -145,7 +145,6 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
         ) : (
           indicators.map((data, i) => {
             const { kind, timeframe, value } = decompose(data);
-            console.log(kind);
             const kindKey = Object.keys(kind)[0] as keyof typeof indicatorColors;
 
             return (
@@ -155,7 +154,7 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
                 >
                 {indicatorLabels[kindKey] || (kindKey as string)} — {fromTimeFrame(timeframe)}
                 </span>
-                <span className="text-center font-bold text-lg">{get_value(value)}</span>
+                <span className="text-center font-bold text-base">{get_value(value)}</span>
               </div>
             );
           })

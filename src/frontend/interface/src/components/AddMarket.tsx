@@ -58,7 +58,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({ onClose, totalMargin, asse
       cfg = { smaOnRsi: { periods: newParam, smoothing_length: newParam2 } };
       break;
     case "stochRsi":
-      cfg = { stochRsi: { periods: newParam, k_smoothing: null, dSmoothing: null } };
+      cfg = { stochRsi: { periods: newParam, k_smoothing: null, d_smoothing: null } };
       break;
     case "adx":
       cfg = { adx: { periods: newParam, di_length: newParam2 } };

@@ -182,16 +182,17 @@ impl SignalEngine{
                     let ind = self.get_indicators_data();
                     let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
 
-                    if tick % 5 == 0{
-                        if let Some(sender) = &self.data_tx{
-                            let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
+                    if !ind.is_empty(){
+                        if tick % 5 == 0 {
+                            if let Some(sender) = &self.data_tx{
+                                let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
+                        } 
+                    }
+
+                        if let Some(trade) = self.get_signal(price.close, values){
+                            let _ = self.trade_tx.try_send(trade);
                         }
                     }
-
-                    if let Some(trade) = self.get_signal(price.close, values){
-                        let _ = self.trade_tx.try_send(trade);
-                    }
-
                     tick += 1;
                 }, 
 
