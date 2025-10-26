@@ -249,8 +249,8 @@ impl TimeFrame {
             TimeFrame::Hour12 => "12h",
             TimeFrame::Day1   => "1d",
             TimeFrame::Day3   => "3d",
-            TimeFrame::Week   => "w",
-            TimeFrame::Month  => "m",
+            TimeFrame::Week   => "1w",
+            TimeFrame::Month  => "1M",
         }
     }
     pub fn to_string(&self) -> String{

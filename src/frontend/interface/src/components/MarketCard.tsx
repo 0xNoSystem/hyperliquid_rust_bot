@@ -154,7 +154,7 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
                 >
                 {indicatorLabels[kindKey] || (kindKey as string)} — {fromTimeFrame(timeframe)}
                 </span>
-                <span className="text-center font-bold text-base">{get_value(value)}</span>
+                <span className="text-center font-bold text-base">{value ? get_value(value) : "N/A"}</span>
               </div>
             );
           })

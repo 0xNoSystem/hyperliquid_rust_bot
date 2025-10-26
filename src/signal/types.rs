@@ -242,14 +242,12 @@ impl Tracker{
     pub fn get_indicators_data(&self) -> Vec<IndicatorData>{
         let mut values = Vec::new();
         for (kind, handler) in &self.indicators{
-            if let Some(val) = handler.get_value(){
-                values.push(
-                    IndicatorData{
-                        id: (*kind, self.tf),
-                        value: Some(val),
-                    }
-                );
-            }
+            values.push(
+                IndicatorData{
+                    id: (*kind, self.tf),
+                    value: handler.get_value(),
+                }
+            );
         }
         values
     }
