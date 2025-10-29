@@ -2,11 +2,8 @@ use hyperliquid_rust_sdk::{BaseUrl, InfoClient};
 use std::fs::File;
 use std::io::Write;
 
-
-
 #[tokio::main]
 async fn main() {
-
     let info = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
 
     let universe = info.meta().await.unwrap().universe;
@@ -15,5 +12,4 @@ async fn main() {
     let mut f = File::create("src/assets.rs").unwrap();
 
     let _ = f.write_all(format!("pub static MARKETS: &[&str] = &{:?};", assets).as_bytes());
-
 }

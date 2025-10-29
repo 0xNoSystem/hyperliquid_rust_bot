@@ -1,33 +1,35 @@
-mod market;
-mod executor;
-mod consts;
 mod assets;
+mod consts;
+mod executor;
+mod market;
 mod wallet;
-//mod backtest; 
+//mod backtest;
 
-
+pub mod bot;
 pub mod frontend;
 pub mod helper;
+pub mod margin;
 pub mod signal;
 pub mod strategy;
 pub mod trade_setup;
-pub mod bot;
-pub mod margin;
 
-pub use helper::*;
-pub use frontend::*;
-pub use bot::{Bot, BotEvent, BotToMarket};
-pub use wallet::Wallet;
-pub use signal::{SignalEngine, IndexId, IndicatorKind, EditType, Entry};
-pub use market::{Market, MarketCommand, MarketUpdate, AssetPrice};
-pub use consts::{MAX_HISTORY};
 pub use assets::MARKETS;
+pub use bot::{Bot, BotEvent, BotToMarket};
+pub use consts::MAX_HISTORY;
 pub use executor::Executor;
-// pub use backtest::BackTester; 
-pub use trade_setup::{TradeParams, TimeFrame, TradeCommand, TradeInfo, MarketTradeInfo, TradeFillInfo, LiquidationFillInfo};
+pub use frontend::*;
+pub use helper::*;
+pub use market::{AssetPrice, Market, MarketCommand, MarketUpdate};
+pub use signal::{EditType, Entry, IndexId, IndicatorKind, SignalEngine};
+pub use wallet::Wallet;
+// pub use backtest::BackTester;
 pub use margin::{AssetMargin, MarginAllocation};
+pub use trade_setup::{
+    LiquidationFillInfo, MarketTradeInfo, TimeFrame, TradeCommand, TradeFillInfo, TradeInfo,
+    TradeParams,
+};
 
 //expost HL sdk types
-pub use hyperliquid_rust_sdk::{BaseUrl, Error};
 pub use ethers::signers::LocalWallet;
+pub use hyperliquid_rust_sdk::{BaseUrl, Error};
 pub use kwant::indicators::Value;

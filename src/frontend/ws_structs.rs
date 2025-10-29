@@ -1,7 +1,8 @@
-use serde::{Deserialize, Serialize};
-use crate::{MarketTradeInfo,MarginAllocation, IndexId, TradeParams, Value, AssetPrice, AssetMargin};
+use crate::{
+    AssetMargin, AssetPrice, IndexId, MarginAllocation, MarketTradeInfo, TradeParams, Value,
+};
 use hyperliquid_rust_sdk::AssetMeta;
-
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,9 +15,9 @@ pub struct AddMarketInfo {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MarketInfo{
+pub struct MarketInfo {
     pub asset: String,
-    pub lev: u32,
+    pub lev: usize,
     pub price: f64,
     pub params: TradeParams,
     pub margin: f64,
@@ -25,39 +26,35 @@ pub struct MarketInfo{
     pub indicators: Vec<IndicatorData>,
 }
 
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IndicatorData{
+pub struct IndicatorData {
     pub id: IndexId,
     pub value: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum EditMarketInfo{
+pub enum EditMarketInfo {
     Lev(f64),
     Strategy,
     Indicator(Vec<IndexId>),
 }
 
-
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum UpdateFrontend{
+pub enum UpdateFrontend {
     PreconfirmMarket(String),
     ConfirmMarket(MarketInfo),
     UpdatePrice(AssetPrice),
     NewTradeInfo(MarketTradeInfo),
     UpdateTotalMargin(f64),
     UpdateMarketMargin(AssetMargin),
-    UpdateIndicatorValues{asset: String, data: Vec<IndicatorData>},
+    UpdateIndicatorValues {
+        asset: String,
+        data: Vec<IndicatorData>,
+    },
     MarketInfoEdit((String, EditMarketInfo)),
     UserError(String),
     LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),
 }
-
-
-
-

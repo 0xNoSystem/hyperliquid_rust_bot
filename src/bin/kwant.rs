@@ -1,17 +1,21 @@
-use std::env;
-use tokio::{sync::{mpsc::{unbounded_channel, UnboundedSender}, broadcast::{self, Sender as BroadcastSender}}, time::Duration};
-use actix::{Actor, StreamHandler, Handler, Message};
-use actix_cors::Cors;
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder, Error as ActixError};
 use actix::ActorContext;
 use actix::AsyncContext;
+use actix::{Actor, Handler, Message, StreamHandler};
+use actix_cors::Cors;
+use actix_web::{App, Error as ActixError, HttpRequest, HttpResponse, HttpServer, Responder, web};
 use actix_web_actors::ws;
 use dotenv::dotenv;
 use env_logger;
+use hyperliquid_rust_bot::{BaseUrl, Bot, BotEvent, Error, UpdateFrontend, Wallet};
 use log::{error, info};
 use serde_json;
-use hyperliquid_rust_bot::{
-    Bot, BotEvent, UpdateFrontend, Wallet, BaseUrl,Error
+use std::env;
+use tokio::{
+    sync::{
+        broadcast::{self, Sender as BroadcastSender},
+        mpsc::{UnboundedSender, unbounded_channel},
+    },
+    time::Duration,
 };
 
 #[actix_web::main]
@@ -21,7 +25,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let url = BaseUrl::Mainnet;
     let wallet = load_wallet(url).await?;
-
 
     let (bot, cmd_sender) = Bot::new(wallet).await?;
     let (update_tx, mut update_rx) = unbounded_channel::<UpdateFrontend>();
@@ -69,15 +72,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn execute(
-    raw: web::Bytes,
-    sender: web::Data<UnboundedSender<BotEvent>>,
-) -> impl Responder {
-    // Log the raw request body
+async fn execute(raw: web::Bytes, sender: web::Data<UnboundedSender<BotEvent>>) -> impl Responder {
+    //log
     let body_str = String::from_utf8_lossy(&raw);
     println!("Incoming raw body: {}", body_str);
 
-    // Try to deserialize
     match serde_json::from_slice::<BotEvent>(&raw) {
         Ok(event) => {
             if let Err(err) = sender.send(event) {
@@ -104,7 +103,7 @@ async fn ws_route(
 }
 
 #[derive(Message)]
-#[rtype(result = "()")] 
+#[rtype(result = "()")]
 struct ServerMessage(String);
 
 struct MyWebSocket {
@@ -141,7 +140,7 @@ impl Actor for MyWebSocket {
 }
 
 impl Handler<ServerMessage> for MyWebSocket {
-    type Result = (); 
+    type Result = ();
 
     fn handle(&mut self, msg: ServerMessage, ctx: &mut Self::Context) {
         if msg.0 == "__SERVER_CLOSED__" {
@@ -164,13 +163,14 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
     }
 }
 
-pub async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error>{
-    let wallet = env::var("PRIVATE_KEY").expect("Error fetching PRIVATE_KEY")
+pub async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error> {
+    let wallet = env::var("PRIVATE_KEY")
+        .expect("Error fetching PRIVATE_KEY")
         .parse();
 
-    if let Err(ref e) = wallet{
-        return Err(Error::Custom(format!("Failed to load wallet: {}", e))); 
+    if let Err(ref e) = wallet {
+        return Err(Error::Custom(format!("Failed to load wallet: {}", e)));
     }
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
-    Ok(Wallet::new(url , pubkey, wallet.unwrap()).await?)
+    Ok(Wallet::new(url, pubkey, wallet.unwrap()).await?)
 }

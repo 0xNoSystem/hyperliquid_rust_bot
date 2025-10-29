@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-hyperliquid_rust_sdk = { git = "https://github.com/0xNoSystem/hyperliquid-rust-sdk.git", branch = "master" }
+hyperliquid_rust_sdk = { git = "https://github.com/0xNoSystem/hyperliquid-rust-sdk.git", branch = "main" }
 kwant = { git = "https://github.com/0xNoSystem/Indicators_rs.git", branch = "main" }
 chrono = "0.4.26"
 env_logger = "0.10.0"
@@ -35,6 +35,10 @@ actix = "0.13"
 actix-web = "4.11.0"
 actix-web-actors = "4"
 actix-cors = "0.6"
+alloy = { version = "1.0", default-features = false, features = [
+  "signer-local",
+] }
+
 
 
 
