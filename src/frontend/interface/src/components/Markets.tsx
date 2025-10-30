@@ -3,7 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Power, Pause, X, AlertCircle } from 'lucide-react';
 import MarketCard from './MarketCard';
 import { AddMarket } from './AddMarket';
-import type { MarketInfo, Message, assetPrice, MarketTradeInfo, assetMargin, indicatorData, assetMeta } from '../types';
+import {CachedMarket} from './MarketDetails';
+import type { MarketInfo, Message, assetPrice, MarketTradeInfo,AddMarketInfo, assetMargin, indicatorData, assetMeta } from '../types';
+import {market_add_info} from '../types';
 
 export default function MarketsPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -11,6 +13,7 @@ export default function MarketsPage() {
 
   const [markets, setMarkets] = useState<MarketInfo[]>([]);
   const [universe, setUniverse] = useState<assetMeta[]>([]);
+  const [cachedMarkets, setCachedMarkets] = useState<AddMarketInfo[]>([]);
   const [totalMargin, setTotalMargin] = useState(0);
   const [marketToRemove, setMarketToRemove] = useState<string | null>(null);
   const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
@@ -18,6 +21,7 @@ export default function MarketsPage() {
   const [trades, setTrades] = useState<MarketTradeInfo[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<number>();
+
 
   useEffect(() => {
     if (wsRef.current) return;
@@ -46,7 +50,7 @@ export default function MarketsPage() {
             indicators: [],
             trades: [],
             params: {
-                strategy: { custom: { risk: 'Normal', style: 'Scalp', stance: 'Bull', followTrend: false } }
+                strategy: { custom: { risk: 'Normal', style: 'Scalp', stance: 'Neutral', followTrend: false } }
             },
             isPaused: false,
         },
@@ -123,9 +127,15 @@ export default function MarketsPage() {
     setMarketToToggle(null);
   };
   const handleRemove = (asset: string) => {
-    remove_market(asset);
-    setMarkets(prev => prev.filter(m => m.asset !== asset));
-    setMarketToRemove(null);
+        setMarkets(prev => prev.filter(m => {
+            if (m.asset === asset){
+                remove_market(asset);
+                setCachedMarkets(prev => [...prev, market_add_info(m)]);
+                return false;
+            }
+            return true;
+        }));
+        setMarketToRemove(null);
   };
   const closeAll = async () => {
     await fetch('http://localhost:8090/command', {
@@ -181,12 +191,36 @@ export default function MarketsPage() {
           </div>
 
           <div className="mt-6 grid gap-2 border-t border-white/10 pt-4 text-[12px] text-white/60">
-            <p className="font-semibold text-white/70">Console</p>
-            
-            <div className="rounded-md border border-white/10 bg-[#0F1115] p-3">
-                
-            </div>
-          </div>
+  <p className="font-semibold text-white/70">Console</p>
+
+  <div className="rounded-md border border-white/10 bg-[#0F1115] p-3  h-43 overflow-y-auto ">
+    {cachedMarkets.length === 0 ? (
+      <p className="text-white/40 italic">No cached markets.</p>
+    ) : (
+      cachedMarkets.map(m => (
+        <CachedMarket
+          key={m.asset}
+          market={m}
+          onAdd={async asset => {
+            const info = cachedMarkets.find(cm => cm.asset === asset);
+            if (!info) return;
+            const res = await fetch("http://127.0.0.1:8090/command", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ addMarket: info }),
+            });
+            if (res.ok) {
+                setCachedMarkets(prev => prev.filter(c => c.asset !== asset));
+            }
+          }}
+          onRemove={asset => {
+              setCachedMarkets(prev => prev.filter(c => c.asset !== asset));
+          }}
+        />
+      ))
+    )}
+  </div>
+</div>
         </aside>
 
         {/* Markets Grid */}

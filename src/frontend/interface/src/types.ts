@@ -183,6 +183,18 @@ export type MarginAllocation =
 
 
 
+export function market_add_info(m: MarketInfo): AddMarketInfo{
+    const  { asset, margin, params, indicators} = m;
+    const config = indicators.map(i => i.id); 
+
+    return {
+        asset,
+        marginAlloc: {amount: margin},
+        tradeParams: params, 
+        config,
+    };
+
+}
 
 export interface AddMarketInfo {
   asset: string;
