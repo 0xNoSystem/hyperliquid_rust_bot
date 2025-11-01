@@ -368,7 +368,7 @@ export default function MarketDetail() {
                         <td className="py-2 pr-4 text-right">{formatPrice(t.open)}</td>
                         <td className="py-2 pr-4 text-right">{formatPrice(t.close)}</td>
                         <td className={`py-2 pr-4 text-right ${t.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
-                          {num(t.pnl, 2)$}
+                          {num(t.pnl, 2)}$
                         </td>
                         <td className="py-2 pr-4 text-right">{num(t.fee, 2)}$</td>
                         <td className="py-2 text-right">{t.oid[0]} / {t.oid[1]}</td>
