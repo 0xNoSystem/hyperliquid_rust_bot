@@ -9,6 +9,9 @@ user-selected indicators.
 The repository currently ships a React UI (BETA).
 The server instance is in bin/kwant.rs.
 
+<img width="2506" height="1251" alt="image" src="https://github.com/user-attachments/assets/0a27d4db-1b79-4c36-b00e-3b3da6fbfb38" />
+
+
 ## Features
 
 - Connect to Hyperliquid mainnet, testnet or localhost.
