@@ -9,6 +9,8 @@ user-selected indicators.
 The repository currently ships a React UI (BETA).
 The server instance is in bin/kwant.rs.
 
+<img width="2090" height="1277" alt="image" src="https://github.com/user-attachments/assets/d1ed699f-a1ef-48d9-882e-63291ae9a8c3" />
+
 <img width="2506" height="1251" alt="image" src="https://github.com/user-attachments/assets/0a27d4db-1b79-4c36-b00e-3b3da6fbfb38" />
 
 
