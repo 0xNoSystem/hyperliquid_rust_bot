@@ -189,7 +189,7 @@ export function market_add_info(m: MarketInfo): AddMarketInfo{
 
     return {
         asset,
-        marginAlloc: {amount: margin},
+        marginAlloc: {amount: margin ?? 0},
         tradeParams: params, 
         config,
     };
@@ -202,6 +202,12 @@ export interface AddMarketInfo {
   tradeParams: TradeParams;
   config?: IndexId[];
 };
+
+export interface AddMarketProps {
+  onClose: () => void;
+  totalMargin: number;
+  assets: assetMeta[];
+}
 
 export type Message = 
     | { preconfirmMarket: string }
@@ -230,7 +236,7 @@ export interface TradeInfo{
     close: number,
     pnl: number,
     fee: number,
-    is_long: number,
+    isLong: number,
     duration?: number,
     oid: [number, number]
 };
@@ -270,9 +276,4 @@ export interface assetMeta{
     szDecimals: number,
     maxLeverage: number,
 }
-
-
-
-
-
 

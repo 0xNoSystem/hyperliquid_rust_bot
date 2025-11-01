@@ -1,153 +1,69 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Power, Pause, X, AlertCircle } from 'lucide-react';
-import MarketCard from './MarketCard';
-import { AddMarket } from './AddMarket';
-import {CachedMarket} from './MarketDetails';
-import type { MarketInfo, Message, assetPrice, MarketTradeInfo,AddMarketInfo, assetMargin, indicatorData, assetMeta } from '../types';
-import {market_add_info} from '../types';
+import React, { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Plus, Power, Pause, X, AlertCircle } from "lucide-react";
+import MarketCard from "./MarketCard";
+import { AddMarket } from "./AddMarket";
+import { CachedMarket } from "./MarketDetails";
+import { useWebSocketContext } from "../context/WebSocketContext";
 
 export default function MarketsPage() {
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const errRef = useRef<NodeJS.Timeout | null>(null);
+  const {
+    markets,
+    universe,
+    cachedMarkets,
+    totalMargin,
+    errorMsg,
+    sendCommand,
+    dismissError,
+    cacheMarket,
+    deleteCachedMarket,
+    requestRemoveMarket,
+    requestToggleMarket,
+    requestCloseAll,
+    requestPauseAll,
+  } = useWebSocketContext();
 
-  const [markets, setMarkets] = useState<MarketInfo[]>([]);
-  const [universe, setUniverse] = useState<assetMeta[]>([]);
-  const [cachedMarkets, setCachedMarkets] = useState<AddMarketInfo[]>([]);
-  const [totalMargin, setTotalMargin] = useState(0);
   const [marketToRemove, setMarketToRemove] = useState<string | null>(null);
   const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [trades, setTrades] = useState<MarketTradeInfo[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<number>();
-
-
-  useEffect(() => {
-    if (wsRef.current) return;
-    const connect = () => {
-      const ws = new WebSocket('ws://localhost:8090/ws');
-      wsRef.current = ws;
-      ws.onopen = () => load_session();
-      ws.onmessage = (event: MessageEvent) => {
-        const payload = JSON.parse(event.data) as Message;
-            if ('confirmMarket' in payload) {
-                const asset = payload.confirmMarket.asset;
-                setMarkets(prev => prev.map(m => (m.asset === asset ? {...payload.confirmMarket, state: 'Ready'} : m)));
-
-        }else if ('preconfirmMarket' in payload){ 
-            const asset = payload.preconfirmMarket;
-            console.log(asset);
-            setMarkets(prev => [
-        ...prev,
-        {
-            asset,
-            state: 'Loading',
-            price: null,
-            lev: null,
-            margin: null,
-            pnl: null,
-            indicators: [],
-            trades: [],
-            params: {
-                strategy: { custom: { risk: 'Normal', style: 'Scalp', stance: 'Neutral', followTrend: false } }
-            },
-            isPaused: false,
-        },
-        ]);
-
-        }else if ('updatePrice' in payload) {
-          const [asset, price] = payload.updatePrice as assetPrice;
-          setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, price } : m)));
-        } else if ('newTradeInfo' in payload) {
-          const { asset, info } = payload.newTradeInfo as MarketTradeInfo;
-          console.log(info);
-          setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, trades: [...(Array.isArray(m.trades) ? m.trades : []), info], pnl: (m.pnl += info.pnl) } : m)));
-        } else if ('updateTotalMargin' in payload) {
-          setTotalMargin(payload.updateTotalMargin);
-        } else if ('updateMarketMargin' in payload) {
-          const [asset, margin] = payload.updateMarketMargin as assetMargin;
-          setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, margin } : m)));
-        } else if ('updateIndicatorValues' in payload) {
-          const { asset, data } = payload.updateIndicatorValues as { asset: string; data: indicatorData[] };
-          setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, indicators: data } : m)));
-        } else if ('userError' in payload) {
-          setErrorMsg(payload.userError);
-          if (errRef.current) clearTimeout(errRef.current);
-          errRef.current = setTimeout(() => setErrorMsg(null), 5000);
-        } else if ('loadSession' in payload) {
-          setMarkets(payload.loadSession[0]);
-          setUniverse(payload.loadSession[1] as assetMeta[]);
-        }
-      };
-      ws.onerror = err => console.error('WebSocket error', err);
-      ws.onclose = () => {
-        reconnectRef.current = window.setTimeout(connect, 1000);
-      };
-    };
-    connect();
-    return () => {
-      if (reconnectRef.current) clearTimeout(reconnectRef.current);
-      wsRef.current?.close();
-    };
-  }, []);
-
-  useEffect(() => {
-  console.log("universe updated:", universe);
-}, [universe]);
-
-  const remove_market = async (asset: string) => {
-    await fetch('http://localhost:8090/command', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ removeMarket: asset.toUpperCase() }),
-    });
-  };
-  const toggle_market = async (asset: string) => {
-    await fetch('http://localhost:8090/command', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ toggleMarket: asset.toUpperCase() }),
-    });
-  };
-  const load_session = async () => {
-    await fetch('http://localhost:8090/command', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ getSession: null }),
-    });
-  };
 
   const handleConfirmToggle = (asset: string, isPaused: boolean) => {
     if (isPaused) {
-      toggle_market(asset);
-      setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, isPaused: false } : m)));
-    } else setMarketToToggle(asset);
+      requestToggleMarket(asset).catch((err) =>
+        console.error("Toggle failed", err),
+      );
+    } else {
+      setMarketToToggle(asset);
+    }
   };
+
   const handleTogglePause = (asset: string) => {
-    toggle_market(asset);
-    setMarkets(prev => prev.map(m => (m.asset === asset ? { ...m, isPaused: true } : m)));
-    setMarketToToggle(null);
+    requestToggleMarket(asset)
+      .catch((err) => console.error("Toggle failed", err))
+      .finally(() => setMarketToToggle(null));
   };
+
   const handleRemove = (asset: string) => {
-        setMarkets(prev => prev.filter(m => {
-            if (m.asset === asset){
-                remove_market(asset);
-                setCachedMarkets(prev => [...prev, market_add_info(m)]);
-                return false;
-            }
-            return true;
-        }));
-        setMarketToRemove(null);
+    const market = markets.find((m) => m.asset === asset);
+    if (market) {
+      cacheMarket(market);
+    }
+    requestRemoveMarket(asset)
+      .catch((err) => console.error("Remove failed", err))
+      .finally(() => setMarketToRemove(null));
   };
-  const closeAll = async () => {
-    await fetch('http://localhost:8090/command', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ closeAll: null }),
-    });
-  };
-  const pauseAll = async () => {
-    await fetch('http://localhost:8090/command', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pauseAll: null }),
-    });
+
+  const handleRestoreCached = async (asset: string) => {
+    const info = cachedMarkets.find((cm) => cm.asset === asset);
+    if (!info) return;
+    try {
+      const res = await sendCommand({ addMarket: info });
+      if (res.ok) {
+        deleteCachedMarket(asset);
+      }
+    } catch (error) {
+      console.error("Failed to restore market", error);
+    }
   };
 
   return (
@@ -164,63 +80,74 @@ export default function MarketsPage() {
         <aside className="h-fit rounded-md border border-white/10 bg-[#0B0E12]/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
           <div className="flex items-baseline justify-between">
             <div>
-              <div className="text-[10px] uppercase text-white/50">Available Margin</div>
-              <div className="font-mono text-3xl tabular-nums tracking-tight">${totalMargin.toFixed(2)}</div>
+              <div className="text-[10px] uppercase text-white/50">
+                Available Margin
+              </div>
+              <div className="font-mono text-3xl tabular-nums tracking-tight">
+                ${totalMargin.toFixed(2)}
+              </div>
             </div>
             <div className="h-6 w-1 bg-gradient-to-b from-cyan-400 via-fuchsia-400 to-emerald-400" />
           </div>
 
           <div className="mt-4 grid gap-2">
             {markets.length !== 0 && (
-              <button onClick={() => setShowAdd(true)} className="w-full rounded-md border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-cyan-200 hover:bg-cyan-500/20">
-                <div className="flex items-center justify-center gap-2"><Plus className="h-4 w-4" /><span className="text-sm">Add Market</span></div>
+              <button
+                onClick={() => setShowAdd(true)}
+                className="w-full rounded-md border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-cyan-200 hover:bg-cyan-500/20"
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  <span className="text-sm">Add Market</span>
+                </div>
               </button>
             )}
             <button
               className="w-full rounded-md border border-red-500/40 bg-red-600/15 px-3 py-2 text-red-200 hover:bg-red-600/25"
-              onClick={() => { closeAll(); setMarkets([]); }}
+              onClick={() =>
+                requestCloseAll().catch((err) =>
+                  console.error("Close all failed", err),
+                )
+              }
             >
-              <div className="flex items-center justify-center gap-2"><Power className="h-4 w-4" /><span className="text-sm">Close All</span></div>
+              <div className="flex items-center justify-center gap-2">
+                <Power className="h-4 w-4" />
+                <span className="text-sm">Close All</span>
+              </div>
             </button>
             <button
               className="w-full rounded-md border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-amber-200 hover:bg-amber-500/25"
-              onClick={() => { pauseAll(); markets.forEach(m => (m.isPaused = true)); }}
+              onClick={() =>
+                requestPauseAll().catch((err) =>
+                  console.error("Pause all failed", err),
+                )
+              }
             >
-              <div className="flex items-center justify-center gap-2"><Pause className="h-4 w-4" /><span className="text-sm">Pause All</span></div>
+              <div className="flex items-center justify-center gap-2">
+                <Pause className="h-4 w-4" />
+                <span className="text-sm">Pause All</span>
+              </div>
             </button>
           </div>
 
           <div className="mt-6 grid gap-2 border-t border-white/10 pt-4 text-[12px] text-white/60">
-  <p className="font-semibold text-white/70">Console</p>
+            <p className="font-semibold text-white/70">Console</p>
 
-  <div className="rounded-md border border-white/10 bg-[#0F1115] p-3  h-43 overflow-y-auto ">
-    {cachedMarkets.length === 0 ? (
-      <p className="text-white/40 italic">No cached markets.</p>
-    ) : (
-      cachedMarkets.map(m => (
-        <CachedMarket
-          key={m.asset}
-          market={m}
-          onAdd={async asset => {
-            const info = cachedMarkets.find(cm => cm.asset === asset);
-            if (!info) return;
-            const res = await fetch("http://127.0.0.1:8090/command", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ addMarket: info }),
-            });
-            if (res.ok) {
-                setCachedMarkets(prev => prev.filter(c => c.asset !== asset));
-            }
-          }}
-          onRemove={asset => {
-              setCachedMarkets(prev => prev.filter(c => c.asset !== asset));
-          }}
-        />
-      ))
-    )}
-  </div>
-</div>
+            <div className="h-43 overflow-y-auto rounded-md border border-white/10 bg-[#0F1115] p-3">
+              {cachedMarkets.length === 0 ? (
+                <p className="text-white/40 italic">No cached markets.</p>
+              ) : (
+                cachedMarkets.map((m) => (
+                  <CachedMarket
+                    key={m.asset}
+                    market={m}
+                    onAdd={handleRestoreCached}
+                    onRemove={deleteCachedMarket}
+                  />
+                ))
+              )}
+            </div>
+          </div>
         </aside>
 
         {/* Markets Grid */}
@@ -229,8 +156,14 @@ export default function MarketsPage() {
             <div className="grid place-items-center rounded-md border border-white/10 bg-[#0B0E12]/80 p-12 text-center">
               <div>
                 <h2 className="text-2xl font-semibold">No markets configured</h2>
-                <p className="mt-1 text-white/60">Add a market to begin streaming quotes and executing strategies.</p>
-                <button onClick={() => setShowAdd(true)} className="mt-5 inline-flex items-center gap-2 rounded-md border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-cyan-200 hover:bg-cyan-500/20">
+                <p className="mt-1 text-white/60">
+                  Add a market to begin streaming quotes and executing
+                  strategies.
+                </p>
+                <button
+                  onClick={() => setShowAdd(true)}
+                  className="mt-5 inline-flex items-center gap-2 rounded-md border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-cyan-200 hover:bg-cyan-500/20"
+                >
                   <Plus className="h-4 w-4" /> Add Market
                 </button>
               </div>
@@ -239,9 +172,19 @@ export default function MarketsPage() {
 
           {markets.length > 0 && (
             <div className="grid grid-cols-1 gap-7 sm:grid-cols-2 xl:grid-cols-3">
-              {markets.map(m => (
-                <motion.div key={m.asset} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                  <MarketCard market={m} onTogglePause={() => handleConfirmToggle(m.asset, m.isPaused)} onRemove={() => setMarketToRemove(m.asset)} />
+              {markets.map((m) => (
+                <motion.div
+                  key={m.asset}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                >
+                  <MarketCard
+                    market={m}
+                    onTogglePause={() =>
+                      handleConfirmToggle(m.asset, m.isPaused)
+                    }
+                    onRemove={() => setMarketToRemove(m.asset)}
+                  />
                 </motion.div>
               ))}
             </div>
@@ -252,11 +195,21 @@ export default function MarketsPage() {
       {/* Error toast */}
       <AnimatePresence>
         {errorMsg && (
-          <motion.div initial={{ y: -16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -16, opacity: 0 }} className="fixed left-1/2 top-6 z-50 -translate-x-1/2">
+          <motion.div
+            initial={{ y: -16, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -16, opacity: 0 }}
+            className="fixed left-1/2 top-6 z-50 -translate-x-1/2"
+          >
             <div className="flex items-center gap-2 rounded-md border border-red-500/40 bg-[#2A1010] px-3 py-2 text-red-100 shadow">
               <AlertCircle className="h-4 w-4" />
               <span className="text-sm">{errorMsg}</span>
-              <button onClick={() => setErrorMsg(null)} className="ml-2 rounded-md px-2 py-1 hover:bg-white/10"><X className="h-4 w-4" /></button>
+              <button
+                onClick={dismissError}
+                className="ml-2 rounded-md px-2 py-1 hover:bg-white/10"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
           </motion.div>
         )}
@@ -265,15 +218,37 @@ export default function MarketsPage() {
       {/* Add Market modal */}
       <AnimatePresence>
         {showAdd && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50">
-            <div className="absolute inset-0 bg-black/70" onClick={() => setShowAdd(false)} />
-            <motion.div initial={{ rotateX: -8, opacity: 0 }} animate={{ rotateX: 0, opacity: 1 }} exit={{ rotateX: -4, opacity: 0 }} className="relative mx-auto mt-24 w-full max-w-2xl rounded-md border border-white/10 bg-[#0B0E12] p-6">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50"
+          >
+            <div
+              className="absolute inset-0 bg-black/70"
+              onClick={() => setShowAdd(false)}
+            />
+            <motion.div
+              initial={{ rotateX: -8, opacity: 0 }}
+              animate={{ rotateX: 0, opacity: 1 }}
+              exit={{ rotateX: -4, opacity: 0 }}
+              className="relative mx-auto mt-24 w-full max-w-2xl rounded-md border border-white/10 bg-[#0B0E12] p-6"
+            >
               <div className="flex items-center justify-between border-b border-white/10 pb-3">
                 <h3 className="text-sm text-white/80">Add Market</h3>
-                <button onClick={() => setShowAdd(false)} className="rounded-md p-1 hover:bg-white/10"><X className="h-5 w-5" /></button>
+                <button
+                  onClick={() => setShowAdd(false)}
+                  className="rounded-md p-1 hover:bg-white/10"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
               <div className="pt-4">
-                <AddMarket onClose={() => setShowAdd(false)} totalMargin={totalMargin} assets={universe}/>
+                <AddMarket
+                  onClose={() => setShowAdd(false)}
+                  totalMargin={totalMargin}
+                  assets={universe}
+                />
               </div>
             </motion.div>
           </motion.div>
@@ -283,14 +258,41 @@ export default function MarketsPage() {
       {/* Confirm remove */}
       <AnimatePresence>
         {marketToRemove && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50">
-            <div className="absolute inset-0 bg-black/70" onClick={() => setMarketToRemove(null)} />
-            <motion.div initial={{ y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 10, opacity: 0 }} className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-red-500/40 bg-[#1A0F12] p-6">
-              <h3 className="text-lg font-semibold">Remove <span className="text-red-300">{marketToRemove}</span>?</h3>
-              <p className="mt-1 text-red-200/80">This will close any ongoing trade initiated by the Bot.</p>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50"
+          >
+            <div
+              className="absolute inset-0 bg-black/70"
+              onClick={() => setMarketToRemove(null)}
+            />
+            <motion.div
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 10, opacity: 0 }}
+              className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-red-500/40 bg-[#1A0F12] p-6"
+            >
+              <h3 className="text-lg font-semibold">
+                Remove <span className="text-red-300">{marketToRemove}</span>?
+              </h3>
+              <p className="mt-1 text-red-200/80">
+                This will close any ongoing trade initiated by the Bot.
+              </p>
               <div className="mt-6 flex justify-end gap-2">
-                <button className="rounded-md border border-white/20 px-4 py-2 hover:bg-white/10" onClick={() => setMarketToRemove(null)}>Cancel</button>
-                <button className="rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700" onClick={() => handleRemove(marketToRemove)}>Yes</button>
+                <button
+                  className="rounded-md border border-white/20 px-4 py-2 hover:bg-white/10"
+                  onClick={() => setMarketToRemove(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+                  onClick={() => handleRemove(marketToRemove!)}
+                >
+                  Yes
+                </button>
               </div>
             </motion.div>
           </motion.div>
@@ -300,14 +302,41 @@ export default function MarketsPage() {
       {/* Confirm pause */}
       <AnimatePresence>
         {marketToToggle && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50">
-            <div className="absolute inset-0 bg-black/70" onClick={() => setMarketToToggle(null)} />
-            <motion.div initial={{ y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 10, opacity: 0 }} className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-amber-500/40 bg-[#1A140A] p-6">
-              <h3 className="text-lg font-semibold">Pause <span className="text-amber-300">{marketToToggle}</span>?</h3>
-              <p className="mt-1 text-amber-200/80">This will close any ongoing trade initiated by the Bot.</p>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50"
+          >
+            <div
+              className="absolute inset-0 bg-black/70"
+              onClick={() => setMarketToToggle(null)}
+            />
+            <motion.div
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 10, opacity: 0 }}
+              className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-amber-500/40 bg-[#1A140A] p-6"
+            >
+              <h3 className="text-lg font-semibold">
+                Pause <span className="text-amber-300">{marketToToggle}</span>?
+              </h3>
+              <p className="mt-1 text-amber-200/80">
+                This will close any ongoing trade initiated by the Bot.
+              </p>
               <div className="mt-6 flex justify-end gap-2">
-                <button className="rounded-md border border-white/20 px-4 py-2 hover:bg-white/10" onClick={() => setMarketToToggle(null)}>Cancel</button>
-                <button className="rounded-md bg-amber-600 px-4 py-2 text-white hover:bg-amber-700" onClick={() => handleTogglePause(marketToToggle)}>Yes</button>
+                <button
+                  className="rounded-md border border-white/20 px-4 py-2 hover:bg-white/10"
+                  onClick={() => setMarketToToggle(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="rounded-md bg-amber-600 px-4 py-2 text-white hover:bg-amber-700"
+                  onClick={() => handleTogglePause(marketToToggle!)}
+                >
+                  Yes
+                </button>
               </div>
             </motion.div>
           </motion.div>

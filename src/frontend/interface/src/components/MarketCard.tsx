@@ -193,4 +193,3 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
 };
 
 export default MarketCard;
-
