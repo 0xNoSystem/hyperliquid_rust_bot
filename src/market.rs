@@ -15,7 +15,7 @@ use crate::signal::{
 };
 use crate::strategy::Strategy;
 use crate::trade_setup::{LiquidationFillInfo, TimeFrame, TradeCommand, TradeInfo, TradeParams};
-use crate::{AssetMargin, IndicatorData, UpdateFrontend};
+use crate::{AssetMargin, IndicatorData, UpdateFrontend, EditMarketInfo};
 use crate::{MAX_HISTORY, MarketInfo, MarketTradeInfo, Wallet};
 
 use tokio::sync::mpsc::{
@@ -234,6 +234,9 @@ impl Market {
                     if let Ok(lev) = upd {
                         let _ = engine_update_tx
                             .send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
+                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                            UpdateFrontend::MarketInfoEdit((asset.name.clone(), EditMarketInfo::Lev(lev)))
+                        ));
                     };
                 }
 

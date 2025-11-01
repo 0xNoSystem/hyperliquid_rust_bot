@@ -7,6 +7,7 @@ import React, {
   useState,
 } from "react";
 import type {
+  editMarketInfo,
   AddMarketInfo,
   MarketInfo,
   MarketTradeInfo,
@@ -191,6 +192,16 @@ useEffect(() => {
       });
       return;
     }
+
+    if ("marketInfoEdit" in payload){
+        const [asset, edit] = payload.marketInfoEdit as [string, editMarketInfo];
+        if (edit.lev){
+            setMarkets((prev) =>{
+                return prev.map((m) => (m.asset === asset ? {...m, lev: edit.lev} : m));
+            });
+        }
+    }
+        
 
     if ("updateTotalMargin" in payload) {
       setTotalMargin(payload.updateTotalMargin);

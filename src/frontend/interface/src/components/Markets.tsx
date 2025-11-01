@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Power, Pause, X, AlertCircle } from "lucide-react";
 import MarketCard from "./MarketCard";
 import { AddMarket } from "./AddMarket";
-import { CachedMarket } from "./MarketDetails";
+import { CachedMarket } from "./CachedMarket";
 import { useWebSocketContext } from "../context/WebSocketContext";
+import { BackgroundFX } from "../components/BackgroundFX";
 
 export default function MarketsPage() {
   const {
@@ -69,11 +70,7 @@ export default function MarketsPage() {
   return (
     <div className="relative min-h-screen overflow-hidden pb-70 bg-[#07090B] text-white">
       {/* layered background */}
-      <div className="pointer-events-none absolute max-h inset-0 opacity-[0.08] [background:radial-gradient(60%_60%_at_0%_0%,rgba(56,189,248,0.5),transparent_60%),radial-gradient(50%_50%_at_100%_0%,rgba(232,121,249,0.5),transparent_60%),radial-gradient(60%_60%_at_50%_100%,rgba(52,211,153,0.4),transparent_60%)]" />
-      <div className="pointer-events-none absolute inset-0 opacity-[0.06] bg-[linear-gradient(transparent_23px,rgba(255,255,255,0.06)_24px),linear-gradient(90deg,transparent_23px,rgba(255,255,255,0.06)_24px)] bg-[size:26px_26px]" />
-      <div className="pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,transparent,black_20%,black_80%,transparent)]">
-        <div className="h-[200%] w-[200%] -translate-x-1/4 animate-[scan_9s_linear_infinite] bg-[repeating-linear-gradient(90deg,transparent_0,transparent_48px,rgba(255,255,255,0.04)_49px,rgba(255,255,255,0.04)_50px)]" />
-      </div>
+      <BackgroundFX intensity={1} />
 
       <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[280px,1fr]">
         {/* Command Dock */}

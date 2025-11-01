@@ -1,7 +1,9 @@
+// src/App.tsx
 import './index.css';
 import MarketsPage from './components/Markets';
 import Layout from './components/Layout';
 import Settings from "./components/Settings";
+import MarketDetail from "./components/MarketDetail";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 const App: React.FC = () => (
@@ -9,6 +11,7 @@ const App: React.FC = () => (
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<MarketsPage />} />
+        <Route path="asset/:asset" element={<MarketDetail />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
@@ -16,3 +19,4 @@ const App: React.FC = () => (
 );
 
 export default App;
+

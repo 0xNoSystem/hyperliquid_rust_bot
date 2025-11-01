@@ -4,6 +4,7 @@ import { Pause, Play, Trash2, ExternalLink } from 'lucide-react';
 import type { MarketInfo } from '../types';
 import { indicatorLabels, indicatorColors, decompose, get_value,get_params, fromTimeFrame } from '../types';
 import LoadingDots from './Loading';
+import { Link } from "react-router-dom";
 
 interface MarketCardProps {
   market: MarketInfo;
@@ -58,7 +59,7 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
           <div className="text-[10px] uppercase text-white/50">Asset</div>
           <div className="-mt-0.5 flex items-baseline gap-3">
             <h2 className="text-3xl font-semibold tracking-tight">
-              {asset}
+            <Link to={`/asset/${asset}`} className="hover:underline">{asset}</Link>
               <a
                 href={`https://app.hyperliquid.xyz/trade/${asset}`}
                 target="_blank"

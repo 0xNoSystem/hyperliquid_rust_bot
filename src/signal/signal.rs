@@ -74,6 +74,7 @@ impl SignalEngine {
         if let Some(tracker) = &mut self.trackers.get_mut(&id.1) {
             tracker.add_indicator(id.0, true);
         } else {
+            println!("CREATING A NEW TRACKER");
             let mut new_tracker = Tracker::new(id.1);
             new_tracker.add_indicator(id.0, false);
             self.trackers.insert(id.1, Box::new(new_tracker));
@@ -146,7 +147,7 @@ impl SignalEngine {
 
     pub async fn load<I: IntoIterator<Item = Price>>(&mut self, tf: TimeFrame, price_data: I) {
         if let Some(tracker) = self.trackers.get_mut(&tf) {
-            tracker.load(price_data).await
+            tracker.load(price_data).await;
         }
     }
 
@@ -155,6 +156,13 @@ impl SignalEngine {
             Strategy::Custom(brr) => brr.generate_signal(values, price, self.exec_params),
         }
     }
+
+    fn get_test_trade(&self, price: f64) -> Option<TradeCommand>{
+        match self.strategy {
+            Strategy::Custom(brr) => brr.generate_test_trade(price, self.exec_params),
+        }
+    }
+
 }
 
 impl SignalEngine {
@@ -179,7 +187,7 @@ impl SignalEngine {
                             }
                         }
 
-                        if let Some(trade) = self.get_signal(price.close, values) {
+                        if let Some(trade) = self.get_test_trade(price.close) {
                             let _ = self.trade_tx.try_send(trade);
                         }
                     }
@@ -212,7 +220,7 @@ impl SignalEngine {
                     }
                     if let Some(data) = price_data {
                         for (tf, prices) in data {
-                            let _ = self.load(tf, prices);
+                            let _ = self.load(tf, prices).await;
                         }
                     }
                 }

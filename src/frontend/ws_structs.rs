@@ -36,7 +36,7 @@ pub struct IndicatorData {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EditMarketInfo {
-    Lev(f64),
+    Lev(usize),
     Strategy,
     Indicator(Vec<IndexId>),
 }
