@@ -11,10 +11,10 @@ import { motion, AnimatePresence } from "framer-motion";
 
 import {
   decompose,
-  indicatorColors,
   indicatorLabels,
   indicatorParamLabels,
   fromTimeFrame,
+  get_value,
   into,
 } from "../types";
 import type {
@@ -25,6 +25,17 @@ import type {
   TradeInfo,
 } from "../types";
 import { ArrowLeft, Plus, Minus, Save, X } from "lucide-react";
+
+export const indicatorColors: Record<string, string> = {
+  rsi: 'green',
+  smaOnRsi: 'indigo',
+  stochRsi: 'purple',
+  adx: 'yellow',
+  atr: 'red',
+  ema: 'blue',
+  emaCross: 'pink',
+  sma: 'gray',
+};
 
 
 const formatPrice = (n: number) => {
@@ -309,26 +320,31 @@ export default function MarketDetail() {
             </div>
             <div className={`${Body} flex flex-wrap gap-2`}>
               {market.indicators.map((data, i) => {
-                const { kind, timeframe } = decompose(data);
+                const { kind, timeframe, value } = decompose(data);
                 const kindKey = Object.keys(kind)[0] as string;
                 return (
+                    <div className="group flex flex-col items-center gap-2 rounded-lg border border-white/10 px-2.5 py-1 text-[11px]">
                   <div
                     key={`${kindKey}-${fromTimeFrame(timeframe)}-${i}`}
-                    className={`group flex items-center gap-2 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] ${
+                    className={`group flex items-center gap-4 rounded-lg border border-white/10 px-2.5 py-1 text-[13px] bg-${
                       indicatorColors[kindKey] || "bg-white/10"
-                    }`}
+                    }-800 `}
                     title={JSON.stringify(kind)}
                   >
                     <span className="font-medium">
                       {indicatorLabels[kindKey] || kindKey} — {fromTimeFrame(timeframe)}
                     </span>
-                    <button
+                     <button
                       className="rounded p-0.5 hover:bg-white/10"
                       onClick={() => queueRemove([kind, timeframe])}
                       title="Queue remove"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
+                    </div>
+                    <span className={`text-center font-bold text-xl text-${indicatorColors[kindKey]}-200`}>
+                    {value ? get_value(value) : "N/A"}</span>
+
                   </div>
                 );
               })}
