@@ -1,4 +1,6 @@
 use actix::ActorContext;
+use actix::fut;
+use actix::prelude::*;
 use actix::AsyncContext;
 use actix::{Actor, Handler, Message, StreamHandler};
 use actix_cors::Cors;
@@ -109,7 +111,6 @@ struct ServerMessage(String);
 struct MyWebSocket {
     rx: broadcast::Receiver<UpdateFrontend>,
 }
-
 impl Actor for MyWebSocket {
     type Context = ws::WebsocketContext<Self>;
 
@@ -118,27 +119,24 @@ impl Actor for MyWebSocket {
 
         let mut rx = self.rx.resubscribe();
         let addr = ctx.address();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(update) => {
-                        if let Ok(text) = serde_json::to_string(&update) {
-                            info!("\n{}\n", text);
-                            addr.do_send(ServerMessage(text));
-                        }
+
+        ctx.spawn(
+            fut::wrap_future(async move {
+                while let Ok(update) = rx.recv().await {
+                    if let Ok(text) = serde_json::to_string(&update) {
+                        info!("\n{}\n", text);
+                        addr.do_send(ServerMessage(text));
                     }
-                    Err(broadcast::error::RecvError::Lagged(cnt)) => {
-                        error!("missed {} messages", cnt);
-                        continue;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
                 }
-            }
-            addr.do_send(ServerMessage("__SERVER_CLOSED__".into()));
-        });
+            })
+            .map(|_, _actor, _ctx| ()), // required combinator, result ignored
+        );
+    }
+
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
+        info!("WebSocket actor stopped — unsubscribed");
     }
 }
-
 impl Handler<ServerMessage> for MyWebSocket {
     type Result = ();
 
