@@ -24,7 +24,7 @@ import type {
   TimeFrame,
   TradeInfo,
 } from "../types";
-import { ArrowLeft, Plus, Minus, Save, X } from "lucide-react";
+import { ArrowLeft, Plus, Minus, X } from "lucide-react";
 
 export const indicatorColors: Record<string, string> = {
   rsi: 'green',
@@ -188,8 +188,7 @@ export default function MarketDetail() {
   return (
       
     <div className="relative overflow-hidden min-h-screen mx-auto max-w-[2400px] pb-80 py-8 text-white font-mono">
-      <div className="mb-4 flex items-center justify-center">
-                    <Link to="/" className={`relative right-[34vw] text-[20px] ${BtnGhost}`}><ArrowLeft className="h-6 w-6 mr-2" />Back</Link>
+      <div className="mb-1 flex items-center justify-center">
         <div className="relative right-[3vw] flex items-center gap-3">
           <button
             onClick={() =>
@@ -206,6 +205,7 @@ export default function MarketDetail() {
         <aside className={Rail}>
                 
           <div className="space-y-4">
+                                        <Link to="/" className={`w-full mb-10 text-[20px] ${BtnGhost}`}><ArrowLeft className="h-6 w-6 mr-2" />Back to Markets</Link>
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
               <div className="text-[10px] uppercase text-white/50">Price</div>
               <div className="mt-1 text-2xl">{market.price == null ? "—" : `$${px(market.price)}`}</div>
@@ -499,7 +499,6 @@ export default function MarketDetail() {
                   <div className="flex gap-2">
                     <button onClick={discardPending} className={BtnGhost}>Discard</button>
                     <button onClick={applyPending} className={BtnOK}>
-                      <Save className="h-4 w-4 mr-2" />
                       Apply {pending.length}
                     </button>
                   </div>
