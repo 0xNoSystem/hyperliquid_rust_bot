@@ -68,7 +68,7 @@ export default function MarketsPage() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden pb-70 bg-[#07090B] text-white">
+    <div className="relative min-h-screen overflow-hidden pb-100 bg-[#07090B] text-white">
       {/* layered background */}
       <BackgroundFX intensity={1} />
 

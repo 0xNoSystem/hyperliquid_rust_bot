@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 
 const Header: React.FC = () => (
   <header className="top-0 z-40 border-b border-white/10 bg-[#0B0C0E]">
-    <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
+    <div className="mx-auto flex max-w-[2250px] items-center justify-between px-6 py-3">
       <div className="flex items-center gap-3">
         <div className="grid h-8 w-8 place-items-center rounded-md border border-white/10 bg-[#111316]">
           <div className="h-3.5 w-3.5 bg-orange-500" />

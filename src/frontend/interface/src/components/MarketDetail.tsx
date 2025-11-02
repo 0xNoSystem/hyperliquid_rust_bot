@@ -176,11 +176,10 @@ export default function MarketDetail() {
   /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
   return (
       
-
-    <div className="relative mx-auto max-w-[2300px] px-6 py-8 text-white font-mono">
-      <div className="mb-4 flex items-center justify-between">
-        <Link to="/" className={BtnGhost}><ArrowLeft className="h-4 w-4 mr-2" />Back</Link>
-        <div className="flex items-center gap-3">
+    <div className="relative overflow-hidden min-h-screen mx-auto max-w-[2400px] pb-80 py-8 text-white font-mono">
+      <div className="mb-4 flex items-center justify-center">
+                    <Link to="/" className={`relative right-[34vw] text-[20px] ${BtnGhost}`}><ArrowLeft className="h-6 w-6 mr-2" />Back</Link>
+        <div className="relative right-[3vw] flex items-center gap-3">
           <button
             onClick={() =>
                       handleConfirmToggle(market.asset, market.isPaused)
@@ -189,17 +188,12 @@ export default function MarketDetail() {
           </button>
           <h1 className="text-[30px] tracking-widest">{market.asset} <span className="text-[15px] text-orange-400">{market.lev}x</span></h1>
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-white/60">
-          <span className={Kbd}>A</span><span>Add ind</span>
-          <span className={Kbd}>R</span><span>Rm ind</span>
-          <span className={Kbd}>Ctrl</span>+<span className={Kbd}>Enter</span><span>Apply</span>
-        </div>
       </div>
 
       <div className={GridCols}>
-            <BackgroundFX intensity={0.1} />
         {/* LEFT RAIL — quick stats & knobs */}
         <aside className={Rail}>
+                
           <div className="space-y-4">
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
               <div className="text-[10px] uppercase text-white/50">Price</div>

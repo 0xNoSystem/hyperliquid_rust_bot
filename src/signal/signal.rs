@@ -187,7 +187,7 @@ impl SignalEngine {
                             }
                         }
 
-                        if let Some(trade) = self.get_test_trade(price.close) {
+                        if let Some(trade) = self.get_signal(price.close, values) {
                             let _ = self.trade_tx.try_send(trade);
                         }
                     }
