@@ -29,6 +29,17 @@ export default function MarketsPage() {
   const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
 
+      const sessionPnl = markets.reduce((sum, market) => {
+  return sum + (market.pnl ?? 0);
+}, 0);
+
+const SessionPnlDisplay = () => (
+  <span className={`font-mono tabular-nums ${sessionPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+    {sessionPnl >= 0 ? "+" : ""}
+    {sessionPnl.toFixed(2)}$
+  </span>
+);
+
   const handleConfirmToggle = (asset: string, isPaused: boolean) => {
     if (isPaused) {
       requestToggleMarket(asset).catch((err) =>
@@ -129,6 +140,7 @@ export default function MarketsPage() {
           </div>
 
           <div className="mt-6 grid gap-2 border-t border-white/10 pt-4 text-[12px] text-white/60">
+                                        <div className="text-[25px] text-right p-2 font-bold">PnL : {<SessionPnlDisplay/>}</div>
             <p className="font-semibold text-white/70">Console</p>
 
             <div className="h-43 overflow-y-auto rounded-md border border-white/10 bg-[#0F1115] p-3">

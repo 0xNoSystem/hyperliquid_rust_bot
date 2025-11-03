@@ -80,8 +80,8 @@ function PnlTicker({ pnl }: { pnl: number | null }) {
   if (pnl == null) return <span className="font-mono text-white/60">PnL —</span>;
   const pos = pnl >= 0;
   return (
-    <span className={`font-mono text-lg tabular-nums ${pos ? "text-emerald-300" : "text-rose-300"}`}>
-      {pos ? "+" : ""}
+    <span className={`font-mono text-xl tabular-nums ${pos ? "text-emerald-300" : "text-rose-300"}`}>
+      {pos ? "+ $" : ""}
       {num(pnl, 2)}
     </span>
   );
@@ -231,7 +231,7 @@ export default function MarketDetail() {
 
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
               <div className="flex items-center justify-between">
-                <div className="text-[10px] uppercase text-white/50">Total PnL</div>
+                <div className="text-[14px] uppercase text-white/50">PnL</div>
                 <div className="h-1 w-16 bg-white/10">
                   {/* mini bar (cosmetic) */}
                   <div
