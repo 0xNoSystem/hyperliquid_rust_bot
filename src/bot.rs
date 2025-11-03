@@ -3,7 +3,7 @@ use crate::{
     UpdateFrontend, Wallet,
 };
 use hyperliquid_rust_sdk::{
-    AssetMeta, Error, InfoClient, Message, Subscription, TradeInfo as HLTradeInfo,
+    AssetMeta, Error, InfoClient, Message, Subscription, TradeInfo as HLTradeInfo, AssetPosition
 };
 use log::info;
 use std::collections::HashMap;
@@ -33,6 +33,7 @@ pub struct Bot {
     update_rv: Option<UnboundedReceiver<MarketUpdate>>,
     update_tx: UnboundedSender<MarketUpdate>,
     app_tx: Option<UnboundedSender<UpdateFrontend>>,
+    chain_open_positions: Vec<AssetPosition>,
     universe: Vec<AssetMeta>,
 }
 
@@ -58,6 +59,7 @@ impl Bot {
                 update_rv: Some(update_rv),
                 update_tx,
                 app_tx: None,
+                chain_open_positions: Vec::new(),
                 universe,
             },
             bot_tx,
@@ -91,12 +93,24 @@ impl Bot {
         if !MARKETS.contains(&asset_str) {
             return Err(Error::AssetNotFound);
         }
+        
+        let mut book = margin_book.lock().await;
+        self.chain_open_positions = book.sync().await?;
+        if self.chain_open_positions.iter().any(|p| &p.position.coin == &asset) {
+            if let Some(tx) = &self.app_tx {
+                let _ = tx.send(UpdateFrontend::UserError(format!(
+                    "Cannot add a market with open on-chain position({})",
+                    &asset
+                )));
+            }
+            return Ok(());
+        }
+
+        let margin = book.allocate(asset.clone(), margin_alloc).await?;
+
         if let Some(tx) = &self.app_tx {
             let _ = tx.send(UpdateFrontend::PreconfirmMarket(asset.clone()));
         }
-
-        let mut book = margin_book.lock().await;
-        let margin = book.allocate(asset.clone(), margin_alloc).await?;
 
         let meta = if let Some(cached) = self.universe.iter().find(|a| a.name == asset_str).cloned()
         {
@@ -281,7 +295,6 @@ impl Bot {
 
         self.app_tx = Some(app_tx.clone());
 
-        //safe
         let mut update_rv = self.update_rv.take().unwrap();
 
         let user = self.wallet.clone();
@@ -294,7 +307,7 @@ impl Bot {
         let app_tx_margin = app_tx.clone();
         let err_tx = app_tx.clone();
 
-        //keep marginbook in sync with DEX
+        //keep marginbook in sync for DEX <=> BOT overlap
         tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(2));
             loop {

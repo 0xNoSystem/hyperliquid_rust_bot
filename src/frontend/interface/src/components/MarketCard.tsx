@@ -59,7 +59,7 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
           <div className="text-[10px] uppercase text-white/50">Asset</div>
           <div className="-mt-0.5 flex items-baseline gap-3">
             <h2 className="text-3xl font-semibold tracking-tight">
-            <Link to={`/asset/${asset}`} className="hover:underline">{asset}</Link>
+            {loading ? asset: <Link to={`/asset/${asset}`} className="hover:underline">{asset}</Link>}
               <a
                 href={`https://app.hyperliquid.xyz/trade/${asset}`}
                 target="_blank"

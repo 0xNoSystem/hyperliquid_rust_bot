@@ -1,4 +1,4 @@
-use hyperliquid_rust_sdk::Error;
+use hyperliquid_rust_sdk::{AssetPosition,Error};
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
@@ -31,9 +31,10 @@ impl MarginBook {
             total_on_chain: f64::from_bits(1),
         }
     }
-    pub async fn sync(&mut self) -> Result<(), Error> {
-        self.total_on_chain = self.user.get_user_margin().await?;
-        Ok(())
+    pub async fn sync(&mut self) -> Result<Vec<AssetPosition>, Error> {
+        let res = self.user.get_user_margin(&mut self.map.keys()).await?;
+        self.total_on_chain = res.0;
+        Ok(res.1)
     }
 
     pub async fn update_asset(&mut self, update: AssetMargin) -> Result<f64, Error> {
