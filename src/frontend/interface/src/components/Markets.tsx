@@ -6,6 +6,7 @@ import { AddMarket } from "./AddMarket";
 import { CachedMarket } from "./CachedMarket";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { BackgroundFX } from "../components/BackgroundFX";
+import LoadingDots from './Loading';
 
 export default function MarketsPage() {
   const {
@@ -72,7 +73,7 @@ export default function MarketsPage() {
       {/* layered background */}
       <BackgroundFX intensity={1} />
 
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[280px,1fr]">
+      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[280px,1fr] mt-20">
         {/* Command Dock */}
         <aside className="h-fit rounded-md border border-white/10 bg-[#0B0E12]/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
           <div className="flex items-baseline justify-between">
@@ -81,7 +82,7 @@ export default function MarketsPage() {
                 Available Margin
               </div>
               <div className="font-mono text-3xl tabular-nums tracking-tight">
-                ${totalMargin.toFixed(2)}
+                {totalMargin ? `$${totalMargin.toFixed(2)}` :<LoadingDots/>}
               </div>
             </div>
             <div className="h-6 w-1 bg-gradient-to-b from-cyan-400 via-fuchsia-400 to-emerald-400" />

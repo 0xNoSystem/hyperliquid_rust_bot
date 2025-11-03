@@ -44,6 +44,16 @@ const formatPrice = (n: number) => {
   return n.toFixed(2);
 };
 
+function leverageColor(lev: number, maxLev: number): string {
+  const pct = (lev / maxLev) * 100;
+
+  if (pct < 10) return "text-green-500";
+  if (pct < 40) return "text-lime-200";
+  if (pct < 60) return "text-yellow-500";
+  if (pct < 80) return "text-orange-500";
+  return "text-red-600";
+}
+
 /* ====== TOKENS ====== */
 const Rail      = "rounded-xl border border-white/10 bg-[#0A0D10]/90 p-4 backdrop-blur";
 const Pane      = "rounded-xl border border-white/10 bg-[#0B0E12]/80";
@@ -101,7 +111,6 @@ export default function MarketDetail() {
       .finally(() => setMarketToToggle(null));
   };
 
-
   const market = useMemo<MarketInfo | undefined>(
     () => markets.find((m) => m.asset === (routeAsset ?? "").toUpperCase()),
     [markets, routeAsset]
@@ -111,18 +120,9 @@ export default function MarketDetail() {
     [universe, market]
   );
 
-  if (!market) {
-    return (
-      <div className="mx-auto max-w-7xl px-6 py-8 text-white">
-        <Link to="/" className={BtnGhost}><ArrowLeft className="h-4 w-4 mr-2" />Back</Link>
-        <div className={`${Pane} ${Body} mt-6`}>Market not found.</div>
-      </div>
-    );
-  }
-
   /* ----- local state ----- */
-  const [lev, setLev] = useState<number>(market.lev ?? 1);
-  const [margin, setMargin] = useState<number>(market.margin ?? 0);
+  const [lev, setLev] = useState<number>(market ? market.lev : 1);
+  const [margin, setMargin] = useState<number>(market ? market.margin : 0);
 
   // builder
   const [kindKey, setKindKey] = useState<string>("rsi");
@@ -133,6 +133,8 @@ export default function MarketDetail() {
   // batch
   const [pending, setPending] = useState<PendingEdit[]>([]);
 
+
+    
   const maxLev = meta?.maxLeverage ?? 1;
   const eqIndexId = (a: IndexId, b: IndexId) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -184,11 +186,22 @@ export default function MarketDetail() {
     await sendCommand({ manualUpdateMargin: [market.asset, Math.max(0, margin)] });
   };
 
+  if (!market) {
+    return (
+      <div className="mx-auto max-w-7xl px-6 py-8 text-white">
+        <Link to="/" className={BtnGhost}><ArrowLeft className="h-4 w-4 mr-2" />Back</Link>
+        <div className={`${Pane} ${Body} mt-6`}>Market not found.</div>
+      </div>
+    );
+  }
+
+
+
   /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
   return (
       
     <div className="relative overflow-hidden min-h-screen mx-auto max-w-[2400px] pb-80 py-8 text-white font-mono">
-      <div className="mb-1 flex items-center justify-center">
+      <div className="mb-1 flex items-center justify-center mt-10">
         <div className="relative right-[3vw] flex items-center gap-3">
           <button
             onClick={() =>
@@ -196,8 +209,13 @@ export default function MarketDetail() {
                     }
             className={Chip}>{market.isPaused ? "Paused" : "Live"}
           </button>
-          <h1 className="text-[30px] tracking-widest">{market.asset} <span className="text-[15px] text-orange-400">{market.lev}x</span></h1>
-        </div>
+          <h1 className="text-[40px] tracking-widest">{market.asset} 
+           <span className={`text-[24px] ml-3 ${leverageColor(market.lev, maxLev)}`}>
+            {market.lev}x
+            </span>
+
+             </h1>
+         </div>
       </div>
 
       <div className={GridCols}>
@@ -302,7 +320,8 @@ export default function MarketDetail() {
         <main className="space-y-4">
           {/* Chart placeholder with scanlines */}
           <section className={`${Pane}`}>
-            <div className={Head}>Chart</div>
+            <div className={Head}>Chart <span className="text-red-300/50">Note: This is a reference spot price chart, <a className="font-bold text-yellow-500 underline" href={`https://app.hyperliquid.xyz/trade/${market.asset}`} target="_blank">Hyperliquid chart</a> (PERPS) is likely different</span>
+                </div>
             <div className={`${Chart} relative h-[60vh] `}>
                 <TradingViewWidget
                     symbol={`CRYPTO:${market.asset}USD`}
