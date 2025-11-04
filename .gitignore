@@ -2,4 +2,4 @@
 /target
 Cargo.lock
 testnet
-src/frontend/interface/.vite
+web_ui/.vite
