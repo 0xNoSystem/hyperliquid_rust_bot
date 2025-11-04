@@ -39,9 +39,15 @@ impl MarginBook {
 
     pub async fn update_asset(&mut self, update: AssetMargin) -> Result<f64, Error> {
         let (asset, requested_margin) = update;
-        self.sync().await?;
-        let free = self.free();
 
+        let free: f64;
+        if let Some(margin) = self.map.get(&asset){
+            free = self.free() + margin;
+        }else{
+            return Err(Error::Custom(format!("{} market doesn't exist", &asset)));
+        }
+
+        self.sync().await?;
         if requested_margin > free {
             return Err(Error::InsufficientFreeMargin(free));
         }

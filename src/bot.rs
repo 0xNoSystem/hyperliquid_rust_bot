@@ -430,10 +430,17 @@ impl Bot {
                                     let mut book = margin_user_edit.lock().await;
                                     book.update_asset(asset_margin.clone()).await
                                 };
-                                if let Ok(new_margin) = result{
+                                match result{
+                                Ok(new_margin) => {
                                     let cmd = MarketCommand::UpdateMargin(new_margin);
                                     self.send_cmd(&asset_margin.0.to_string(), cmd).await;
+                                },
+
+                                Err(e) => {
+                                    let _ = err_tx.send(UserError(e.to_string()));
+                                },
                                 }
+                                    
                             },
                             ResumeAll =>{self.resume_all().await},
                             PauseAll => {self.pause_all().await;},

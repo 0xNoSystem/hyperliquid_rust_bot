@@ -7,7 +7,7 @@ pub struct Wallet {
     pub wallet: PrivateKeySigner,
     pub pubkey: String,
     pub url: BaseUrl,
-}
+}        self.sync().await?;
 
 impl Wallet {
     pub async fn new(
