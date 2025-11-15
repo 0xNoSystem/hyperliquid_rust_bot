@@ -226,46 +226,26 @@ const SessionPnlDisplay = () => (
       </AnimatePresence>
 
       {/* Add Market modal */}
-      <AnimatePresence>
-        {showAdd && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50"
-          >
-            <div
-              className="absolute inset-0 bg-black/70"
-              onClick={() => setShowAdd(false)}
-            />
-            <motion.div
-              initial={{ rotateX: -8, opacity: 0 }}
-              animate={{ rotateX: 0, opacity: 1 }}
-              exit={{ rotateX: -4, opacity: 0 }}
-              className="relative mx-auto mt-24 w-full max-w-2xl rounded-md border border-white/10 bg-[#0B0E12] p-6"
-            >
-              <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                <h3 className="text-sm text-white/80">Add Market</h3>
-                <button
-                  onClick={() => setShowAdd(false)}
-                  className="rounded-md p-1 hover:bg-white/10"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="pt-4">
-                <AddMarket
-                  onClose={() => setShowAdd(false)}
-                  totalMargin={totalMargin}
-                  assets={universe}
-                />
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {showAdd && (
+  <div className="fixed inset-0 z-50">
+    {/* Overlay */}
+    <div
+      className="absolute inset-0 bg-black/70"
+      onClick={() => setShowAdd(false)}
+    />
 
-      {/* Confirm remove */}
+    {/* Centered Modal */}
+    <div className="absolute inset-0 flex items-center justify-center p-4">
+      <div className="bg-neutral-900 rounded-xl shadow-xl">
+        <AddMarket
+          onClose={() => setShowAdd(false)}
+          totalMargin={totalMargin}
+          assets={universe}
+        />
+      </div>
+    </div>
+  </div>
+)}      {/* Confirm remove */}
       <AnimatePresence>
         {marketToRemove && (
           <motion.div

@@ -112,7 +112,7 @@ const handleRemove = (i: number) => setConfig(config.filter((_, idx) => idx !== 
   const btnClass = 'px-5 py-2 border border-white bg-gray-600 text-white rounded hover:bg-gray-500 cursor-pointer';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm transform scale-[0.88]">
       <form onSubmit={handleSubmit} className="relative bg-gray-600 rounded-2xl shadow-2xl w-full max-w-lg p-8 space-y-6 scale-90">
         <h2 className="text-2xl font-bold text-white">Add New Market</h2>
         <div className="text-sm text-white">Available Margin: <span className="font-semibold">{totalMargin.toFixed(2)}</span></div>
