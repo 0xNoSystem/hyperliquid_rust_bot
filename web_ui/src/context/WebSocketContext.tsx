@@ -183,6 +183,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 asset,
                 state: "Loading",
                 price: null,
+                prev: null,
                 lev: null,
                 margin: null,
                 pnl: null,
@@ -198,7 +199,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     if ("updatePrice" in payload) {
       const [asset, price] = payload.updatePrice as assetPrice;
-      setMarkets((prev) => prev.map((m) => (m.asset === asset ? { ...m, price } : m)));
+      setMarkets((prev) => prev.map((m) => (m.asset === asset ? { ...m, prev: m.price, price } : m)));
       return;
     }
 

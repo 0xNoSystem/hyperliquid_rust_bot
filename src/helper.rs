@@ -29,7 +29,7 @@ pub async fn subscribe_candles(
     Ok((subscription_id, receiver))
 }
 
-fn get_time_now_and_candles_ago(candle_count: u64, tf: TimeFrame) -> (u64, u64) {
+pub fn get_time_now_and_candles_ago(candle_count: u64, tf: TimeFrame) -> (u64, u64) {
     let end = get_time_now();
 
     let interval = candle_count

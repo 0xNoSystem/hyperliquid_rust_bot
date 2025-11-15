@@ -34,3 +34,23 @@
   animation: scan 9s linear infinite;
 }
 
+@keyframes fadeToWhite {
+  0% {
+    color: inherit;
+  }
+
+  50% {
+      color: orange;
+  }
+  100% {
+    color: white;
+  }
+}
+
+.fade-a {
+  animation: fadeToWhite 1s forwards;
+}
+
+.fade-b {
+  animation: fadeToWhite 1s forwards;
+}

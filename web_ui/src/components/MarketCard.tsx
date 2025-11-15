@@ -42,9 +42,16 @@ const PnlBar: React.FC<{ pnl: number }> = ({ pnl }) => {
 };
 
 const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove }) => {
-  const { asset, state, price, lev, margin, params, pnl, isPaused, indicators } = market;
+  const { asset, state, price,prev, lev, margin, params, pnl, isPaused, indicators } = market;
   const { strategy } = params;
   const { risk, style, stance } = strategy.custom;
+
+    const price_color =
+        prev > price
+        ? "red"
+        : prev < price
+        ? "green"
+        : "orange";
 
   const loading = state === 'Loading';
 
@@ -113,11 +120,14 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
       <div className="grid grid-cols-3 gap-3">
         <div>
           <div className="text-[10px] uppercase text-white/50">Price</div>
-          <div className="font-mono text-xl tabular-nums text-green-200 font-semibold">
+          <div className={`font-mono text-xl tabular-nums  font-semibold`}>
+          <span className={`text-${price_color}-300  `}>
             {loading || price == null || Math.abs(price) < 1e-8
                 ? <LoadingDots />
             : `$${formatPrice(price)}`}
+            </span>
           </div>
+
         </div>
         <div>
           <div className="text-[10px] uppercase text-white/50">Leverage</div>

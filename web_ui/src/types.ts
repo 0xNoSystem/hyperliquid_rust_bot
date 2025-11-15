@@ -24,6 +24,7 @@ export interface MarketInfo {
   state: 'Loading' | 'Ready';
   lev: number | null;
   price: number | null;
+  prev: number | null;
   margin: number | null;
   pnl: number | null;
   params: TradeParams;
