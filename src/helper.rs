@@ -1,5 +1,5 @@
 use crate::TimeFrame;
-use hyperliquid_rust_sdk::{AssetMeta, Error, InfoClient, Message, Subscription};
+use hyperliquid_rust_sdk::{AssetMeta, Error, InfoClient, Message, Subscription, CandleData};
 use kwant::indicators::Price;
 use log::info;
 use log::warn;
@@ -72,6 +72,13 @@ async fn candles_snapshot(
             .parse::<f64>()
             .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
 
+        /*
+        let v = candle
+            .vlm
+            .parse::<f64>()
+            .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
+        */
+
         res.push(Price {
             high: h,
             low: l,
@@ -130,4 +137,30 @@ pub fn get_time_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64
+}
+
+pub fn parse_candle(candle: CandleData) -> Result<Price, Error>{
+        let h = candle
+            .high
+            .parse::<f64>()
+            .map_err(|e| Error::GenericParse(format!("Failed to parse high: {}", e)))?;
+        let l = candle
+            .low
+            .parse::<f64>()
+            .map_err(|e| Error::GenericParse(format!("Failed to parse low: {}", e)))?;
+        let o = candle
+            .open
+            .parse::<f64>()
+            .map_err(|e| Error::GenericParse(format!("Failed to parse open: {}", e)))?;
+        let c = candle
+            .close
+            .parse::<f64>()
+            .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
+        
+        Ok(Price {
+            high: h,
+            low: l,
+            open: o,
+            close: c,
+        })
 }

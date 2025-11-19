@@ -1,4 +1,4 @@
-use hyperliquid_rust_sdk::{AssetPosition,Error};
+use hyperliquid_rust_sdk::{AssetPosition, Error};
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
@@ -41,9 +41,9 @@ impl MarginBook {
         let (asset, requested_margin) = update;
 
         let free: f64;
-        if let Some(margin) = self.map.get(&asset){
+        if let Some(margin) = self.map.get(&asset) {
             free = self.free() + margin;
-        }else{
+        } else {
             return Err(Error::Custom(format!("{} market doesn't exist", &asset)));
         }
 

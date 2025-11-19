@@ -137,20 +137,18 @@ impl CustomStrategy {
         self.follow_trend = follow_trend;
     }
 
-    
-    pub fn generate_test_trade(&self,price: f64, params: ExecParams) -> Option<TradeCommand> {
-    let duration = 30; 
-    let is_long = true;
+    pub fn generate_test_trade(&self, price: f64, params: ExecParams) -> Option<TradeCommand> {
+        let duration = 30;
+        let is_long = true;
 
-    let max_size = (params.margin * params.lev as f64) / price;
+        let max_size = (params.margin * params.lev as f64) / price;
 
-    Some(TradeCommand::ExecuteTrade {
-        size: max_size * 0.5,
-        is_long,
-        duration,
-    })
-}
-
+        Some(TradeCommand::ExecuteTrade {
+            size: max_size * 0.5,
+            is_long,
+            duration,
+        })
+    }
 
     pub fn generate_signal(
         &self,

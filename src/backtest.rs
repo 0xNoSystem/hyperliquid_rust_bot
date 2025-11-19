@@ -25,6 +25,7 @@ impl BackTester{
             panic!("ASSET ISN'T TRADABLE, MARKET CAN'T BE INITILIAZED");
         }
 
+
         BackTester{
             asset: asset.to_string(),
             signal_engine: Some(SignalEngine::new_backtest(params.clone(), config, margin)),

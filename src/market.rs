@@ -6,21 +6,21 @@ use std::sync::Arc;
 
 use hyperliquid_rust_sdk::{AssetMeta, Error, ExchangeClient, InfoClient, Message};
 
-use kwant::indicators::Price;
 
 use crate::executor::Executor;
-use crate::helper::load_candles;
+use crate::helper::{load_candles, parse_candle};
 use crate::signal::{
     EditType, EngineCommand, Entry, ExecParam, IndexId, SignalEngine, TimeFrameData,
 };
 use crate::strategy::Strategy;
 use crate::trade_setup::{LiquidationFillInfo, TimeFrame, TradeCommand, TradeInfo, TradeParams};
-use crate::{AssetMargin, IndicatorData, UpdateFrontend, EditMarketInfo};
+use crate::{AssetMargin, EditMarketInfo, IndicatorData, UpdateFrontend};
 use crate::{MAX_HISTORY, MarketInfo, MarketTradeInfo, Wallet};
 
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
+use tokio::task::JoinHandle;
 
 use flume::{Sender as FlumeSender, bounded};
 
@@ -176,7 +176,7 @@ impl Market {
         let _ = self.senders.bot_tx.send(MarketUpdate::InitMarket(info));
 
         let mut signal_engine = self.signal_engine;
-        let executor = self.executor;
+        let mut executor = self.executor;
 
         //Start engine
         let engine_handle = tokio::spawn(async move {
@@ -191,31 +191,23 @@ impl Market {
         let bot_price_update = self.senders.bot_tx.clone();
 
         let asset_name: Arc<str> = Arc::from(self.asset.name.clone());
-        let candle_stream_handle = tokio::spawn(async move {
+        let candle_stream_handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
             let mut tick: u64 = 0;
             let mut curr = f64::from_bits(1);
             while let Some(Message::Candle(candle)) = self.receivers.price_rv.recv().await {
-                let close = candle.data.close.parse::<f64>().ok().unwrap();
-                let high = candle.data.high.parse::<f64>().ok().unwrap();
-                let low = candle.data.low.parse::<f64>().ok().unwrap();
-                let open = candle.data.open.parse::<f64>().ok().unwrap();
-                let price = Price {
-                    open,
-                    high,
-                    low,
-                    close,
-                };
+                let price = parse_candle(candle.data)?;
 
                 let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
-                if close != curr && tick % 5 == 0 {
+                if price.close != curr && tick % 5 == 0 {
                     let _ = bot_price_update.send(MarketUpdate::PriceUpdate((
                         asset_name.clone().to_string(),
-                        close,
+                        price.close,
                     )));
-                    curr = close;
+                    curr = price.close;
                 };
                 tick += 1;
             }
+            Ok(())
         });
 
         //listen to changes and trade results
@@ -235,7 +227,10 @@ impl Market {
                         let _ = engine_update_tx
                             .send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
                         let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                            UpdateFrontend::MarketInfoEdit((asset.name.clone(), EditMarketInfo::Lev(lev)))
+                            UpdateFrontend::MarketInfoEdit((
+                                asset.name.clone(),
+                                EditMarketInfo::Lev(lev),
+                            )),
                         ));
                     };
                 }

@@ -1,6 +1,6 @@
 use crate::helper::address;
 use alloy::signers::local::PrivateKeySigner;
-use hyperliquid_rust_sdk::{BaseUrl, Error, InfoClient, UserFillsResponse, AssetPosition};
+use hyperliquid_rust_sdk::{AssetPosition, BaseUrl, Error, InfoClient, UserFillsResponse};
 
 pub struct Wallet {
     info_client: InfoClient,
@@ -27,8 +27,19 @@ impl Wallet {
     pub async fn get_user_fees(&self) -> Result<(f64, f64), Error> {
         let user = address(&self.pubkey);
         let user_fees = self.info_client.user_fees(user).await?;
-        let add_fee: f64 = user_fees.user_add_rate.parse().unwrap();
-        let cross_fee: f64 = user_fees.user_cross_rate.parse().unwrap();
+        let add_fee = user_fees.user_add_rate.parse::<f64>().map_err(|_| {
+            Error::GenericParse(format!(
+                "Failed to parse user_add_rate: {}",
+                user_fees.user_add_rate
+            ))
+        })?;
+
+        let cross_fee = user_fees.user_cross_rate.parse::<f64>().map_err(|_| {
+            Error::GenericParse(format!(
+                "Failed to parse user_cross_rate: {}",
+                user_fees.user_cross_rate
+            ))
+        })?;
 
         Ok((add_fee, cross_fee))
     }
@@ -39,7 +50,10 @@ impl Wallet {
         return self.info_client.user_fills(user).await;
     }
 
-    pub async fn get_user_margin(&self, bot_assets: &mut std::collections::hash_map::Keys<'_, String, f64>) -> Result<(f64, Vec<AssetPosition>), Error> {
+    pub async fn get_user_margin(
+        &self,
+        bot_assets: &mut std::collections::hash_map::Keys<'_, String, f64>,
+    ) -> Result<(f64, Vec<AssetPosition>), Error> {
         let user = address(&self.pubkey);
 
         let info = self.info_client.user_state(user).await?;
@@ -54,12 +68,12 @@ impl Wallet {
                     e
                 ))
             })?;
-        let positions = info.asset_positions; 
+        let positions = info.asset_positions;
 
         let upnl: f64 = positions
             .iter()
             .filter_map(|p| {
-                if !bot_assets.any(|a| a == &p.position.coin){
+                if !bot_assets.any(|a| a == &p.position.coin) {
                     return Some(p.position.margin_used.parse::<f64>().ok()?);
                 }
                 let u = p.position.unrealized_pnl.parse::<f64>().ok()?;

@@ -3,7 +3,7 @@ use crate::{
     UpdateFrontend, Wallet,
 };
 use hyperliquid_rust_sdk::{
-    AssetMeta, Error, InfoClient, Message, Subscription, TradeInfo as HLTradeInfo, AssetPosition
+    AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, TradeInfo as HLTradeInfo,
 };
 use log::info;
 use std::collections::HashMap;
@@ -93,10 +93,14 @@ impl Bot {
         if !MARKETS.contains(&asset_str) {
             return Err(Error::AssetNotFound);
         }
-        
+
         let mut book = margin_book.lock().await;
         self.chain_open_positions = book.sync().await?;
-        if self.chain_open_positions.iter().any(|p| &p.position.coin == &asset) {
+        if self
+            .chain_open_positions
+            .iter()
+            .any(|p| &p.position.coin == &asset)
+        {
             if let Some(tx) = &self.app_tx {
                 let _ = tx.send(UpdateFrontend::UserError(format!(
                     "Cannot add a market with open on-chain position({})",
@@ -116,7 +120,7 @@ impl Bot {
         {
             cached
         } else {
-            get_asset(&self.info_client, asset_str).await.unwrap()
+            get_asset(&self.info_client, asset_str).await?
         };
 
         let (sub_id, receiver) = subscribe_candles(
@@ -440,7 +444,7 @@ impl Bot {
                                     let _ = err_tx.send(UserError(e.to_string()));
                                 },
                                 }
-                                    
+
                             },
                             ResumeAll =>{self.resume_all().await},
                             PauseAll => {self.pause_all().await;},
@@ -452,8 +456,10 @@ impl Bot {
 
                             GetSession =>{
                                 let session = self.get_session().await;
-                                if session.is_ok(){
-                                    let _ = err_tx.send(LoadSession(session.unwrap()));
+                                if let Ok(session) = session{
+                                    let _ = err_tx.send(LoadSession(session));
+                                }else{
+                                    let _ = err_tx.send(UserError(format!("Failed to load session from server.")));
                                 }
                             },
                         }

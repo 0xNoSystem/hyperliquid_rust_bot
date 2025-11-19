@@ -1,7 +1,7 @@
 use actix::ActorContext;
+use actix::AsyncContext;
 use actix::fut;
 use actix::prelude::*;
-use actix::AsyncContext;
 use actix::{Actor, Handler, Message, StreamHandler};
 use actix_cors::Cors;
 use actix_web::{App, Error as ActixError, HttpRequest, HttpResponse, HttpServer, Responder, web};

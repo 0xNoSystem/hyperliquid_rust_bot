@@ -229,7 +229,7 @@ impl Executor {
         self.is_paused = !self.is_paused
     }
 
-    pub async fn start(mut self) {
+    pub async fn start(&mut self) {
         println!("EXECUTOR STARTED");
 
         let info_sender = self.market_tx.clone();

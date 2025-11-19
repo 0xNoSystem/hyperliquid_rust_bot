@@ -3,3 +3,4 @@
 Cargo.lock
 testnet
 web_ui/.vite
+src/bin/cli_ui.rs

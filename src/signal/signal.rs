@@ -157,12 +157,11 @@ impl SignalEngine {
         }
     }
 
-    fn get_test_trade(&self, price: f64) -> Option<TradeCommand>{
+    fn get_test_trade(&self, price: f64) -> Option<TradeCommand> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_test_trade(price, self.exec_params),
         }
     }
-
 }
 
 impl SignalEngine {
