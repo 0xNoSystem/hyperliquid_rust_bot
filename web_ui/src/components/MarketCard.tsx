@@ -121,7 +121,7 @@ const MarketCard: React.FC<MarketCardProps> = ({ market, onTogglePause, onRemove
         <div>
           <div className="text-[10px] uppercase text-white/50">Price</div>
           <div className={`font-mono text-xl tabular-nums  font-semibold`}>
-          <span className={`text-${price_color}-300  `}>
+          <span className={`text-${price_color}-400  `}>
             {loading || price == null || Math.abs(price) < 1e-8
                 ? <LoadingDots />
             : `$${formatPrice(price)}`}
