@@ -15,11 +15,13 @@ use tokio::sync::mpsc::{Sender as tokioSender, UnboundedReceiver, unbounded_chan
 
 use super::types::{EditType, Entry, ExecParam, ExecParams, IndexId, TimeFrameData, Tracker};
 
+type TrackersMap = HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>>;
+
 pub struct SignalEngine {
     engine_rv: UnboundedReceiver<EngineCommand>,
     trade_tx: Sender<TradeCommand>,
     data_tx: Option<tokioSender<MarketCommand>>,
-    trackers: HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>>,
+    trackers: TrackersMap,
     strategy: Strategy,
     exec_params: ExecParams,
 }
@@ -33,7 +35,7 @@ impl SignalEngine {
         trade_tx: Sender<TradeCommand>,
         margin: f64,
     ) -> Self {
-        let mut trackers: HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>> =
+        let mut trackers: TrackersMap =
             HashMap::default();
         trackers.insert(
             trade_params.time_frame,
@@ -258,7 +260,7 @@ impl SignalEngine {
         config: Option<Vec<IndexId>>,
         margin: f64,
     ) -> Self {
-        let mut trackers: HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>> =
+        let mut trackers: TrackersMap =
             HashMap::default();
         trackers.insert(
             trade_params.time_frame,
