@@ -153,6 +153,7 @@ impl SignalEngine {
         }
     }
 
+    #[inline(always)]
     fn get_signal(&self, price: f64, values: Vec<Value>) -> Option<TradeCommand> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_signal(values, price, self.exec_params),
@@ -164,6 +165,13 @@ impl SignalEngine {
             Strategy::Custom(brr) => brr.generate_test_trade(price, self.exec_params),
         }
     }
+
+    #[inline(always)]
+    fn digest(&mut self, price: Price){
+        for (_tf, tracker) in self.trackers.iter_mut() {
+            tracker.digest(price);
+        }
+    }
 }
 
 impl SignalEngine {
@@ -173,11 +181,8 @@ impl SignalEngine {
         while let Some(cmd) = self.engine_rv.recv().await {
             match cmd {
                 EngineCommand::UpdatePrice(price) => {
-                    for (_tf, tracker) in &mut self.trackers {
-                        tracker.digest(price);
-                    }
+                    self.digest(price);
 
-                    //self.display_indicators(price.close);
                     let ind = self.get_indicators_data();
                     let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
 
@@ -256,16 +261,12 @@ impl SignalEngine {
     }
 
     pub fn new_backtest(
-        trade_params: TradeParams,
+        trade_params: ExecParams,
+        strategy: Strategy,
         config: Option<Vec<IndexId>>,
-        margin: f64,
     ) -> Self {
         let mut trackers: TrackersMap =
             HashMap::default();
-        trackers.insert(
-            trade_params.time_frame,
-            Box::new(Tracker::new(trade_params.time_frame)),
-        );
 
         if let Some(list) = config {
             if !list.is_empty() {
@@ -290,12 +291,8 @@ impl SignalEngine {
             trade_tx: dummy_tx,
             data_tx: None,
             trackers,
-            strategy: trade_params.strategy,
-            exec_params: ExecParams {
-                margin,
-                lev: trade_params.lev,
-                tf: trade_params.time_frame,
-            },
+            strategy,
+            exec_params: trade_params,
         }
     }
 }

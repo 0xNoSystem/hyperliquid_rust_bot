@@ -74,7 +74,7 @@ impl Wallet {
             .iter()
             .filter_map(|p| {
                 if !bot_assets.any(|a| a == &p.position.coin) {
-                    return Some(p.position.margin_used.parse::<f64>().ok()?);
+                    return p.position.margin_used.parse::<f64>().ok();
                 }
                 let u = p.position.unrealized_pnl.parse::<f64>().ok()?;
                 let f = p.position.cum_funding.since_open.parse::<f64>().ok()?;

@@ -203,12 +203,12 @@ pub enum TimeFrame {
 impl TimeFrame {
     pub fn to_secs(&self) -> u64 {
         match *self {
-            TimeFrame::Min1 => 1 * 60,
+            TimeFrame::Min1 => 60,
             TimeFrame::Min3 => 3 * 60,
             TimeFrame::Min5 => 5 * 60,
             TimeFrame::Min15 => 15 * 60,
             TimeFrame::Min30 => 30 * 60,
-            TimeFrame::Hour1 => 1 * 60 * 60,
+            TimeFrame::Hour1 => 60 * 60,
             TimeFrame::Hour2 => 2 * 60 * 60,
             TimeFrame::Hour4 => 4 * 60 * 60,
             TimeFrame::Hour12 => 12 * 60 * 60,

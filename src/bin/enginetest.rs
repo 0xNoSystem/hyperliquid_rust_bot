@@ -9,7 +9,7 @@ use dotenv::dotenv;
 use hyperliquid_rust_bot::strategy::{CustomStrategy, Risk, Stance, Strategy, Style};
 use hyperliquid_rust_bot::{
     AddMarketInfo, AssetMargin, BaseUrl, Bot, BotEvent, BotToMarket, EditType, Entry, IndexId,
-    IndicatorKind, LocalWallet, MARKETS, MarginAllocation, MarketCommand, TimeFrame, TradeParams,
+    IndicatorKind, MARKETS, MarginAllocation, MarketCommand, TimeFrame, TradeParams,
     UpdateFrontend, Wallet,
 };
 use hyperliquid_rust_sdk::Error;
@@ -34,7 +34,7 @@ async fn main() -> Result<(), Error> {
         BaseUrl::Localhost => dotenv::from_filename(".env.test").ok(),
     };
     let wallet = load_wallet(BaseUrl::Mainnet).await?;
-    let strat = Strategy::Custom(load_strategy("./config.toml"));
+    let strat = Strategy::Custom(CustomStrategy::default());
 
     let trade_params = TradeParams {
         strategy: strat,
@@ -200,10 +200,6 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-fn load_strategy(path: &str) -> CustomStrategy {
-    let content = fs::read_to_string(path).expect("failed to read file");
-    toml::from_str(&content).expect("failed to parse toml")
-}
 
 async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error> {
     let wallet = std::env::var("PRIVATE_KEY")

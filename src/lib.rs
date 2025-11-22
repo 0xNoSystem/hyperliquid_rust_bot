@@ -3,7 +3,7 @@ mod consts;
 mod executor;
 mod market;
 mod wallet;
-//mod backtest;
+mod backtest;
 
 pub mod bot;
 pub mod frontend;
@@ -30,6 +30,5 @@ pub use trade_setup::{
 };
 
 //expost HL sdk types
-pub use ethers::signers::LocalWallet;
 pub use hyperliquid_rust_sdk::{BaseUrl, Error};
 pub use kwant::indicators::Value;
