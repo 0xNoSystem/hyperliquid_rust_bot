@@ -1,56 +1,65 @@
 @import "tailwindcss";
 
 @keyframes gradientBG {
-  0%   { background-position:   0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position:   0% 50%; }
+    0% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0% 50%;
+    }
 }
 
 .bg-special {
-  background: 
-    /* your custom palette here */
-    linear-gradient(
-      90deg,
-      black,
-      gray,
-      gray,
-      black
+    background: 
+    /* your custom palette here */ linear-gradient(
+        90deg,
+        black,
+        gray,
+        gray,
+        black
     );
-  background-size: 300% 300%;
-  animation: gradientBG 120s ease infinite;
+    background-size: 300% 300%;
+    animation: gradientBG 120s ease infinite;
 }
 
 @keyframes shimmer {
-  100% {
-    transform: translateX(100%);
-  }
+    100% {
+        transform: translateX(100%);
+    }
 }
 
 @keyframes scan {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-25%); }
+    0% {
+        transform: translateX(0);
+    }
+    100% {
+        transform: translateX(-25%);
+    }
 }
 .animate-scan {
-  animation: scan 9s linear infinite;
+    animation: scan 9s linear infinite;
 }
 
 @keyframes fadeToWhite {
-  0% {
-    color: inherit;
-  }
+    0% {
+        color: inherit;
+    }
 
-  50% {
-      color: orange;
-  }
-  100% {
-    color: white;
-  }
+    50% {
+        color: orange;
+    }
+    100% {
+        color: white;
+    }
 }
 
 .fade-a {
-  animation: fadeToWhite 1s forwards;
+    animation: fadeToWhite 1s forwards;
 }
 
 .fade-b {
-  animation: fadeToWhite 1s forwards;
+    animation: fadeToWhite 1s forwards;
 }
