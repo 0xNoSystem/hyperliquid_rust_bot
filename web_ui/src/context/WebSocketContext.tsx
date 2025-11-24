@@ -78,7 +78,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     /** ------------ util functions (stable) ------------ **/
     const sendCommand = useCallback(async (body: unknown) => {
-        const res = await fetch("http://192.168.1.101:8090/command", {
+        const res = await fetch("http://localhost:8090/command", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),

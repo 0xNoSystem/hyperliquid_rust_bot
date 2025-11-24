@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+html,
+body,
+#root {
+    height: 100%;
+}
+
 @keyframes gradientBG {
     0% {
         background-position: 0% 50%;
@@ -40,7 +46,7 @@
     }
 }
 .animate-scan {
-    animation: scan 9s linear infinite;
+    animation: scan 20s linear infinite;
 }
 
 @keyframes fadeToWhite {

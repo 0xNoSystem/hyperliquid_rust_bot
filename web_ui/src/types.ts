@@ -273,10 +273,20 @@ export interface assetMeta {
     maxLeverage: number;
 }
 
-export interface Price {
-    c: number;
-    o: number;
-    h: number;
-    l: number;
-    vlm: number;
-}
+
+export const TF_TO_MS: Record<TimeFrame, number> = {
+  min1: 60_000,
+  min3: 3 * 60_000,
+  min5: 5 * 60_000,
+  min15: 15 * 60_000,
+  min30: 30 * 60_000,
+  hour1: 60 * 60_000,
+  hour2: 2 * 60 * 60_000,
+  hour4: 4 * 60 * 60_000,
+  hour12: 12 * 60 * 60_000,
+  day1: 24 * 60 * 60_000,
+  day3: 3 * 24 * 60 * 60_000,
+  week: 7 * 24 * 60 * 60_000,
+  month: 30 * 24 * 60 * 60_000,
+};
+
