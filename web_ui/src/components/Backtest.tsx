@@ -153,6 +153,7 @@ export default function Backtest() {
     const [timeframe, setTimeframe] = useState<TimeFrame>("hour1");
     const [intervalOn, setIntervalOn] = useState(false);
     const [candleData, setCandleData] = useState<CandleData[]>([]);
+    const [showDatePicker, setShowDatePicker] = useState(true);
 
     const [rangePreset, setRangePreset] = useState<RangePreset>("7D");
     const [customStartParts, setCustomStartParts] =
@@ -183,6 +184,7 @@ export default function Backtest() {
 
     const handlePresetSelect = (preset: RangePreset) => {
         setRangePreset(preset);
+        
         const tfForPreset = PRESET_DEFAULT_TF[preset];
         if (tfForPreset) {
             setTimeframe(tfForPreset);
@@ -309,7 +311,7 @@ export default function Backtest() {
                 </div>
 
                 {/* CHART (middle) */}
-                <div className="mb-6 mb-30 flex min-h-[70vh] w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 p-4 tracking-widest">
+                <div className="mb-30 flex min-h-[70vh] w-[90%] flex-grow flex-col rounded-lg border-2 bg-white/10 border-white/20 p-4 tracking-widest">
                     {/* Toggle + Dates */}
                     <div className="flex items-center gap-4 p-4 pl-1">
                         {/* Toggle Button */}
@@ -341,8 +343,10 @@ export default function Backtest() {
                                             ? "border-orange-500 text-orange-400"
                                             : "border-white/30 text-white/70 hover:border-white/60"
                                     }`}
-                                    onClick={() =>
-                                        handlePresetSelect(preset.id)
+                                    onClick={() =>{
+                                        handlePresetSelect(preset.id);
+                                        setShowDatePicker(true);
+                                        }
                                     }
                                 >
                                     {preset.label}
@@ -350,7 +354,7 @@ export default function Backtest() {
                             ))}
                         </div>
 
-                        {rangePreset === "CUSTOM" && (
+                        {rangePreset === "CUSTOM" && showDatePicker &&(
                             <div className="flex flex-col gap-3 rounded border border-white/30 bg-black/50 p-3 text-sm text-white">
                                 {customRows.map((item) => (
                                     <div
@@ -423,7 +427,7 @@ export default function Backtest() {
                                                     time: e.target.value,
                                                 })
                                             }
-                                            className="w-24 rounded border border-white/30 bg-black/70 p-1"
+                                            className="w-24 rounded border border-white/30 bg-gray-600/70 p-1 w-[115px]"
                                         />
                                         <span className="text-xs text-white/50">
                                             UTC
@@ -432,7 +436,7 @@ export default function Backtest() {
                                 ))}
 
                                 <button
-                                    onClick={confirmCustomRange}
+                                    onClick={() => {confirmCustomRange(); setShowDatePicker(false);}}
                                     disabled={!isCustomDirty}
                                     className={`self-start rounded border px-3 py-1 text-xs font-semibold transition ${
                                         isCustomDirty

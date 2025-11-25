@@ -31,7 +31,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
         candles,
         width,
         crosshairX,
-        mouseOnChart
+        mouseOnChart,
     } = useChartContext();
     const rightRef = useRef<HTMLDivElement>(null);
     const [rightWidth, setRightWidth] = useState(0);
@@ -84,14 +84,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
         }
 
         setHoveredCandle(nearest);
-    }, [
-        selectingInterval,
-        crosshairX,
-        width,
-        startTime,
-        endTime,
-        candles,
-    ]);
+    }, [selectingInterval, crosshairX, width, startTime, endTime, candles]);
 
     return (
         <div className="flex h-full flex-1 flex-col overflow-hidden">

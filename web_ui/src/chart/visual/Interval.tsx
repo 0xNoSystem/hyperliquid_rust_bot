@@ -55,11 +55,7 @@ const IntervalOverlay: React.FC = () => {
             changed = true;
         }
 
-        if (
-            changed ||
-            intervalStartX === null ||
-            intervalEndX === null
-        ) {
+        if (changed || intervalStartX === null || intervalEndX === null) {
             setIntervalStartX(start);
             setIntervalEndX(end);
         }
@@ -91,67 +87,70 @@ const IntervalOverlay: React.FC = () => {
 
     const msPerPx = width > 0 ? rangeMs / width : 0;
 
-    const beginDrag = (
-        mode: "move" | "start" | "end"
-    ) => (e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
+    const beginDrag =
+        (mode: "move" | "start" | "end") => (e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
 
-        const startClientX = e.clientX;
-        const initialStart = start;
-        const initialEnd = end;
-        const windowSize = initialEnd - initialStart;
+            const startClientX = e.clientX;
+            const initialStart = start;
+            const initialEnd = end;
+            const windowSize = initialEnd - initialStart;
 
-        const handleMove = (ev: MouseEvent) => {
-            const dx = ev.clientX - startClientX;
-            const dt = dx * msPerPx;
+            const handleMove = (ev: MouseEvent) => {
+                const dx = ev.clientX - startClientX;
+                const dt = dx * msPerPx;
 
-            if (mode === "move") {
-                let nextStart = initialStart + dt;
-                let nextEnd = initialEnd + dt;
+                if (mode === "move") {
+                    let nextStart = initialStart + dt;
+                    let nextEnd = initialEnd + dt;
 
-                if (nextStart < startTime) {
-                    const offset = startTime - nextStart;
-                    nextStart += offset;
-                    nextEnd += offset;
+                    if (nextStart < startTime) {
+                        const offset = startTime - nextStart;
+                        nextStart += offset;
+                        nextEnd += offset;
+                    }
+                    if (nextEnd > endTime) {
+                        const offset = nextEnd - endTime;
+                        nextStart -= offset;
+                        nextEnd -= offset;
+                    }
+
+                    setIntervalStartX(
+                        clamp(nextStart, startTime, endTime - minWindow)
+                    );
+                    setIntervalEndX(
+                        clamp(nextEnd, startTime + minWindow, endTime)
+                    );
+                    return;
                 }
-                if (nextEnd > endTime) {
-                    const offset = nextEnd - endTime;
-                    nextStart -= offset;
-                    nextEnd -= offset;
+
+                if (mode === "start") {
+                    let nextStart = clamp(
+                        initialStart + dt,
+                        startTime,
+                        initialEnd - minWindow
+                    );
+                    setIntervalStartX(nextStart);
+                    return;
                 }
 
-                setIntervalStartX(clamp(nextStart, startTime, endTime - minWindow));
-                setIntervalEndX(clamp(nextEnd, startTime + minWindow, endTime));
-                return;
-            }
-
-            if (mode === "start") {
-                let nextStart = clamp(
-                    initialStart + dt,
-                    startTime,
-                    initialEnd - minWindow
+                let nextEnd = clamp(
+                    initialEnd + dt,
+                    initialStart + minWindow,
+                    endTime
                 );
-                setIntervalStartX(nextStart);
-                return;
-            }
+                setIntervalEndX(nextEnd);
+            };
 
-            let nextEnd = clamp(
-                initialEnd + dt,
-                initialStart + minWindow,
-                endTime
-            );
-            setIntervalEndX(nextEnd);
+            const handleUp = () => {
+                window.removeEventListener("mousemove", handleMove);
+                window.removeEventListener("mouseup", handleUp);
+            };
+
+            window.addEventListener("mousemove", handleMove);
+            window.addEventListener("mouseup", handleUp);
         };
-
-        const handleUp = () => {
-            window.removeEventListener("mousemove", handleMove);
-            window.removeEventListener("mouseup", handleUp);
-        };
-
-        window.addEventListener("mousemove", handleMove);
-        window.addEventListener("mouseup", handleUp);
-    };
 
     return (
         <div className="pointer-events-none absolute inset-0">
@@ -160,16 +159,16 @@ const IntervalOverlay: React.FC = () => {
                 style={{ left, width: overlayWidth }}
                 onMouseDown={beginDrag("move")}
             >
-                <div className="pointer-events-none w-[100%] absolute overflow-hidden  py-1 text-xs font-semibold text-black">
+                <div className="pointer-events-none absolute w-[100%] overflow-hidden py-1 text-xs font-semibold text-black">
                     <span className="bg-orange-500/80 p-2">BackTest</span>
                 </div>
                 <button
-                    className="pointer-events-auto absolute top-1/2 left-0 h-8 w-4 -translate-x-2 -translate-y-1/2 rounded-full border border-white/70 bg-black hover:bg-orange-500 cursor-w-resize"
+                    className="pointer-events-auto absolute top-1/2 left-0 h-8 w-4 -translate-x-2 -translate-y-1/2 cursor-w-resize rounded-full border border-white/70 bg-black hover:bg-orange-500"
                     onMouseDown={beginDrag("start")}
                     title="Adjust start"
                 />
                 <button
-                    className="pointer-events-auto absolute top-1/2 right-0 h-8 w-4 translate-x-2 -translate-y-1/2 rounded-full border border-white/70 bg-black hover:bg-orange-500 cursor-w-resize"
+                    className="pointer-events-auto absolute top-1/2 right-0 h-8 w-4 translate-x-2 -translate-y-1/2 cursor-w-resize rounded-full border border-white/70 bg-black hover:bg-orange-500"
                     onMouseDown={beginDrag("end")}
                     title="Adjust end"
                 />

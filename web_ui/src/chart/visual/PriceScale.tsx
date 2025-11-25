@@ -18,7 +18,7 @@ const PriceScale: React.FC = () => {
         width,
         crosshairY,
         mouseOnChart,
-        selectingInterval
+        selectingInterval,
     } = useChartContext();
 
     const svgRef = useRef<SVGSVGElement>(null);
@@ -116,7 +116,7 @@ const PriceScale: React.FC = () => {
             ))}
 
             {/* --- Crosshair Price Label --- */}
-            {crosshairPrice !== null && mouseOnChart && !selectingInterval &&(
+            {crosshairPrice !== null && mouseOnChart && !selectingInterval && (
                 <>
                     {/* Background box (TV style) */}
                     <rect

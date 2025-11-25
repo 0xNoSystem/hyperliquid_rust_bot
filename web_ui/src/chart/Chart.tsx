@@ -58,7 +58,13 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
             setIntervalStartX(null);
             setIntervalEndX(null);
         }
-    }, [tf, settingInterval, setSelectingInterval, setIntervalStartX, setIntervalEndX]);
+    }, [
+        tf,
+        settingInterval,
+        setSelectingInterval,
+        setIntervalStartX,
+        setIntervalEndX,
+    ]);
 
     // ------------------------------------------------------------
     // Visible candles
@@ -82,7 +88,13 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         setIntervalStartX(null);
         setIntervalEndX(null);
         setTimeRange(candles[0].start, candles[candles.length - 1].end);
-    }, [candles, setTimeRange, setManualPriceRange, setIntervalStartX, setIntervalEndX]);
+    }, [
+        candles,
+        setTimeRange,
+        setManualPriceRange,
+        setIntervalStartX,
+        setIntervalEndX,
+    ]);
 
     // ------------------------------------------------------------
     // Auto price range
@@ -219,10 +231,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
 
         const steps = Math.round((hoverTime - startTime) / candleDuration);
         const snappedTime = startTime + steps * candleDuration;
-        const clampedTime = Math.min(
-            endTime,
-            Math.max(startTime, snappedTime)
-        );
+        const clampedTime = Math.min(endTime, Math.max(startTime, snappedTime));
         const snapX = timeToX(clampedTime, startTime, endTime, width);
         setCrosshair(snapX, y);
     };

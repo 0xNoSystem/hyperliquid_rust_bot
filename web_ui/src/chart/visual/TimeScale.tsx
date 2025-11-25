@@ -62,7 +62,7 @@ const TimeScale: React.FC = () => {
         intervalEndX,
     } = useChartContext();
 
-    const minRange = timeframe ? TF_TO_MS[timeframe] ?? 1 : 1;
+    const minRange = timeframe ? (TF_TO_MS[timeframe] ?? 1) : 1;
 
     const ref = useRef<SVGSVGElement>(null);
 
@@ -81,15 +81,14 @@ const TimeScale: React.FC = () => {
             : null;
 
     const pxPerMs = width > 0 ? width / Math.max(1, endTime - startTime) : 0;
-    const candleDurationMs = timeframe ? TF_TO_MS[timeframe] ?? 0 : 0;
+    const candleDurationMs = timeframe ? (TF_TO_MS[timeframe] ?? 0) : 0;
     const candleWidthEstimate = pxPerMs * candleDurationMs;
 
     // --- Wheel zoom / horizontal pan ---
     const onWheel = (e: React.WheelEvent) => {
         e.stopPropagation();
 
-        const wantsPan =
-            e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
+        const wantsPan = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
 
         if (wantsPan && width > 0) {
             const horizontalDelta =
@@ -141,7 +140,8 @@ const TimeScale: React.FC = () => {
 
             if (
                 totalDx < 0 &&
-                (end - start < minRange || candleWidthEstimate >= MAX_CANDLE_WIDTH)
+                (end - start < minRange ||
+                    candleWidthEstimate >= MAX_CANDLE_WIDTH)
             )
                 return;
 
@@ -169,73 +169,73 @@ const TimeScale: React.FC = () => {
     }, []);
 
     return (
-        <div
-            className="pb-2"
-            onWheel={onWheel}
-            onMouseDown={onMouseDown}
-        >
-        <svg
-            ref={ref}
-            width={width}
-            height={25}
-            style={{ overflow: "visible", overscrollBehavior: "none" }}
-                    >
-            {/* Tick Labels */}
-            {times.slice(0, -1).map((p, idx) => (
-                <g key={idx}>
-                    <line
-                        x1={p.x}
-                        y1={0}
-                        x2={p.x}
-                        y2={-height - 10}
-                        stroke="#444"
-                        strokeOpacity={0.4}
-                        strokeWidth={0.8}
-                    />
-                    <text
-                        x={p.x}
-                        y={20}
-                        textAnchor="middle"
-                        fill="#aaa"
-                        fontSize={11}
-                    >
-                        {formatUTC(p.t)}
-                    </text>
-                </g>
-            ))}
+        <div className="pb-2" onWheel={onWheel} onMouseDown={onMouseDown}>
+            <svg
+                ref={ref}
+                width={width}
+                height={25}
+                style={{ overflow: "visible", overscrollBehavior: "none" }}
+            >
+                {/* Tick Labels */}
+                {times.slice(0, -1).map((p, idx) => (
+                    <g key={idx}>
+                        <line
+                            x1={p.x}
+                            y1={0}
+                            x2={p.x}
+                            y2={-height - 10}
+                            stroke="#444"
+                            strokeOpacity={0.4}
+                            strokeWidth={0.8}
+                        />
+                        <text
+                            x={p.x}
+                            y={20}
+                            textAnchor="middle"
+                            fill="#aaa"
+                            fontSize={11}
+                        >
+                            {formatUTC(p.t)}
+                        </text>
+                    </g>
+                ))}
 
-            {/* Crosshair Time Label */}
-            {crosshairTime !== null && mouseOnChart && !selectingInterval && (
-                <>
-                    <rect
-                        x={crosshairX - 60}
-                        y={0}
-                        width={120}
-                        height={18}
-                        fill="#2a2a2a"
-                        stroke="#ffffff44"
-                        strokeWidth={1}
-                        rx={4}
-                    />
-                    <text
-                        x={crosshairX}
-                        y={13}
-                        textAnchor="middle"
-                        fill="white"
-                        fontSize={12}
-                        fontWeight="bold"
-                    >
-                        {formatUTC(crosshairTime)}
-                    </text>
-                </>
-            )}
+                {/* Crosshair Time Label */}
+                {crosshairTime !== null &&
+                    mouseOnChart &&
+                    !selectingInterval && (
+                        <>
+                            <rect
+                                x={crosshairX - 60}
+                                y={0}
+                                width={120}
+                                height={18}
+                                fill="#2a2a2a"
+                                stroke="#ffffff44"
+                                strokeWidth={1}
+                                rx={4}
+                            />
+                            <text
+                                x={crosshairX}
+                                y={13}
+                                textAnchor="middle"
+                                fill="white"
+                                fontSize={12}
+                                fontWeight="bold"
+                            >
+                                {formatUTC(crosshairTime)}
+                            </text>
+                        </>
+                    )}
 
-            {selectingInterval &&
-                intervalStartX !== null &&
-                intervalEndX !== null && (
-                    <>
-                        {[{ x: intervalStartX, label: "Start" }, { x: intervalEndX, label: "End" }].map(
-                            (item, idx) => {
+                {selectingInterval &&
+                    intervalStartX !== null &&
+                    intervalEndX !== null && (
+                        <>
+                            {[
+                                { x: intervalStartX, label: "Start" },
+                                { x: intervalEndX, label: "End" },
+                            ].map((item, idx) => {
                                 const px = clamp(
                                     timeToX(item.x, startTime, endTime, width),
                                     40,
@@ -267,11 +267,10 @@ const TimeScale: React.FC = () => {
                                         </text>
                                     </g>
                                 );
-                            }
-                        )}
-                    </>
-                )}
-        </svg>
+                            })}
+                        </>
+                    )}
+            </svg>
         </div>
     );
 };
