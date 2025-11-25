@@ -81,10 +81,6 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         setPriceRange(Math.min(...lows) * 0.98, Math.max(...highs) * 1.02);
     }, [visibleCandles, manualPriceRange, setPriceRange]);
 
-    useEffect(() => {
-    setManualPriceRange(false);
-    }, [tf, setManualPriceRange]);
-
     // ------------------------------------------------------------
     // Resize observer
     // ------------------------------------------------------------
