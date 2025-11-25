@@ -26,12 +26,12 @@ const CandleInfo: React.FC<CandleInfoProps> = ({ candle }) => {
     return (
         <div className="pointer-events-none absolute top-3 right-4 rounded border border-white/20 bg-black/80 px-3 py-2 text-xs text-white/80 shadow-lg shadow-black/40">
             <div className="flex gap-2">
-                <span className="text-white/50">C</span>
-                <span>{formatPrice(candle.close)}</span>
-            </div>
-            <div className="flex gap-2">
                 <span className="text-white/50">H</span>
                 <span>{formatPrice(candle.high)}</span>
+            </div>
+            <div className="flex gap-2">
+                <span className="text-white/50">C</span>
+                <span>{formatPrice(candle.close)}</span>
             </div>
             <div className="flex gap-2">
                 <span className="text-white/50">L</span>

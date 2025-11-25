@@ -108,7 +108,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                 {/* RIGHT PRICE SCALE */}
                 <div
                     ref={rightRef}
-                    className="w-[7%] cursor-n-resize bg-black/20 text-white"
+                    className="w-fit cursor-n-resize bg-black/20 text-white"
                 >
                     <PriceScale />
                 </div>

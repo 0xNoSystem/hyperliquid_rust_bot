@@ -35,12 +35,12 @@ const PriceScale: React.FC = () => {
         return () => node.removeEventListener("wheel", blockScroll);
     }, []);
 
-    const levels = 14;
+    const levels = 12;
     const step = (maxPrice - minPrice) / (levels - 1);
 
     const prices = Array.from({ length: levels }, (_, i) => {
-        const price = minPrice + i * step;
-        const y = priceToY(price, minPrice, maxPrice, height);
+        const price = minPrice + i * step * 0.95;
+        const y = priceToY(price, minPrice, maxPrice, height) * 0.95;
         return { price, y };
     });
 
@@ -60,7 +60,7 @@ const PriceScale: React.FC = () => {
 
     return (
         <svg
-            width={700}
+            width={100}
             height={height}
             style={{ overflow: "visible" }}
             ref={svgRef}
