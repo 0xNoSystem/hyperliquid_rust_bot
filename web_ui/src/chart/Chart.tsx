@@ -65,8 +65,9 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         if (dataSignatureRef.current === signature) return;
 
         dataSignatureRef.current = signature;
+        setManualPriceRange(false);
         setTimeRange(candles[0].start, candles[candles.length - 1].end);
-    }, [candles, setTimeRange]);
+    }, [candles, setTimeRange, setManualPriceRange]);
 
     // ------------------------------------------------------------
     // Auto price range
@@ -80,10 +81,9 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         setPriceRange(Math.min(...lows) * 0.98, Math.max(...highs) * 1.02);
     }, [visibleCandles, manualPriceRange, setPriceRange]);
 
-    // Reset manual scaling when candles change significantly
     useEffect(() => {
-        setManualPriceRange(false);
-    }, [candles, tf, setManualPriceRange]);
+    setManualPriceRange(false);
+    }, [tf, setManualPriceRange]);
 
     // ------------------------------------------------------------
     // Resize observer
