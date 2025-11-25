@@ -1,7 +1,7 @@
 import React from "react";
 import { useChartContext } from "../ChartContext";
 
-const CrossHair: React.FC<CrossHairProps> = ({}) => {
+const CrossHair = ({}) => {
     const { crosshairX, crosshairY, height, width } = useChartContext();
     return (
         <g pointerEvents="none" className="z-10">

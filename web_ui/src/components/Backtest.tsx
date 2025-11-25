@@ -5,13 +5,14 @@ import type { TimeFrame } from "../types";
 import ChartContainer from "../chart/ChartContainer";
 import ChartProvider from "../chart/ChartContext";
 import { fetchCandles } from "../chart/utils";
-import type { CandleData} from "../chart/utils";
+import type { CandleData } from "../chart/utils";
 
 async function loadCandles(
     tf: TimeFrame,
     intervalOn: boolean,
     startDate: string,
-    endDate: string
+    endDate: string,
+    asset: string
 ): Promise<CandleData[]> {
     let startMs: number;
     let endMs: number;
@@ -24,7 +25,7 @@ async function loadCandles(
     // Otherwise load default recent data
     else {
         endMs = Date.now();
-        startMs = endMs - 30 * 60 * 1000; // last 30 minutes
+        startMs = endMs - 30 * 24 * 60 * 60 * 1000; // last 30 minutes
     }
 
     // Compute expected candle count
@@ -37,10 +38,8 @@ async function loadCandles(
     );
 
     // Binance fetch (with automatic batching)
-    return await fetchCandles("SOL", startMs, endMs, fromTimeFrame(tf));
+    return await fetchCandles(asset, startMs, endMs, fromTimeFrame(tf));
 }
-
-
 
 // -----------------------
 // Backtest Component
@@ -48,7 +47,7 @@ async function loadCandles(
 export default function Backtest() {
     const { asset: routeAsset } = useParams<{ asset: string }>();
 
-    const [timeframe, setTimeframe] = useState<TimeFrame>("min1");
+    const [timeframe, setTimeframe] = useState<TimeFrame>("day1");
     const [intervalOn, setIntervalOn] = useState(false);
     const [candleData, setCandleData] = useState<CandleData[]>([]);
 
@@ -62,7 +61,8 @@ export default function Backtest() {
                 timeframe,
                 intervalOn,
                 startDate,
-                endDate
+                endDate,
+                routeAsset
             );
             setCandleData(data);
         }
@@ -79,24 +79,20 @@ export default function Backtest() {
 
             {/* Layout */}
             <div className="z-1 flex flex-grow flex-col items-center justify-between py-8">
-
                 {/* STRATEGY (top) */}
                 <div className="mb-6 mb-30 w-[60%] border-2 border-white/70 bg-black/60 p-4 text-center tracking-widest">
                     <h2 className="p-2 text-xl font-semibold">Strategy</h2>
                 </div>
 
                 {/* CHART (middle) */}
-                <div className="mb-6 mb-30 flex min-h-[70vh] w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20  p-4 tracking-widest">
-
+                <div className="mb-6 mb-30 flex min-h-[70vh] w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 p-4 tracking-widest">
                     {/* Toggle + Dates */}
-                    <div className="flex p-4 pl-1 items-center gap-4">
+                    <div className="flex items-center gap-4 p-4 pl-1">
                         {/* Toggle Button */}
                         <button
                             onClick={() => setIntervalOn(!intervalOn)}
                             className={`relative mr-3 flex h-6 w-12 cursor-pointer items-center rounded-full transition-colors duration-300 ${
-                                intervalOn
-                                    ? "bg-orange-500"
-                                    : "bg-gray-600"
+                                intervalOn ? "bg-orange-500" : "bg-gray-600"
                             }`}
                         >
                             <span
@@ -117,8 +113,7 @@ export default function Backtest() {
                             type="datetime-local"
                             value={startDate}
                             onChange={(e) => setStartDate(e.target.value)}
-                            className={`p-1 rounded bg-black/40 text-white border border-white/40
-                            }`}
+                            className={`} rounded border border-white/40 bg-black/40 p-1 text-white`}
                         />
 
                         {/* END DATE */}
@@ -126,8 +121,7 @@ export default function Backtest() {
                             type="datetime-local"
                             value={endDate}
                             onChange={(e) => setEndDate(e.target.value)}
-                            className={`p-1 rounded bg-black/40 text-white border border-white/40
-                            }`}
+                            className={`} rounded border border-white/40 bg-black/40 p-1 text-white`}
                         />
                     </div>
 
@@ -138,12 +132,11 @@ export default function Backtest() {
 
                     {/* TF SELECTOR */}
                     <div className="flex flex-1 flex-col rounded-b-lg border-2 border-black/30 bg-[#111212]">
-
                         <div className="z-5 grid w-full grid-cols-13 bg-black/70 text-center tracking-normal">
                             {Object.entries(TIMEFRAME_CAMELCASE).map(
                                 ([short, tf]) => (
                                     <div
-                                        className="border-b-2 border-black py-2 text-white/70 hover:bg-black cursor-pointer"
+                                        className="cursor-pointer border-b-2 border-black py-2 text-white/70 hover:bg-black"
                                         key={short}
                                         onClick={() => {
                                             setTimeframe(tf);
@@ -179,9 +172,7 @@ export default function Backtest() {
                 <div className="w-[60%] border-2 border-white/70 bg-black/60 p-2 text-center text-xl font-semibold tracking-wide">
                     <h2 className="p-2 text-xl font-semibold">Console</h2>
                 </div>
-
             </div>
         </div>
     );
 }
-

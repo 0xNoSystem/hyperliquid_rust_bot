@@ -13,7 +13,12 @@ export interface ChartProps {
     candleData: CandleData[];
 }
 
-const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval, candleData}) => {
+const Chart: React.FC<ChartProps> = ({
+    asset,
+    tf,
+    settingInterval,
+    candleData,
+}) => {
     const {
         setSize,
         setTf,
@@ -21,6 +26,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval, candleData}) 
         setMouseOnChart,
         setCrosshair,
         setPriceRange,
+        setTimeRange,
         setCandles,
         height,
         width,
@@ -52,15 +58,21 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval, candleData}) 
         setSelectingInterval(settingInterval);
         setTf(tf);
         setCandles(candleData);
-    }, [candleData,isInside, settingInterval, tf]);
+    }, [candleData, isInside, settingInterval, tf]);
 
     useEffect(() => {
         if (candles.length === 0) return;
 
         const lows = candles.map((c) => c.low);
         const highs = candles.map((c) => c.high);
+        const start = candles.length > 0 ? candles[0].start : undefined;
+        const end =
+            candles.length > 0 ? candles[candles.length - 1].end : undefined;
+        if (start && end) {
+            setTimeRange(start, end);
+        }
 
-        setPriceRange(Math.min(...lows) -5, Math.max(...highs) + 5);
+        setPriceRange(Math.min(...lows) * 0.98, Math.max(...highs) * 1.02);
     }, [candles]);
 
     useEffect(() => {
@@ -79,7 +91,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval, candleData}) 
     }, [setSize]);
 
     return (
-        <div ref={ref} className="relative h-full flex-1 cursor-crosshair">
+        <div ref={ref} className="relative flex-1 cursor-crosshair">
             <svg
                 width={localSize.width}
                 height={localSize.height}
@@ -129,12 +141,12 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval, candleData}) 
                             <Candle
                                 key={c.start}
                                 x={x}
-                                width={candleWidth}
+                                width={candleWidth / 1.3}
                                 bodyTop={bodyTop}
                                 bodyHeight={bodyHeight}
                                 wickTop={wickTop}
                                 wickHeight={wickHeight}
-                                color={isGreen ? "white" : "gray"}
+                                color={isGreen ? "green" : "white"}
                             />
                         );
                     })}

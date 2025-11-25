@@ -2,9 +2,6 @@ import { createContext, useContext, useState } from "react";
 import type { TimeFrame } from "../types";
 import type { CandleData } from "./utils";
 
-
-
-
 export const ChartContext = createContext<
     ChartContextState & ChartContextActions
 >({} as ChartContextState & ChartContextActions);
