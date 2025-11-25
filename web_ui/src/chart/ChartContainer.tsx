@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from "react";
 import Chart from "./Chart";
 import PriceScale from "./visual/PriceScale";
 import TimeScale from "./visual/TimeScale";
+import IntervalOverlay from "./visual/Interval";
 import { useChartContext } from "./ChartContext";
 
 import type { TimeFrame, CandleData } from "../types";
@@ -48,17 +49,13 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
             <div className="flex h-full w-full flex-1">
                 {/* LEFT: CHART */}
                 <div className="relative flex w-[93%] flex-1 overflow-hidden">
-                    {/* Optional overlay block */}
-                    <div
-                        className="absolute top-0 left-[20%] bg-gray-400/30"
-                        style={{ width: 400, height }}
-                    />
                     <div className="relative flex flex-1">
                         <Chart
                             asset={asset}
                             tf={tf}
                             settingInterval={settingInterval}
                         />
+                        <IntervalOverlay />
                     </div>
                 </div>
 

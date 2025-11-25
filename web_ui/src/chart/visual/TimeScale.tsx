@@ -44,6 +44,9 @@ function computeTimeWheelZoom(
     };
 }
 
+const clamp = (value: number, min: number, max: number) =>
+    Math.min(Math.max(value, min), max);
+
 const TimeScale: React.FC = () => {
     const {
         width,
@@ -55,6 +58,8 @@ const TimeScale: React.FC = () => {
         setTimeRange,
         selectingInterval,
         timeframe,
+        intervalStartX,
+        intervalEndX,
     } = useChartContext();
 
     const minRange = timeframe ? TF_TO_MS[timeframe] ?? 1 : 1;
@@ -166,7 +171,7 @@ const TimeScale: React.FC = () => {
 
     return (
         <div
-            className="py-2"
+            className="pb-2"
             onWheel={onWheel}
             onMouseDown={onMouseDown}
         >
@@ -201,7 +206,7 @@ const TimeScale: React.FC = () => {
             ))}
 
             {/* Crosshair Time Label */}
-            {crosshairTime !== null && mouseOnChart && !selectingInterval &&(
+            {crosshairTime !== null && mouseOnChart && !selectingInterval && (
                 <>
                     <rect
                         x={crosshairX - 60}
@@ -225,6 +230,48 @@ const TimeScale: React.FC = () => {
                     </text>
                 </>
             )}
+
+            {selectingInterval &&
+                intervalStartX !== null &&
+                intervalEndX !== null && (
+                    <>
+                        {[{ x: intervalStartX, label: "Start" }, { x: intervalEndX, label: "End" }].map(
+                            (item, idx) => {
+                                const px = clamp(
+                                    timeToX(item.x, startTime, endTime, width),
+                                    40,
+                                    width - 40
+                                );
+                                const text = formatUTC(item.x);
+
+                                return (
+                                    <g key={item.label + idx}>
+                                        <rect
+                                            x={px - 60}
+                                            y={0}
+                                            width={120}
+                                            height={22}
+                                            fill="#151515"
+                                            stroke="#ff7a18"
+                                            strokeWidth={1}
+                                            rx={4}
+                                        />
+                                        <text
+                                            x={px}
+                                            y={13}
+                                            textAnchor="middle"
+                                            fill="#ffb46a"
+                                            fontSize={11}
+                                            fontWeight="bold"
+                                        >
+                                            {text}
+                                        </text>
+                                    </g>
+                                );
+                            }
+                        )}
+                    </>
+                )}
         </svg>
         </div>
     );

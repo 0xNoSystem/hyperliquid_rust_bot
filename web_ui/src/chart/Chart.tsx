@@ -24,6 +24,8 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         setPriceRange,
         setManualPriceRange,
         setTimeRange,
+        setIntervalStartX,
+        setIntervalEndX,
 
         height,
         width,
@@ -45,7 +47,11 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     useEffect(() => {
         setTf(tf);
         setSelectingInterval(settingInterval);
-    }, [tf, settingInterval]);
+        if (!settingInterval) {
+            setIntervalStartX(null);
+            setIntervalEndX(null);
+        }
+    }, [tf, settingInterval, setSelectingInterval, setIntervalStartX, setIntervalEndX]);
 
     // ------------------------------------------------------------
     // Visible candles
@@ -66,8 +72,10 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
 
         dataSignatureRef.current = signature;
         setManualPriceRange(false);
+        setIntervalStartX(null);
+        setIntervalEndX(null);
         setTimeRange(candles[0].start, candles[candles.length - 1].end);
-    }, [candles, setTimeRange, setManualPriceRange]);
+    }, [candles, setTimeRange, setManualPriceRange, setIntervalStartX, setIntervalEndX]);
 
     // ------------------------------------------------------------
     // Auto price range
