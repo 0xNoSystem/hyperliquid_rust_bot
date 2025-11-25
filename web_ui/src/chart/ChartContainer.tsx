@@ -3,7 +3,9 @@ import Chart from "./Chart";
 import PriceScale from "./visual/PriceScale";
 import TimeScale from "./visual/TimeScale";
 import IntervalOverlay from "./visual/Interval";
+import CandleInfo from "./visual/CandleInfo";
 import { useChartContext } from "./ChartContext";
+import { xToTime } from "./utils";
 
 import type { TimeFrame, CandleData } from "../types";
 
@@ -20,9 +22,20 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
     settingInterval,
     candleData,
 }) => {
-    const { height, setCandles } = useChartContext();
+    const {
+        height,
+        setCandles,
+        selectingInterval,
+        startTime,
+        endTime,
+        candles,
+        width,
+        crosshairX,
+        mouseOnChart
+    } = useChartContext();
     const rightRef = useRef<HTMLDivElement>(null);
     const [rightWidth, setRightWidth] = useState(0);
+    const [hoveredCandle, setHoveredCandle] = useState<CandleData | null>(null);
 
     // Load candle data into context
     useEffect(() => {
@@ -43,6 +56,43 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
         return () => obs.disconnect();
     }, []);
 
+    useEffect(() => {
+        if (
+            selectingInterval ||
+            crosshairX === null ||
+            width === 0 ||
+            endTime <= startTime ||
+            candles.length === 0
+        ) {
+            setHoveredCandle(null);
+            return;
+        }
+
+        const hoverTime = xToTime(crosshairX, startTime, endTime, width);
+
+        let nearest: CandleData | null = null;
+        let bestDiff = Infinity;
+
+        for (const candle of candles) {
+            if (candle.end < startTime || candle.start > endTime) continue;
+            const mid = (candle.start + candle.end) / 2;
+            const diff = Math.abs(mid - hoverTime);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                nearest = candle;
+            }
+        }
+
+        setHoveredCandle(nearest);
+    }, [
+        selectingInterval,
+        crosshairX,
+        width,
+        startTime,
+        endTime,
+        candles,
+    ]);
+
     return (
         <div className="flex h-full flex-1 flex-col overflow-hidden">
             {/* MAIN ROW */}
@@ -56,6 +106,9 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                             settingInterval={settingInterval}
                         />
                         <IntervalOverlay />
+                        {hoveredCandle && mouseOnChart && (
+                            <CandleInfo candle={hoveredCandle} />
+                        )}
                     </div>
                 </div>
 

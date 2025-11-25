@@ -3,7 +3,13 @@ import Candle from "./visual/Candle";
 import CrossHair from "./visual/CrossHair";
 import { useChartContext } from "./ChartContext";
 
-import { priceToY, timeToX, computeTimeWheelZoom, computeTimePan } from "./utils";
+import {
+    priceToY,
+    timeToX,
+    xToTime,
+    computeTimeWheelZoom,
+    computeTimePan,
+} from "./utils";
 import { MIN_CANDLE_WIDTH, MAX_CANDLE_WIDTH } from "./constants";
 import type { TimeFrame } from "../types";
 
@@ -34,6 +40,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         manualPriceRange,
         startTime,
         endTime,
+        selectingInterval,
     } = useChartContext();
 
     const [isInside, setIsInside] = useState(false);
@@ -122,7 +129,6 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     // Wheel zoom / horizontal pan
     // ------------------------------------------------------------
     const onWheel = (e: React.WheelEvent) => {
-        e.preventDefault();
         e.stopPropagation();
 
         const wantsPan = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
@@ -197,7 +203,28 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         const rect = e.currentTarget.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        setCrosshair(x, y);
+        if (!width || selectingInterval || visibleCandles.length === 0) {
+            setCrosshair(x, y);
+            return;
+        }
+
+        if (x < 0 || x > rect.width) {
+            setCrosshair(x, y);
+            return;
+        }
+
+        const hoverTime = xToTime(x, startTime, endTime, width);
+        const candleDuration =
+            visibleCandles[0].end - visibleCandles[0].start || 1;
+
+        const steps = Math.round((hoverTime - startTime) / candleDuration);
+        const snappedTime = startTime + steps * candleDuration;
+        const clampedTime = Math.min(
+            endTime,
+            Math.max(startTime, snappedTime)
+        );
+        const snapX = timeToX(clampedTime, startTime, endTime, width);
+        setCrosshair(snapX, y);
     };
 
     const handleEnter = () => {

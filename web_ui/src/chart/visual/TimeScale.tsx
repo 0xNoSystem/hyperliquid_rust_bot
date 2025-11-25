@@ -86,7 +86,6 @@ const TimeScale: React.FC = () => {
 
     // --- Wheel zoom / horizontal pan ---
     const onWheel = (e: React.WheelEvent) => {
-        e.preventDefault();
         e.stopPropagation();
 
         const wantsPan =

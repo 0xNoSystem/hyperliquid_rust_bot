@@ -50,7 +50,6 @@ const PriceScale: React.FC = () => {
             : null;
 
     const onWheel = (e: React.WheelEvent) => {
-        e.preventDefault();
         e.stopPropagation();
 
         const { min, max } = handleWheelZoom(minPrice, maxPrice, e.deltaY);
