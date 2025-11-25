@@ -1,4 +1,4 @@
-import React, {useRef, useEffect} from "react";
+import React, { useRef, useEffect } from "react";
 import { useChartContext } from "../ChartContext";
 import {
     attachVerticalDrag,
@@ -14,24 +14,26 @@ const PriceScale: React.FC = () => {
         minPrice,
         maxPrice,
         setPriceRange,
+        setManualPriceRange,
         width,
         crosshairY,
         mouseOnChart,
+        selectingInterval
     } = useChartContext();
 
     const svgRef = useRef<SVGSVGElement>(null);
     useEffect(() => {
-    const node = svgRef.current;
-    if (!node) return;
+        const node = svgRef.current;
+        if (!node) return;
 
-    const blockScroll = (e: WheelEvent) => {
-        e.preventDefault();
-    };
+        const blockScroll = (e: WheelEvent) => {
+            e.preventDefault();
+        };
 
-    node.addEventListener("wheel", blockScroll, { passive: false });
+        node.addEventListener("wheel", blockScroll, { passive: false });
 
-    return () => node.removeEventListener("wheel", blockScroll);
-}, []);
+        return () => node.removeEventListener("wheel", blockScroll);
+    }, []);
 
     const levels = 14;
     const step = (maxPrice - minPrice) / (levels - 1);
@@ -53,6 +55,7 @@ const PriceScale: React.FC = () => {
 
         const { min, max } = handleWheelZoom(minPrice, maxPrice, e.deltaY);
 
+        setManualPriceRange(true);
         setPriceRange(min, max);
     };
 
@@ -73,6 +76,7 @@ const PriceScale: React.FC = () => {
                 const handleMove = (ev: MouseEvent) => {
                     const dy = ev.clientY - startY; // TOTAL drag distance
                     const { min, max } = zoomPriceRange(startMin, startMax, dy);
+                    setManualPriceRange(true);
                     setPriceRange(min, max);
                 };
 
@@ -113,7 +117,7 @@ const PriceScale: React.FC = () => {
             ))}
 
             {/* --- Crosshair Price Label --- */}
-            {crosshairPrice !== null && mouseOnChart && (
+            {crosshairPrice !== null && mouseOnChart && !selectingInterval &&(
                 <>
                     {/* Background box (TV style) */}
                     <rect

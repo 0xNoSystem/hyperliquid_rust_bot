@@ -15,6 +15,7 @@ interface ChartContextState {
 
     minPrice: number;
     maxPrice: number;
+    manualPriceRange: boolean;
 
     startTime: number;
     endTime: number;
@@ -36,6 +37,7 @@ interface ChartContextActions {
     setCandles: (c: CandleData[]) => void;
 
     setPriceRange: (min: number, max: number) => void;
+    setManualPriceRange: (manual: boolean) => void;
 
     setTimeRange: (start: number, end: number) => void;
 
@@ -57,6 +59,7 @@ export default function ChartProvider({ children }) {
 
     const [minPrice, setMinPrice] = useState(0);
     const [maxPrice, setMaxPrice] = useState(0);
+    const [manualPriceRange, setManualPriceRangeState] = useState(false);
 
     const [startTime, setStartTime] = useState(0);
     const [endTime, setEndTime] = useState(0);
@@ -85,6 +88,9 @@ export default function ChartProvider({ children }) {
         setMinPrice(min);
         setMaxPrice(max);
     };
+    const setManualPriceRange = (manual: boolean) => {
+        setManualPriceRangeState(manual);
+    };
 
     const setTimeRange = (start: number, end: number) => {
         setStartTime(start);
@@ -108,6 +114,7 @@ export default function ChartProvider({ children }) {
 
                 minPrice,
                 maxPrice,
+                manualPriceRange,
 
                 startTime,
                 endTime,
@@ -126,6 +133,7 @@ export default function ChartProvider({ children }) {
                 setTf,
                 setCandles,
                 setPriceRange,
+                setManualPriceRange,
                 setTimeRange,
                 setCrosshair,
                 setSelectingInterval,

@@ -1,10 +1,65 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import { useChartContext } from "../ChartContext";
-import { timeToX, xToTime, formatUTC } from "../utils";
+import { timeToX, xToTime, formatUTC, computeTimePan } from "../utils";
+import { MAX_CANDLE_WIDTH } from "../constants";
+import { TF_TO_MS } from "../../types";
+
+function computeTimeDragZoom(
+    initialStart: number,
+    initialEnd: number,
+    totalDx: number
+) {
+    const initialRange = initialEnd - initialStart;
+    const center = (initialStart + initialEnd) / 2;
+
+    // Drag right → totalDx > 0 → zoom OUT
+    // Drag left → totalDx < 0 → zoom IN
+    const speed = 0.002;
+    const factor = 1 + totalDx * speed;
+
+    const newRange = Math.max(1, initialRange * factor);
+
+    return {
+        start: center - newRange / 2,
+        end: center + newRange / 2,
+    };
+}
+
+function computeTimeWheelZoom(
+    startTime: number,
+    endTime: number,
+    deltaY: number
+) {
+    const range = endTime - startTime;
+    const center = (startTime + endTime) / 2;
+
+    const speed = 0.0015;
+    const factor = 1 + deltaY * speed;
+
+    const newRange = Math.max(1, range * factor);
+
+    return {
+        start: center - newRange / 2,
+        end: center + newRange / 2,
+    };
+}
 
 const TimeScale: React.FC = () => {
-    const { width, height, startTime, endTime, crosshairX, mouseOnChart } =
-        useChartContext();
+    const {
+        width,
+        height,
+        startTime,
+        endTime,
+        crosshairX,
+        mouseOnChart,
+        setTimeRange,
+        selectingInterval,
+        timeframe,
+    } = useChartContext();
+
+    const minRange = timeframe ? TF_TO_MS[timeframe] ?? 1 : 1;
+
+    const ref = useRef<SVGSVGElement>(null);
 
     const ticks = 12;
     const step = (endTime - startTime) / (ticks - 1);
@@ -20,9 +75,108 @@ const TimeScale: React.FC = () => {
             ? xToTime(crosshairX, startTime, endTime, width)
             : null;
 
+    const pxPerMs = width > 0 ? width / Math.max(1, endTime - startTime) : 0;
+    const candleDurationMs = timeframe ? TF_TO_MS[timeframe] ?? 0 : 0;
+    const candleWidthEstimate = pxPerMs * candleDurationMs;
+
+    // --- Wheel zoom / horizontal pan ---
+    const onWheel = (e: React.WheelEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const wantsPan =
+            e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
+
+        if (wantsPan && width > 0) {
+            const horizontalDelta =
+                e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX;
+
+            const { start, end } = computeTimePan(
+                startTime,
+                endTime,
+                -horizontalDelta,
+                width
+            );
+
+            setTimeRange(start, end);
+            return;
+        }
+
+        const { start, end } = computeTimeWheelZoom(
+            startTime,
+            endTime,
+            e.deltaY
+        );
+
+        if (
+            e.deltaY < 0 &&
+            (end - start < minRange || candleWidthEstimate >= MAX_CANDLE_WIDTH)
+        )
+            return;
+
+        setTimeRange(start, end);
+    };
+
+    // --- Drag zoom (RIGHT = zoom out, LEFT = zoom in) ---
+    const onMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const initialStart = startTime;
+        const initialEnd = endTime;
+        const startX = e.clientX;
+
+        const handleMove = (ev: MouseEvent) => {
+            const totalDx = ev.clientX - startX;
+
+            const { start, end } = computeTimeDragZoom(
+                initialStart,
+                initialEnd,
+                totalDx
+            );
+
+            if (
+                totalDx < 0 &&
+                (end - start < minRange || candleWidthEstimate >= MAX_CANDLE_WIDTH)
+            )
+                return;
+
+            setTimeRange(start, end);
+        };
+
+        const handleUp = () => {
+            window.removeEventListener("mousemove", handleMove);
+            window.removeEventListener("mouseup", handleUp);
+        };
+
+        window.addEventListener("mousemove", handleMove);
+        window.addEventListener("mouseup", handleUp);
+    };
+
+    // --- Block scroll chaining completely ---
+    useEffect(() => {
+        const node = ref.current;
+        if (!node) return;
+
+        const blockScroll = (e: WheelEvent) => e.preventDefault();
+        node.addEventListener("wheel", blockScroll, { passive: false });
+
+        return () => node.removeEventListener("wheel", blockScroll);
+    }, []);
+
     return (
-        <svg width={width} height={25} style={{ overflow: "visible" }}>
-            {/* tick labels */}
+        <div
+            className="py-2"
+            onWheel={onWheel}
+            onMouseDown={onMouseDown}
+        >
+        <svg
+            ref={ref}
+            width={width}
+            height={25}
+            style={{ overflow: "visible", overscrollBehavior: "none" }}
+                    >
+            {/* Tick Labels */}
             {times.slice(0, -1).map((p, idx) => (
                 <g key={idx}>
                     <line
@@ -46,8 +200,8 @@ const TimeScale: React.FC = () => {
                 </g>
             ))}
 
-            {/* crosshair label */}
-            {crosshairTime !== null && mouseOnChart && (
+            {/* Crosshair Time Label */}
+            {crosshairTime !== null && mouseOnChart && !selectingInterval &&(
                 <>
                     <rect
                         x={crosshairX - 60}
@@ -59,7 +213,6 @@ const TimeScale: React.FC = () => {
                         strokeWidth={1}
                         rx={4}
                     />
-
                     <text
                         x={crosshairX}
                         y={13}
@@ -73,6 +226,7 @@ const TimeScale: React.FC = () => {
                 </>
             )}
         </svg>
+        </div>
     );
 };
 

@@ -1,58 +1,68 @@
 import React, { useRef, useEffect, useState } from "react";
 import Chart from "./Chart";
-import type { ChartProps } from "./Chart";
 import PriceScale from "./visual/PriceScale";
 import TimeScale from "./visual/TimeScale";
 import { useChartContext } from "./ChartContext";
 
-interface ChartContainerProps extends ChartProps {}
+import type { TimeFrame, CandleData } from "../types";
+
+interface ChartContainerProps {
+    asset: string;
+    tf: TimeFrame;
+    settingInterval: boolean;
+    candleData: CandleData[];
+}
 
 const ChartContainer: React.FC<ChartContainerProps> = ({
     asset,
-    timeframe,
+    tf,
     settingInterval,
     candleData,
 }) => {
-    const { crosshairX, crosshairY, startTime, height } = useChartContext();
+    const { height, setCandles } = useChartContext();
     const rightRef = useRef<HTMLDivElement>(null);
     const [rightWidth, setRightWidth] = useState(0);
 
+    // Load candle data into context
+    useEffect(() => {
+        if (candleData && candleData.length > 0) {
+            setCandles(candleData);
+        }
+    }, [candleData, setCandles]);
+
+    // Track right panel width (needed for bottom preview)
     useEffect(() => {
         if (!rightRef.current) return;
 
-        const observer = new ResizeObserver(([entry]) => {
-            const { width } = entry.contentRect;
-            setRightWidth(width);
+        const obs = new ResizeObserver(([entry]) => {
+            setRightWidth(entry.contentRect.width);
         });
 
-        observer.observe(rightRef.current);
-        return () => observer.disconnect();
+        obs.observe(rightRef.current);
+        return () => obs.disconnect();
     }, []);
 
     return (
         <div className="flex h-full flex-1 flex-col overflow-hidden">
             {/* MAIN ROW */}
-            <div className="flex h-full w-[100%] flex-1">
+            <div className="flex h-full w-full flex-1">
                 {/* LEFT: CHART */}
                 <div className="relative flex w-[93%] flex-1 overflow-hidden">
+                    {/* Optional overlay block */}
                     <div
-                        className={`absolute top-0 left-[20%] bg-gray-400/30`}
-                        style={{
-                            width: 400,
-                            height: height,
-                        }}
-                    ></div>
+                        className="absolute top-0 left-[20%] bg-gray-400/30"
+                        style={{ width: 400, height }}
+                    />
                     <div className="relative flex flex-1">
                         <Chart
                             asset={asset}
-                            tf={timeframe}
+                            tf={tf}
                             settingInterval={settingInterval}
-                            candleData={candleData}
                         />
                     </div>
                 </div>
 
-                {/* RIGHT PANEL */}
+                {/* RIGHT PRICE SCALE */}
                 <div
                     ref={rightRef}
                     className="w-[7%] cursor-n-resize bg-black/20 text-white"
@@ -61,14 +71,13 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                 </div>
             </div>
 
-            {/* BOTTOM PANEL */}
+            {/* BOTTOM TIME SCALE */}
             <div className="flex bg-black/20 text-white">
-                {/* Bottom content */}
-                <div className="flex-1 cursor-w-resize py-4">
+                <div className="flex-1 cursor-w-resize">
                     <TimeScale />
                 </div>
 
-                {/* Dynamic width preview */}
+                {/* Right-side width preview box */}
                 <div className="bg-black/60" style={{ width: rightWidth }} />
             </div>
         </div>

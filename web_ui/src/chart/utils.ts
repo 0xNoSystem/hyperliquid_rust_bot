@@ -210,3 +210,41 @@ export function handleWheelZoom(
         max: center + newRange / 2,
     };
 }
+
+// Zoom time range with mouse wheel
+export function computeTimeWheelZoom(
+    startTime: number,
+    endTime: number,
+    deltaY: number
+) {
+    const range = endTime - startTime;
+    const center = (startTime + endTime) / 2;
+
+    const speed = 0.0015;
+    const factor = 1 + deltaY * speed;
+
+    const newRange = Math.max(1, range * factor); // prevents collapse
+
+    return {
+        start: center - newRange / 2,
+        end: center + newRange / 2,
+    };
+}
+
+// Pan time range horizontally via drag
+export function computeTimePan(
+    initialStart: number,
+    initialEnd: number,
+    totalDx: number,
+    width: number
+) {
+    // convert pixel movement to time delta
+    const range = initialEnd - initialStart;
+    const timePerPixel = range / width;
+    const shift = totalDx * timePerPixel;
+
+    return {
+        start: initialStart - shift,
+        end: initialEnd - shift,
+    };
+}
