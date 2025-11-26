@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { TIMEFRAME_CAMELCASE, fromTimeFrame, TF_TO_MS } from "../types";
 import type { TimeFrame } from "../types";
 import ChartContainer from "../chart/ChartContainer";
+import { getTimeframeCache } from "../chart/candleCache";
 import { fetchCandles } from "../chart/utils";
 import type { CandleData } from "../chart/utils";
 import { useChartContext } from "../chart/ChartContext";
@@ -83,6 +84,58 @@ function normalizeParts(parts: CustomDateParts): CustomDateParts {
     return { ...parts, day, time: sanitizeTime(parts.time) };
 }
 
+function normalizeRange(
+    startMs: number,
+    endMs: number,
+    candleIntervalMs: number
+) {
+    const clampedStart = Math.max(0, startMs);
+    const normalizedStart = clampedStart - (clampedStart % candleIntervalMs);
+    const normalizedEnd = Math.max(
+        normalizedStart + candleIntervalMs,
+        Math.ceil(endMs / candleIntervalMs) * candleIntervalMs
+    );
+
+    return { normalizedStart, normalizedEnd };
+}
+
+function collectCachedCandles(
+    tfCache: Map<number, CandleData>,
+    asset: string,
+    normalizedStart: number,
+    normalizedEnd: number,
+    candleIntervalMs: number
+) {
+    const cached: CandleData[] = [];
+    const missing: { start: number; end: number }[] = [];
+
+    let gapStart: number | null = null;
+
+    for (
+        let ts = normalizedStart;
+        ts < normalizedEnd;
+        ts += candleIntervalMs
+    ) {
+        const candle = tfCache.get(ts);
+
+        if (candle && candle.asset === asset) {
+            cached.push(candle);
+            if (gapStart !== null) {
+                missing.push({ start: gapStart, end: ts });
+                gapStart = null;
+            }
+        } else if (gapStart === null) {
+            gapStart = ts;
+        }
+    }
+
+    if (gapStart !== null) {
+        missing.push({ start: gapStart, end: normalizedEnd });
+    }
+
+    return { cached, missing };
+}
+
 function buildCustomRangeISO(
     startParts: CustomDateParts,
     endParts: CustomDateParts
@@ -112,38 +165,79 @@ async function loadCandles(
     asset: string,
     updatePrev: (a: number, b: number) => void
 ): Promise<CandleData[]> {
+    if (!asset) return [];
+
+    let rangeStart = startMs;
+    let rangeEnd = endMs;
+
     // Fallback to recent window if range is invalid
-    if (!startMs || !endMs || endMs <= startMs) {
-        endMs = Date.now();
-        startMs = endMs - 30 * 24 * 60 * 60 * 1000; 
+    if (!rangeStart || !rangeEnd || rangeEnd <= rangeStart) {
+        rangeEnd = Date.now();
+        rangeStart = rangeEnd - 30 * 24 * 60 * 60 * 1000;
     }
 
     const candleIntervalMs = TF_TO_MS[tf];
-    const expectedCandles = Math.ceil((endMs - startMs) / candleIntervalMs);
+    const { normalizedStart, normalizedEnd } = normalizeRange(
+        rangeStart,
+        rangeEnd,
+        candleIntervalMs
+    );
+    const expectedCandles = Math.ceil(
+        (normalizedEnd - normalizedStart) / candleIntervalMs
+    );
+    const tfCache = getTimeframeCache(tf, asset);
+    const { cached, missing } = collectCachedCandles(
+        tfCache,
+        asset,
+        normalizedStart,
+        normalizedEnd,
+        candleIntervalMs
+    );
 
     console.log(
-        `%c[LOAD CANDLES] TF=${tf}, Expected=${expectedCandles}`,
+        `%c[LOAD CANDLES] TF=${tf}, Expected=${expectedCandles}, Cached=${cached.length}`,
         "color: orange; font-weight: bold;"
     );
 
-    try {
-        const data = await fetchCandles(
-            asset,
-            startMs.toFixed(0),
-            endMs.toFixed(0),
-            fromTimeFrame(tf)
-        );
+    // Serve straight from cache when we already have full coverage
+    if (missing.length === 0 && cached.length > 0) {
+        updatePrev(rangeStart, rangeEnd);
+        return cached;
+    }
 
-        if (data.length === 0) {
-            console.warn("No candle data returned");
-            return [];
+    try {
+        for (const segment of missing) {
+            const data = await fetchCandles(
+                asset,
+                segment.start,
+                segment.end,
+                fromTimeFrame(tf)
+            );
+
+            for (const candle of data) {
+                tfCache.set(candle.start, candle);
+            }
         }
-        updatePrev(startMs, endMs);
-        return data;
     } catch (err) {
         console.error("Failed to fetch candles", err);
         return [];
     }
+
+    const merged: CandleData[] = [];
+
+    for (let ts = normalizedStart; ts < normalizedEnd; ts += candleIntervalMs) {
+        const candle = tfCache.get(ts);
+        if (candle && candle.asset === asset) {
+            merged.push(candle);
+        }
+    }
+
+    if (merged.length === 0) {
+        return [];
+    }
+
+    updatePrev(rangeStart, rangeEnd);
+    return merged;
 }
 
 type BacktestContentProps = {
