@@ -6,6 +6,7 @@ import Backtest from "./components/Backtest";
 import Settings from "./components/Settings";
 import MarketDetail from "./components/MarketDetail";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import ChartProvider from "./chart/ChartContext";
 
 const App: React.FC = () => (
     <BrowserRouter>
@@ -14,7 +15,14 @@ const App: React.FC = () => (
                 <Route index element={<MarketsPage />} />
                 <Route path="asset/:asset" element={<MarketDetail />} />
                 <Route path="settings" element={<Settings />} />
-                <Route path="backtest/:asset" element={<Backtest />} />
+                <Route
+                    path="backtest/:asset"
+                    element={
+                        <ChartProvider>
+                            <Backtest />
+                        </ChartProvider>
+                    }
+                />
             </Route>
         </Routes>
     </BrowserRouter>

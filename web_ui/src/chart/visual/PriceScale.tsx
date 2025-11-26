@@ -8,6 +8,16 @@ import {
     handleWheelZoom,
 } from "../utils";
 
+
+const formatPrice = (n: number) => {
+    if (n > 1 && n < 2) return n.toFixed(4);
+    if (n < 1) return n.toFixed(6);
+    if (n > 10000) return n.toFixed(0);
+    return n.toFixed(2);
+};
+
+
+
 const PriceScale: React.FC = () => {
     const {
         height,
@@ -110,7 +120,7 @@ const PriceScale: React.FC = () => {
                         fill="#aaa"
                         fontSize={14}
                     >
-                        {p.price.toFixed(2)}
+                        {formatPrice(p.price)}
                     </text>
                 </g>
             ))}
@@ -140,7 +150,7 @@ const PriceScale: React.FC = () => {
                         fontSize={12}
                         fontWeight="bold"
                     >
-                        {crosshairPrice.toFixed(2)}
+                        {formatPrice(crosshairPrice)}
                     </text>
                 </>
             )}

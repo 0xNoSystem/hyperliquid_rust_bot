@@ -11,8 +11,6 @@ const formatPrice = (n: number) => {
     return n.toFixed(2);
 };
 
-
-
 const CandleInfo: React.FC<CandleInfoProps> = ({ candle }) => {
     const diff = candle.close - candle.open;
     const pct = candle.open !== 0 ? (diff / candle.open) * 100 : 0;

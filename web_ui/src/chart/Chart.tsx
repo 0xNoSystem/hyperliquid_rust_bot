@@ -87,7 +87,6 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         setManualPriceRange(false);
         setIntervalStartX(null);
         setIntervalEndX(null);
-        setTimeRange(candles[0].start, candles[candles.length - 1].end);
     }, [
         candles,
         setTimeRange,

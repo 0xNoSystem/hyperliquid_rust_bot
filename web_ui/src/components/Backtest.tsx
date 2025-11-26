@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useRef, useState, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { TIMEFRAME_CAMELCASE, fromTimeFrame, TF_TO_MS } from "../types";
 import type { TimeFrame } from "../types";
 import ChartContainer from "../chart/ChartContainer";
-import ChartProvider from "../chart/ChartContext";
 import { fetchCandles } from "../chart/utils";
 import type { CandleData } from "../chart/utils";
+import { useChartContext } from "../chart/ChartContext";
 
 type RangePreset = "24H" | "7D" | "30D" | "YTD" | "CUSTOM";
 
@@ -107,25 +107,17 @@ function buildCustomRangeISO(
 async function loadCandles(
     tf: TimeFrame,
     intervalOn: boolean,
-    startDate: string,
-    endDate: string,
-    asset: string
+    startMs: number,
+    endMs: number,
+    asset: string,
+    updatePrev: (a: number, b: number) => void
 ): Promise<CandleData[]> {
-    let startMs: number;
-    let endMs: number;
-
-    // If user selected a custom time range
-    if (startDate && endDate) {
-        startMs = new Date(startDate).getTime();
-        endMs = new Date(endDate).getTime();
-    }
-    // Otherwise load default recent data
-    else {
+    // Fallback to recent window if range is invalid
+    if (!startMs || !endMs || endMs <= startMs) {
         endMs = Date.now();
-        startMs = endMs - 30 * 24 * 60 * 60 * 1000; // last 30 minutes
+        startMs = endMs - 30 * 24 * 60 * 60 * 1000; 
     }
 
-    // Compute expected candle count
     const candleIntervalMs = TF_TO_MS[tf];
     const expectedCandles = Math.ceil((endMs - startMs) / candleIntervalMs);
 
@@ -134,28 +126,58 @@ async function loadCandles(
         "color: orange; font-weight: bold;"
     );
 
-    // Binance fetch (with automatic batching)
-    return await fetchCandles(asset, startMs, endMs, fromTimeFrame(tf));
+    try {
+        const data = await fetchCandles(
+            asset,
+            startMs.toFixed(0),
+            endMs.toFixed(0),
+            fromTimeFrame(tf)
+        );
+
+        if (data.length === 0) {
+            console.warn("No candle data returned");
+            return [];
+        }
+        updatePrev(startMs, endMs);
+        return data;
+    } catch (err) {
+        console.error("Failed to fetch candles", err);
+        return [];
+    }
 }
 
-// -----------------------
-// Backtest Component
-// -----------------------
-export default function Backtest() {
-    const { asset: routeAsset } = useParams<{ asset: string }>();
+type BacktestContentProps = {
+    routeAsset?: string;
+};
 
+// -----------------------
+// Backtest Content
+// -----------------------
+function BacktestContent({ routeAsset }: BacktestContentProps) {
+    const { startTime, endTime, setTimeRange } = useChartContext();
+
+    const timeframeChangingRef = useRef(false);
     const defaultStartParts = useMemo(
         () => dateToParts(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
         []
     );
     const defaultEndParts = useMemo(() => dateToParts(new Date()), []);
 
-    const [timeframe, setTimeframe] = useState<TimeFrame>("hour1");
+    const [prevStartTime, setPrevStartTime] = useState(0);
+    const [prevEndTime, setPrevEndTime] = useState(0);
+
+    const updatePrevTimeRange = (newStart: number, newEnd: number) => {
+        setPrevStartTime(newStart);
+        setPrevEndTime(newEnd);
+    };
+    const [canFill, setCanFill] = useState(true);
+
+    const [timeframe, setTimeframe] = useState<TimeFrame>("hour4");
     const [intervalOn, setIntervalOn] = useState(false);
     const [candleData, setCandleData] = useState<CandleData[]>([]);
     const [showDatePicker, setShowDatePicker] = useState(true);
 
-    const [rangePreset, setRangePreset] = useState<RangePreset>("7D");
+    const [rangePreset, setRangePreset] = useState<RangePreset>("30D");
     const [customStartParts, setCustomStartParts] =
         useState<CustomDateParts>(defaultStartParts);
     const [customEndParts, setCustomEndParts] =
@@ -164,10 +186,6 @@ export default function Backtest() {
         useState<CustomDateParts>(defaultStartParts);
     const [committedEndParts, setCommittedEndParts] =
         useState<CustomDateParts>(defaultEndParts);
-    const [customRangeISO, setCustomRangeISO] = useState<{
-        start: string;
-        end: string;
-    } | null>(null);
     const updateStartParts = (updates: Partial<CustomDateParts>) => {
         setCustomStartParts((prev) => normalizeParts({ ...prev, ...updates }));
     };
@@ -175,59 +193,53 @@ export default function Backtest() {
         setCustomEndParts((prev) => normalizeParts({ ...prev, ...updates }));
     };
     const confirmCustomRange = () => {
-        setCustomRangeISO(
-            buildCustomRangeISO(customStartParts, customEndParts)
-        );
+        const range = buildCustomRangeISO(customStartParts, customEndParts);
         setCommittedStartParts(customStartParts);
         setCommittedEndParts(customEndParts);
+        const startMs = new Date(range.start).getTime();
+        const endMs = new Date(range.end).getTime();
+        if (!Number.isNaN(startMs) && !Number.isNaN(endMs)) {
+            setTimeRange(startMs, endMs);
+        }
+    };
+
+    const applyPresetTimeRange = (preset: RangePreset) => {
+        const now = Date.now();
+        switch (preset) {
+            case "24H":
+                setTimeRange(now - 24 * 60 * 60 * 1000, now);
+                break;
+            case "7D":
+                setTimeRange(now - 7 * 24 * 60 * 60 * 1000, now);
+                break;
+            case "30D":
+                setTimeRange(now - 30 * 24 * 60 * 60 * 1000, now);
+                break;
+            case "YTD": {
+                const current = new Date();
+                const startOfYear = Date.UTC(current.getUTCFullYear(), 0, 1);
+                setTimeRange(startOfYear, now);
+                break;
+            }
+            default:
+                // CUSTOM handled separately
+                break;
+        }
     };
 
     const handlePresetSelect = (preset: RangePreset) => {
+        if (preset === rangePreset) return;
         setRangePreset(preset);
-        
+
         const tfForPreset = PRESET_DEFAULT_TF[preset];
         if (tfForPreset) {
             setTimeframe(tfForPreset);
         }
+
+        if (preset !== "CUSTOM") {
+            applyPresetTimeRange(preset);
+        } 
     };
-
-    const derivedRange = useMemo(() => {
-        const now = Date.now();
-        const toInput = (ms: number) => new Date(ms).toISOString().slice(0, 16);
-
-        switch (rangePreset) {
-            case "24H":
-                return {
-                    start: toInput(now - 24 * 60 * 60 * 1000),
-                    end: toInput(now),
-                };
-            case "7D":
-                return {
-                    start: toInput(now - 7 * 24 * 60 * 60 * 1000),
-                    end: toInput(now),
-                };
-            case "30D":
-                return {
-                    start: toInput(now - 30 * 24 * 60 * 60 * 1000),
-                    end: toInput(now),
-                };
-            case "YTD": {
-                const current = new Date();
-                const startOfYear = Date.UTC(current.getUTCFullYear(), 0, 1);
-                return {
-                    start: toInput(startOfYear),
-                    end: toInput(now),
-                };
-            }
-            case "CUSTOM":
-                return customRangeISO ?? {
-                    start: "",
-                    end: "",
-                };
-            default:
-                return { start: "", end: "" };
-        }
-    }, [rangePreset, customRangeISO]);
 
     const startDayOptions = getDaysInMonth(
         customStartParts.year,
@@ -271,30 +283,75 @@ export default function Backtest() {
         customEndParts,
         committedEndParts,
     ]);
-
-    // Auto-reload candles when TF, toggle, or date inputs change
     useEffect(() => {
-        async function reload() {
-            if (!routeAsset) return;
+        timeframeChangingRef.current = true;
+
+        const t = setTimeout(() => {
+            timeframeChangingRef.current = false;
+        }, 400);
+
+        return () => clearTimeout(t);
+    }, [timeframe]);
+
+    useEffect(() => {
+        if (rangePreset !== "CUSTOM") {
+            applyPresetTimeRange(rangePreset);
+        }
+
+        (async () => {
             const data = await loadCandles(
                 timeframe,
                 intervalOn,
-                derivedRange.start,
-                derivedRange.end,
-                routeAsset
+                startTime,
+                endTime,
+                routeAsset,
+                updatePrevTimeRange
             );
             setCandleData(data);
-        }
+        })();
+    }, []);
 
-        if (!derivedRange.start || !derivedRange.end) return;
-        reload();
-    }, [
-        timeframe,
-        intervalOn,
-        derivedRange.start,
-        derivedRange.end,
-        routeAsset,
-    ]);
+
+    // Auto-reload candles when TF, toggle, or date inputs change
+    useEffect(() => {
+        if (!routeAsset) return;
+        if (startTime <= 0 || endTime <= startTime) return;
+
+        (async () => {
+            const data = await loadCandles(
+                timeframe,
+                intervalOn,
+                startTime,
+                endTime,
+                routeAsset,
+                updatePrevTimeRange
+            );
+            setCandleData(data);
+        })();
+    }, [timeframe, intervalOn, routeAsset]);
+
+    useEffect(() => {
+        if (!routeAsset) return;
+        if (startTime <= 0 || endTime <= startTime) return;
+        if (timeframeChangingRef.current) return;
+        if (startTime > prevStartTime && (endTime < prevEndTime || prevEndTime > Date.now())) return;
+
+        const timer = setTimeout(() => {
+            (async () => {
+                const data = await loadCandles(
+                    timeframe,
+                    intervalOn,
+                    startTime,
+                    endTime,
+                    routeAsset,
+                    updatePrevTimeRange
+                );
+                setCandleData(data);
+            })();
+        }, 300);
+
+        return () => clearTimeout(timer);
+    }, [startTime, endTime, routeAsset, intervalOn]);
 
     return (
         <div className="flex h-full flex-col bg-black/70 pb-50">
@@ -311,9 +368,9 @@ export default function Backtest() {
                 </div>
 
                 {/* CHART (middle) */}
-                <div className="mb-30 flex min-h-[70vh] w-[90%] flex-grow flex-col rounded-lg border-2 bg-white/10 border-white/20 p-4 tracking-widest">
+                <div className="mb-30 flex min-h-[70vh] w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 bg-white/10 p-4 tracking-widest">
                     {/* Toggle + Dates */}
-                    <div className="flex items-center gap-4 p-4 pl-1">
+                    <div className="flex flex-wrap items-center gap-4 p-4 pl-1">
                         {/* Toggle Button */}
                         <button
                             onClick={() => setIntervalOn(!intervalOn)}
@@ -343,18 +400,17 @@ export default function Backtest() {
                                             ? "border-orange-500 text-orange-400"
                                             : "border-white/30 text-white/70 hover:border-white/60"
                                     }`}
-                                    onClick={() =>{
+                                    onClick={() => {
                                         handlePresetSelect(preset.id);
                                         setShowDatePicker(true);
-                                        }
-                                    }
+                                    }}
                                 >
                                     {preset.label}
                                 </button>
                             ))}
                         </div>
 
-                        {rangePreset === "CUSTOM" && showDatePicker &&(
+                        {rangePreset === "CUSTOM" && showDatePicker && (
                             <div className="flex flex-col gap-3 rounded border border-white/30 bg-black/50 p-3 text-sm text-white">
                                 {customRows.map((item) => (
                                     <div
@@ -427,7 +483,7 @@ export default function Backtest() {
                                                     time: e.target.value,
                                                 })
                                             }
-                                            className="w-24 rounded border border-white/30 bg-gray-600/70 p-1 w-[115px]"
+                                            className="w-24 w-[115px] rounded border border-white/30 bg-gray-600/70 p-1"
                                         />
                                         <span className="text-xs text-white/50">
                                             UTC
@@ -436,7 +492,10 @@ export default function Backtest() {
                                 ))}
 
                                 <button
-                                    onClick={() => {confirmCustomRange(); setShowDatePicker(false);}}
+                                    onClick={() => {
+                                        confirmCustomRange();
+                                        setShowDatePicker(false);
+                                    }}
                                     disabled={!isCustomDirty}
                                     className={`self-start rounded border px-3 py-1 text-xs font-semibold transition ${
                                         isCustomDirty
@@ -448,6 +507,13 @@ export default function Backtest() {
                                 </button>
                             </div>
                         )}
+                        <div className="ml-auto">
+                            <button
+                                className={`rounded border px-3 py-1 text-sm font-semibold transition ${canFill ? "border-orange-500 text-orange-400" : "border-white/40 text-white/70"}`}
+                            >
+                            NIGGER
+                            </button>
+                        </div>
                     </div>
 
                     {/* Asset Title */}
@@ -482,14 +548,12 @@ export default function Backtest() {
                         </div>
 
                         {/* CHART PROVIDER + CHART */}
-                        <ChartProvider>
-                            <ChartContainer
-                                asset={routeAsset}
-                                tf={timeframe}
-                                settingInterval={intervalOn}
-                                candleData={candleData}
-                            />
-                        </ChartProvider>
+                        <ChartContainer
+                            asset={routeAsset}
+                            tf={timeframe}
+                            settingInterval={intervalOn}
+                            candleData={candleData}
+                        />
                     </div>
                 </div>
 
@@ -500,4 +564,13 @@ export default function Backtest() {
             </div>
         </div>
     );
+}
+
+// -----------------------
+// Backtest Component (with ChartProvider)
+// -----------------------
+export default function Backtest() {
+    const { asset: routeAsset } = useParams<{ asset: string }>();
+
+    return <BacktestContent routeAsset={routeAsset} />;
 }

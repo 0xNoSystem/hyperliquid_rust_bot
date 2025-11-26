@@ -22,6 +22,8 @@ export async function fetchCandles(
             `https://api.binance.com/api/v3/klines?symbol=${symbol}` +
             `&interval=${interval}&startTime=${fetchStart}&endTime=${endTime}&limit=1000`;
 
+        console.log(fetchStart);
+
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Binance error ${res.status}`);
 
@@ -248,3 +250,4 @@ export function computeTimePan(
         end: initialEnd - shift,
     };
 }
+

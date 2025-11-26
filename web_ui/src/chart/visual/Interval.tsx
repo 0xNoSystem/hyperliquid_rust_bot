@@ -2,8 +2,10 @@ import React, { useEffect, useMemo } from "react";
 import { useChartContext } from "../ChartContext";
 import { timeToX } from "../utils";
 
-const MIN_WINDOW_RATIO = 0.02; // 2% of visible range
+const MIN_WINDOW_RATIO = 0.04; // 2% of visible range
 const MIN_WINDOW_MS = 60 * 1000; // 1 minute fallback
+
+
 
 const clamp = (value: number, min: number, max: number) => {
     return Math.min(Math.max(value, min), max);
@@ -22,7 +24,8 @@ const IntervalOverlay: React.FC = () => {
         setIntervalEndX,
     } = useChartContext();
 
-    const rangeMs = endTime - startTime;
+    const effectiveEndTime = Math.min(endTime, Date.now());
+    const rangeMs = effectiveEndTime - startTime;
     const minWindow = useMemo(() => {
         if (rangeMs <= 0) return MIN_WINDOW_MS;
         return Math.min(
@@ -45,12 +48,12 @@ const IntervalOverlay: React.FC = () => {
             start = startTime;
             changed = true;
         }
-        if (end > endTime) {
-            end = endTime;
+        if (end > effectiveEndTime) {
+            end = effectiveEndTime;
             changed = true;
         }
         if (end - start < minWindow) {
-            end = Math.min(endTime, start + minWindow);
+            end = Math.min(effectiveEndTime, start + minWindow);
             start = Math.max(startTime, end - minWindow);
             changed = true;
         }
@@ -74,10 +77,10 @@ const IntervalOverlay: React.FC = () => {
     if (!selectingInterval || width <= 0 || rangeMs <= 0) return null;
     if (intervalStartX === null || intervalEndX === null) return null;
 
-    let start = clamp(intervalStartX, startTime, endTime);
-    let end = clamp(intervalEndX, startTime, endTime);
+    let start = clamp(intervalStartX, startTime, effectiveEndTime);
+    let end = clamp(intervalEndX, startTime, effectiveEndTime);
     if (end - start < minWindow) {
-        end = Math.min(endTime, start + minWindow);
+        end = Math.min(effectiveEndTime, start + minWindow);
         start = Math.max(startTime, end - minWindow);
     }
 
@@ -110,17 +113,21 @@ const IntervalOverlay: React.FC = () => {
                         nextStart += offset;
                         nextEnd += offset;
                     }
-                    if (nextEnd > endTime) {
-                        const offset = nextEnd - endTime;
+                    if (nextEnd > effectiveEndTime) {
+                        const offset = nextEnd - effectiveEndTime;
                         nextStart -= offset;
                         nextEnd -= offset;
                     }
 
                     setIntervalStartX(
-                        clamp(nextStart, startTime, endTime - minWindow)
+                        clamp(
+                            nextStart,
+                            startTime,
+                            effectiveEndTime - minWindow
+                        )
                     );
                     setIntervalEndX(
-                        clamp(nextEnd, startTime + minWindow, endTime)
+                        clamp(nextEnd, startTime + minWindow, effectiveEndTime)
                     );
                     return;
                 }
@@ -138,7 +145,7 @@ const IntervalOverlay: React.FC = () => {
                 let nextEnd = clamp(
                     initialEnd + dt,
                     initialStart + minWindow,
-                    endTime
+                    effectiveEndTime
                 );
                 setIntervalEndX(nextEnd);
             };
