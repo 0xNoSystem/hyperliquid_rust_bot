@@ -174,7 +174,7 @@ async function loadCandles(
     const prefetchBuffer = 200 * candleIntervalMs;
 
     let rangeStart = Math.max(0, startMs - prefetchBuffer);
-    let rangeEnd = endMs + prefetchBuffer;
+    let rangeEnd = Math.min(Date.now(), endMs + prefetchBuffer);
 
     // Fallback to recent window if range is invalid
     if (!rangeStart || !rangeEnd || rangeEnd <= rangeStart) {

@@ -1,19 +1,20 @@
 import React, { useRef, useEffect } from "react";
 import { useChartContext } from "../ChartContext";
 import {
-    attachVerticalDrag,
     zoomPriceRange,
     priceToY,
     yToPrice,
     handleWheelZoom,
+    computePricePan,
 } from "../utils";
 
 const formatPrice = (n: number) => {
     if (n > 1 && n < 2) return n.toFixed(4);
     if (n < 1) return n.toFixed(6);
-    if (n > 10000) return n.toFixed(0);
-    return n.toFixed(2);
+    if (n > 10000) return Number(n.toFixed(0)).toLocaleString("en-US");
+    return Number(n.toFixed(2)).toLocaleString("en-US");
 };
+
 
 const PriceScale: React.FC = () => {
     const {
@@ -29,6 +30,7 @@ const PriceScale: React.FC = () => {
     } = useChartContext();
 
     const svgRef = useRef<SVGSVGElement>(null);
+    const dragModeRef = useRef<"zoom" | "pan">("zoom");
     useEffect(() => {
         const node = svgRef.current;
         if (!node) return;
@@ -59,6 +61,18 @@ const PriceScale: React.FC = () => {
     const onWheel = (e: React.WheelEvent) => {
         e.stopPropagation();
 
+        if (e.shiftKey) {
+            const { min, max } = computePricePan(
+                minPrice,
+                maxPrice,
+                e.deltaY,
+                height
+            );
+            setManualPriceRange(true);
+            setPriceRange(min, max);
+            return;
+        }
+
         const { min, max } = handleWheelZoom(minPrice, maxPrice, e.deltaY);
 
         setManualPriceRange(true);
@@ -75,18 +89,25 @@ const PriceScale: React.FC = () => {
             onMouseDown={(e) => {
                 e.preventDefault();
 
+                dragModeRef.current =
+                    e.shiftKey || e.button === 1 ? "pan" : "zoom";
+
                 const startMin = minPrice;
                 const startMax = maxPrice;
                 const startY = e.clientY;
 
                 const handleMove = (ev: MouseEvent) => {
                     const dy = ev.clientY - startY; // TOTAL drag distance
-                    const { min, max } = zoomPriceRange(startMin, startMax, dy);
+                    const { min, max } =
+                        dragModeRef.current === "pan"
+                            ? computePricePan(startMin, startMax, dy, height)
+                            : zoomPriceRange(startMin, startMax, dy);
                     setManualPriceRange(true);
                     setPriceRange(min, max);
                 };
 
                 const handleUp = () => {
+                    dragModeRef.current = "zoom";
                     window.removeEventListener("mousemove", handleMove);
                     window.removeEventListener("mouseup", handleUp);
                 };

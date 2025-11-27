@@ -9,6 +9,7 @@ import {
     xToTime,
     computeTimeWheelZoom,
     computeTimePan,
+    computePricePan,
 } from "./utils";
 import { MIN_CANDLE_WIDTH, MAX_CANDLE_WIDTH } from "./constants";
 import type { TimeFrame } from "../types";
@@ -181,22 +182,47 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         const initialStart = startTime;
         const initialEnd = endTime;
         const startX = e.clientX;
+        const initialMin = minPrice;
+        const initialMax = maxPrice;
+        const startY = e.clientY;
 
         const move = (ev: MouseEvent) => {
             const dx = ev.clientX - startX;
+            const dy = ev.clientY - startY;
 
-            const { start, end } = computeTimePan(
-                initialStart,
-                initialEnd,
-                dx,
-                width
-            );
+            let nextStart = initialStart;
+            let nextEnd = initialEnd;
 
-            if (rawCandleWidth >= MAX_CANDLE_WIDTH && dx < 0) {
-                return;
+            if (!(rawCandleWidth >= MAX_CANDLE_WIDTH && dx < 0) && width > 0) {
+                const { start, end } = computeTimePan(
+                    initialStart,
+                    initialEnd,
+                    dx,
+                    width
+                );
+                nextStart = start;
+                nextEnd = end;
             }
 
-            setTimeRange(start, end);
+            let nextMin = initialMin;
+            let nextMax = initialMax;
+            if (height > 0 && initialMax !== initialMin) {
+                const { min, max } = computePricePan(
+                    initialMin,
+                    initialMax,
+                    dy,
+                    height
+                );
+                nextMin = min;
+                nextMax = max;
+            }
+
+            setTimeRange(nextStart, nextEnd);
+
+            if (nextMin !== initialMin || nextMax !== initialMax) {
+                setManualPriceRange(true);
+                setPriceRange(nextMin, nextMax);
+            }
         };
 
         const up = () => {
@@ -317,7 +343,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
                                 bodyHeight={Math.abs(yOpen - yClose)}
                                 wickTop={yHigh}
                                 wickHeight={yLow - yHigh}
-                                color={c.close >= c.open ? "orange" : "white"}
+                                color={c.close >= c.open ? "#cf7b15" : "#c4c3c2"}
                             />
                         );
                     })}

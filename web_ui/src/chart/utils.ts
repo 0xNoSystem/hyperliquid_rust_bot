@@ -213,6 +213,27 @@ export function handleWheelZoom(
     };
 }
 
+// Pan price range vertically by translating the visible window
+export function computePricePan(
+    initialMin: number,
+    initialMax: number,
+    totalDy: number,
+    height: number
+) {
+    const range = initialMax - initialMin;
+    if (height <= 0 || range === 0) {
+        return { min: initialMin, max: initialMax };
+    }
+
+    const pricePerPixel = range / height;
+    const shift = totalDy * pricePerPixel;
+
+    return {
+        min: initialMin + shift,
+        max: initialMax + shift,
+    };
+}
+
 // Zoom time range with mouse wheel
 export function computeTimeWheelZoom(
     startTime: number,
