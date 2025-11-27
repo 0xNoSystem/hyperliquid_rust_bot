@@ -25,6 +25,7 @@ actix-cors = "0.6"
 alloy = { version = "1.0", default-features = false, features = [
   "signer-local",
 ] }
+reqwest = "0.12.24"
 
 
 

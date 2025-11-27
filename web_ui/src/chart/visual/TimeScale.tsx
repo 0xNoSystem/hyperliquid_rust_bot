@@ -69,6 +69,14 @@ const TimeScale: React.FC = () => {
             ? (candleDurationMs * width) / MAX_CANDLE_WIDTH
             : 0;
     const minZoomRange = Math.max(minRange, minRangeForMaxWidth);
+    const touchState = useRef<{
+        mode: "drag" | "pinch";
+        startX?: number;
+        startDistance?: number;
+        initialStart: number;
+        initialEnd: number;
+        anchorRatio?: number;
+    } | null>(null);
 
     const ref = useRef<SVGSVGElement>(null);
 
@@ -85,6 +93,101 @@ const TimeScale: React.FC = () => {
         crosshairX !== null
             ? xToTime(crosshairX, startTime, endTime, width)
             : null;
+
+    const beginTouchDrag = (touch: Touch) => {
+        touchState.current = {
+            mode: "drag",
+            startX: touch.clientX,
+            initialStart: startTime,
+            initialEnd: endTime,
+        };
+    };
+
+    const beginTouchPinch = (t1: Touch, t2: Touch) => {
+        const distance = Math.hypot(
+            t2.clientX - t1.clientX,
+            t2.clientY - t1.clientY
+        );
+        const rect = ref.current?.getBoundingClientRect();
+        const midX =
+            rect && width > 0
+                ? clamp(
+                      (t1.clientX + t2.clientX) / 2 - rect.left,
+                      0,
+                      width
+                  )
+                : width / 2;
+
+        touchState.current = {
+            mode: "pinch",
+            startDistance: Math.max(1, distance),
+            initialStart: startTime,
+            initialEnd: endTime,
+            anchorRatio: width > 0 ? midX / width : 0.5,
+        };
+    };
+
+    const onTouchStart = (e: React.TouchEvent) => {
+        if (e.touches.length === 1) {
+            beginTouchDrag(e.touches[0]);
+        } else if (e.touches.length >= 2) {
+            beginTouchPinch(e.touches[0], e.touches[1]);
+        }
+    };
+
+    const onTouchMove = (e: React.TouchEvent) => {
+        if (!touchState.current) return;
+
+        if (touchState.current.mode === "drag" && e.touches.length === 1) {
+            const state = touchState.current;
+            const dx = e.touches[0].clientX - (state.startX ?? 0);
+
+            const { start, end } = computeTimeDragZoom(
+                state.initialStart,
+                state.initialEnd,
+                dx
+            );
+
+            const newRange = end - start;
+            if (dx < 0 && newRange <= minZoomRange) return;
+
+            setTimeRange(start, end);
+            return;
+        }
+
+        if (touchState.current.mode === "pinch" && e.touches.length >= 2) {
+            const state = touchState.current;
+            const distance = Math.hypot(
+                e.touches[1].clientX - e.touches[0].clientX,
+                e.touches[1].clientY - e.touches[0].clientY
+            );
+            const initialRange = state.initialEnd - state.initialStart;
+            if (!state.startDistance || initialRange <= 0) return;
+
+            let newRange =
+                initialRange * (state.startDistance / Math.max(1, distance));
+            newRange = Math.max(minZoomRange, newRange);
+
+            const anchorRatio = state.anchorRatio ?? 0.5;
+            const anchorTime =
+                state.initialStart + anchorRatio * initialRange;
+            const newStart = anchorTime - anchorRatio * newRange;
+            const newEnd = newStart + newRange;
+
+            setTimeRange(newStart, newEnd);
+        }
+    };
+
+    const onTouchEnd = (e: React.TouchEvent) => {
+        if (e.touches.length === 1) {
+            beginTouchDrag(e.touches[0]);
+            return;
+        }
+
+        if (e.touches.length === 0) {
+            touchState.current = null;
+        }
+    };
 
     // --- Wheel zoom / horizontal pan ---
     const onWheel = (e: React.WheelEvent) => {
@@ -163,8 +266,31 @@ const TimeScale: React.FC = () => {
         return () => node.removeEventListener("wheel", blockScroll);
     }, []);
 
+    useEffect(() => {
+        const node = ref.current;
+        if (!node) return;
+
+        const blockTouch = (e: TouchEvent) => e.preventDefault();
+        node.addEventListener("touchstart", blockTouch, { passive: false });
+        node.addEventListener("touchmove", blockTouch, { passive: false });
+
+        return () => {
+            node.removeEventListener("touchstart", blockTouch);
+            node.removeEventListener("touchmove", blockTouch);
+        };
+    }, []);
+
     return (
-        <div className="pb-2" onWheel={onWheel} onMouseDown={onMouseDown}>
+        <div
+            className="pb-2"
+            style={{ touchAction: "none", overscrollBehavior: "contain" }}
+            onWheel={onWheel}
+            onMouseDown={onMouseDown}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onTouchCancel={onTouchEnd}
+        >
             <svg
                 ref={ref}
                 width={width}

@@ -33,7 +33,7 @@ const Candle: React.FC<CandleProps> = ({
                 x2={centerX}
                 y2={wickTop + wickHeight}
                 stroke={color}
-                strokeWidth={1}
+                strokeWidth={ (width / 2 <= 1) ? 0.2 : 1}
             />
 
             {/* Body */}

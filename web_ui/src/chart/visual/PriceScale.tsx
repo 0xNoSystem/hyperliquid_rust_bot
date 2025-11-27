@@ -31,6 +31,13 @@ const PriceScale: React.FC = () => {
 
     const svgRef = useRef<SVGSVGElement>(null);
     const dragModeRef = useRef<"zoom" | "pan">("zoom");
+    const touchState = useRef<{
+        mode: "zoom" | "pinch";
+        startY: number;
+        startDistance?: number;
+        initialMin: number;
+        initialMax: number;
+    } | null>(null);
     useEffect(() => {
         const node = svgRef.current;
         if (!node) return;
@@ -42,6 +49,20 @@ const PriceScale: React.FC = () => {
         node.addEventListener("wheel", blockScroll, { passive: false });
 
         return () => node.removeEventListener("wheel", blockScroll);
+    }, []);
+
+    useEffect(() => {
+        const node = svgRef.current;
+        if (!node) return;
+
+        const blockTouch = (e: TouchEvent) => e.preventDefault();
+        node.addEventListener("touchstart", blockTouch, { passive: false });
+        node.addEventListener("touchmove", blockTouch, { passive: false });
+
+        return () => {
+            node.removeEventListener("touchstart", blockTouch);
+            node.removeEventListener("touchmove", blockTouch);
+        };
     }, []);
 
     const levels = 12;
@@ -57,6 +78,83 @@ const PriceScale: React.FC = () => {
         crosshairY !== null
             ? yToPrice(crosshairY, minPrice, maxPrice, height)
             : null;
+
+    const onTouchStart = (e: React.TouchEvent) => {
+        if (e.touches.length === 1) {
+            touchState.current = {
+                mode: "zoom",
+                startY: e.touches[0].clientY,
+                initialMin: minPrice,
+                initialMax: maxPrice,
+            };
+        } else if (e.touches.length >= 2) {
+            const distance = Math.hypot(
+                e.touches[1].clientX - e.touches[0].clientX,
+                e.touches[1].clientY - e.touches[0].clientY
+            );
+            touchState.current = {
+                mode: "pinch",
+                startY: 0,
+                startDistance: Math.max(1, distance),
+                initialMin: minPrice,
+                initialMax: maxPrice,
+            };
+        }
+    };
+
+    const onTouchMove = (e: React.TouchEvent) => {
+        if (!touchState.current) return;
+
+        const state = touchState.current;
+
+        if (state.mode === "zoom" && e.touches.length === 1) {
+            const dy = e.touches[0].clientY - state.startY;
+            const { min, max } = zoomPriceRange(
+                state.initialMin,
+                state.initialMax,
+                dy
+            );
+            setManualPriceRange(true);
+            setPriceRange(min, max);
+            return;
+        }
+
+        if (state.mode === "pinch" && e.touches.length >= 2) {
+            const distance = Math.hypot(
+                e.touches[1].clientX - e.touches[0].clientX,
+                e.touches[1].clientY - e.touches[0].clientY
+            );
+            if (!state.startDistance) return;
+
+            const initialRange = state.initialMax - state.initialMin;
+            if (initialRange <= 0) return;
+
+            const scale = state.startDistance / Math.max(1, distance);
+            const newRange = Math.max(0.000001, initialRange * scale);
+            const center = (state.initialMin + state.initialMax) / 2;
+            const min = center - newRange / 2;
+            const max = center + newRange / 2;
+
+            setManualPriceRange(true);
+            setPriceRange(min, max);
+        }
+    };
+
+    const onTouchEnd = (e: React.TouchEvent) => {
+        if (e.touches.length === 1) {
+            touchState.current = {
+                mode: "zoom",
+                startY: e.touches[0].clientY,
+                initialMin: minPrice,
+                initialMax: maxPrice,
+            };
+            return;
+        }
+
+        if (e.touches.length === 0) {
+            touchState.current = null;
+        }
+    };
 
     const onWheel = (e: React.WheelEvent) => {
         e.stopPropagation();
@@ -83,9 +181,13 @@ const PriceScale: React.FC = () => {
         <svg
             width={100}
             height={height}
-            style={{ overflow: "visible" }}
+            style={{ overflow: "visible", touchAction: "none", overscrollBehavior: "contain" }}
             ref={svgRef}
             onWheel={onWheel}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onTouchCancel={onTouchEnd}
             onMouseDown={(e) => {
                 e.preventDefault();
 

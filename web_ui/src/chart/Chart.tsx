@@ -48,6 +48,18 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
 
     const containerRef = useRef<HTMLDivElement>(null);
     const [localSize, setLocalSize] = useState({ width: 0, height: 0 });
+    const touchState = useRef<{
+        mode: "pan" | "pinch";
+        touchId?: number;
+        startX: number;
+        startY: number;
+        initialStart: number;
+        initialEnd: number;
+        initialMin: number;
+        initialMax: number;
+        startDistance?: number;
+        anchorRatio?: number;
+    } | null>(null);
 
     // ------------------------------------------------------------
     // Set TF + interval mode
@@ -135,6 +147,23 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         node.addEventListener("wheel", block, { passive: false });
 
         return () => node.removeEventListener("wheel", block);
+    }, []);
+
+    // ------------------------------------------------------------
+    // Block native touch scrolling within chart area
+    // ------------------------------------------------------------
+    useEffect(() => {
+        const node = containerRef.current;
+        if (!node) return;
+
+        const blockTouch = (e: TouchEvent) => e.preventDefault();
+        node.addEventListener("touchstart", blockTouch, { passive: false });
+        node.addEventListener("touchmove", blockTouch, { passive: false });
+
+        return () => {
+            node.removeEventListener("touchstart", blockTouch);
+            node.removeEventListener("touchmove", blockTouch);
+        };
     }, []);
 
     // ------------------------------------------------------------
@@ -290,12 +319,191 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     );
 
     // ------------------------------------------------------------
+    // Touch zoom constraints
+    // ------------------------------------------------------------
+    const candleDurationMs = useMemo(() => {
+        if (visibleCandles.length > 0) {
+            const duration = visibleCandles[0].end - visibleCandles[0].start;
+            return duration || 1;
+        }
+        return 0;
+    }, [visibleCandles]);
+
+    const minTimeRangeForMaxWidth = useMemo(() => {
+        if (width <= 0 || candleDurationMs <= 0) return 0;
+        return (candleDurationMs * width) / MAX_CANDLE_WIDTH;
+    }, [width, candleDurationMs]);
+
+    const minTimeRange = useMemo(() => {
+        const base = candleDurationMs || 1;
+        const clampRange = minTimeRangeForMaxWidth || 0;
+        return Math.max(1, base, clampRange);
+    }, [candleDurationMs, minTimeRangeForMaxWidth]);
+
+    // ------------------------------------------------------------
+    // Touch interactions (pan + pinch zoom)
+    // ------------------------------------------------------------
+    const startTouchPan = (touch: Touch) => {
+        touchState.current = {
+            mode: "pan",
+            touchId: touch.identifier,
+            startX: touch.clientX,
+            startY: touch.clientY,
+            initialStart: startTime,
+            initialEnd: endTime,
+            initialMin: minPrice,
+            initialMax: maxPrice,
+        };
+    };
+
+    const startTouchPinch = (t1: Touch, t2: Touch) => {
+        const distance = Math.hypot(
+            t2.clientX - t1.clientX,
+            t2.clientY - t1.clientY
+        );
+
+        const rect = containerRef.current?.getBoundingClientRect();
+        const centerX =
+            rect && width > 0
+                ? Math.min(
+                      Math.max((t1.clientX + t2.clientX) / 2 - rect.left, 0),
+                      rect.width
+                  )
+                : width / 2;
+
+        const anchorRatio =
+            width > 0 ? Math.min(Math.max(centerX / width, 0), 1) : 0.5;
+
+        touchState.current = {
+            mode: "pinch",
+            startDistance: Math.max(1, distance),
+            anchorRatio,
+            startX: (t1.clientX + t2.clientX) / 2,
+            startY: (t1.clientY + t2.clientY) / 2,
+            initialStart: startTime,
+            initialEnd: endTime,
+            initialMin: minPrice,
+            initialMax: maxPrice,
+        };
+    };
+
+    const onTouchStart = (e: React.TouchEvent) => {
+        e.stopPropagation();
+        if (e.touches.length === 1) {
+            startTouchPan(e.touches[0]);
+        } else if (e.touches.length >= 2) {
+            startTouchPinch(e.touches[0], e.touches[1]);
+        }
+    };
+
+    const onTouchMove = (e: React.TouchEvent) => {
+        e.stopPropagation();
+        if (!touchState.current) {
+            if (e.touches.length === 1) startTouchPan(e.touches[0]);
+            else if (e.touches.length >= 2)
+                startTouchPinch(e.touches[0], e.touches[1]);
+        }
+        if (!touchState.current) return;
+
+        if (touchState.current.mode === "pan" && e.touches.length === 1) {
+            const state = touchState.current;
+            const touch =
+                Array.from(e.touches).find(
+                    (t) => t.identifier === state.touchId
+                ) || e.touches[0];
+
+            const dx = touch.clientX - state.startX;
+            const dy = touch.clientY - state.startY;
+
+            let nextStart = state.initialStart;
+            let nextEnd = state.initialEnd;
+
+            if (!(rawCandleWidth >= MAX_CANDLE_WIDTH && dx < 0) && width > 0) {
+                const { start, end } = computeTimePan(
+                    state.initialStart,
+                    state.initialEnd,
+                    dx,
+                    width
+                );
+                nextStart = start;
+                nextEnd = end;
+            }
+
+            let nextMin = state.initialMin;
+            let nextMax = state.initialMax;
+            if (height > 0 && nextMax !== nextMin) {
+                const { min, max } = computePricePan(
+                    state.initialMin,
+                    state.initialMax,
+                    dy,
+                    height
+                );
+                nextMin = min;
+                nextMax = max;
+            }
+
+            setTimeRange(nextStart, nextEnd);
+
+            if (nextMin !== state.initialMin || nextMax !== state.initialMax) {
+                setManualPriceRange(true);
+                setPriceRange(nextMin, nextMax);
+            }
+            return;
+        }
+
+        if (e.touches.length >= 2) {
+            const [t1, t2] = [e.touches[0], e.touches[1]];
+            if (touchState.current.mode !== "pinch") {
+                startTouchPinch(t1, t2);
+                return;
+            }
+
+            const state = touchState.current;
+            const distance = Math.hypot(
+                t2.clientX - t1.clientX,
+                t2.clientY - t1.clientY
+            );
+            const initialRange = state.initialEnd - state.initialStart;
+            if (!state.startDistance || initialRange <= 0) return;
+
+            let newRange =
+                initialRange * (state.startDistance / Math.max(1, distance));
+            newRange = Math.max(minTimeRange, newRange);
+
+            const anchorRatio = state.anchorRatio ?? 0.5;
+            const anchorTime =
+                state.initialStart + anchorRatio * initialRange;
+            const newStart = anchorTime - anchorRatio * newRange;
+            const newEnd = newStart + newRange;
+
+            setTimeRange(newStart, newEnd);
+        }
+    };
+
+    const onTouchEnd = (e: React.TouchEvent) => {
+        e.stopPropagation();
+        if (e.touches.length === 1) {
+            startTouchPan(e.touches[0]);
+            return;
+        }
+
+        if (e.touches.length === 0) {
+            touchState.current = null;
+        }
+    };
+
+    // ------------------------------------------------------------
     return (
         <div
             ref={containerRef}
             className="relative flex-1 cursor-crosshair"
+            style={{ touchAction: "none", overscrollBehavior: "contain" }}
             onWheel={onWheel}
             onMouseDown={onMouseDown}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onTouchCancel={onTouchEnd}
         >
             <svg
                 width={localSize.width}
