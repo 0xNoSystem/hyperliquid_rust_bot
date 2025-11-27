@@ -136,6 +136,12 @@ function collectCachedCandles(
     return { cached, missing };
 }
 
+function cacheToArray(tfCache: Map<number, CandleData>, asset: string) {
+    return Array.from(tfCache.values())
+        .filter((c) => c.asset === asset)
+        .sort((a, b) => a.start - b.start);
+}
+
 function buildCustomRangeISO(
     startParts: CustomDateParts,
     endParts: CustomDateParts
@@ -163,7 +169,8 @@ async function loadCandles(
     startMs: number,
     endMs: number,
     asset: string,
-    updatePrev: (a: number, b: number) => void
+    updatePrev: (a: number, b: number) => void,
+    setCached?: (c: CandleData[]) => void
 ): Promise<CandleData[]> {
     if (!asset) return [];
 
@@ -193,6 +200,10 @@ async function loadCandles(
         normalizedEnd,
         candleIntervalMs
     );
+    const fullCache = cacheToArray(tfCache, asset);
+    if (setCached) {
+        setCached(fullCache);
+    }
 
     console.log(
         `%c[LOAD CANDLES] TF=${tf}, Expected=${expectedCandles}, Cached=${cached.length}`,
@@ -202,7 +213,7 @@ async function loadCandles(
     // Serve straight from cache when we already have full coverage
     if (missing.length === 0 && cached.length > 0) {
         updatePrev(rangeStart, rangeEnd);
-        return cached;
+        return fullCache;
     }
 
     try {
@@ -220,21 +231,10 @@ async function loadCandles(
         }
     } catch (err) {
         console.error("Failed to fetch candles", err);
-        return [];
+        return fullCache;
     }
 
-    const merged: CandleData[] = [];
-
-    for (let ts = normalizedStart; ts < normalizedEnd; ts += candleIntervalMs) {
-        const candle = tfCache.get(ts);
-        if (candle && candle.asset === asset) {
-            merged.push(candle);
-        }
-    }
-
-    if (merged.length === 0) {
-        return [];
-    }
+    const merged = cacheToArray(tfCache, asset);
 
     updatePrev(rangeStart, rangeEnd);
     return merged;
@@ -399,7 +399,8 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                 startTime,
                 endTime,
                 routeAsset,
-                updatePrevTimeRange
+                updatePrevTimeRange,
+                setCandleData
             );
             setCandleData(data);
         })();
@@ -418,7 +419,8 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                 startTime,
                 endTime,
                 routeAsset,
-                updatePrevTimeRange
+                updatePrevTimeRange,
+                setCandleData
             );
             setCandleData(data);
         })();
@@ -438,7 +440,8 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                     startTime,
                     endTime,
                     routeAsset,
-                    updatePrevTimeRange
+                    updatePrevTimeRange,
+                    setCandleData
                 );
                 setCandleData(data);
             })();
@@ -605,7 +608,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                             <button
                                 className={`rounded border px-3 py-1 text-sm font-semibold transition ${canFill ? "border-orange-500 text-orange-400" : "border-white/40 text-white/70"}`}
                             >
-                            NIGGER
+                                Fill
                             </button>
                         </div>
                     </div>

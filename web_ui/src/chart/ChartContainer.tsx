@@ -39,9 +39,8 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
 
     // Load candle data into context
     useEffect(() => {
-        if (candleData && candleData.length > 0) {
-            setCandles(candleData);
-        }
+        if (!candleData) return;
+        setCandles(candleData);
     }, [candleData, setCandles]);
 
     // Track right panel width (needed for bottom preview)
