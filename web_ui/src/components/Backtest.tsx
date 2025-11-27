@@ -111,11 +111,7 @@ function collectCachedCandles(
 
     let gapStart: number | null = null;
 
-    for (
-        let ts = normalizedStart;
-        ts < normalizedEnd;
-        ts += candleIntervalMs
-    ) {
+    for (let ts = normalizedStart; ts < normalizedEnd; ts += candleIntervalMs) {
         const candle = tfCache.get(ts);
 
         if (candle && candle.asset === asset) {
@@ -174,8 +170,11 @@ async function loadCandles(
 ): Promise<CandleData[]> {
     if (!asset) return [];
 
-    let rangeStart = startMs;
-    let rangeEnd = endMs;
+    const candleIntervalMs = TF_TO_MS[tf];
+    const prefetchBuffer = 200 * candleIntervalMs;
+
+    let rangeStart = Math.max(0, startMs - prefetchBuffer);
+    let rangeEnd = endMs + prefetchBuffer;
 
     // Fallback to recent window if range is invalid
     if (!rangeStart || !rangeEnd || rangeEnd <= rangeStart) {
@@ -183,7 +182,6 @@ async function loadCandles(
         rangeStart = rangeEnd - 30 * 24 * 60 * 60 * 1000;
     }
 
-    const candleIntervalMs = TF_TO_MS[tf];
     const { normalizedStart, normalizedEnd } = normalizeRange(
         rangeStart,
         rangeEnd,
@@ -215,16 +213,13 @@ async function loadCandles(
         updatePrev(rangeStart, rangeEnd);
         return fullCache;
     }
-    const prefetchBuffer = 200 * candleIntervalMs;
 
     try {
         for (const segment of missing) {
-            const paddedStart = Math.max(segment.start - prefetchBuffer, 0);
-            const paddedEnd = Math.max(segment.end + prefetchBuffer, 0);
             const data = await fetchCandles(
                 asset,
-                paddedStart,
-                paddedEnd,
+                segment.start,
+                segment.end,
                 fromTimeFrame(tf)
             );
 
@@ -334,7 +329,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
 
         if (preset !== "CUSTOM") {
             applyPresetTimeRange(preset);
-        } 
+        }
     };
 
     const startDayOptions = getDaysInMonth(
@@ -408,7 +403,6 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         })();
     }, []);
 
-
     // Auto-reload candles when TF, toggle, or date inputs change
     useEffect(() => {
         if (!routeAsset) return;
@@ -432,7 +426,11 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         if (!routeAsset) return;
         if (startTime <= 0 || endTime <= startTime) return;
         if (timeframeChangingRef.current) return;
-        if (startTime > prevStartTime && (endTime < prevEndTime || prevEndTime > Date.now())) return;
+        if (
+            startTime > prevStartTime &&
+            (endTime < prevEndTime || prevEndTime > Date.now())
+        )
+            return;
 
         const timer = setTimeout(() => {
             (async () => {
@@ -607,10 +605,8 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                             </div>
                         )}
                         <div className="ml-auto">
-                            <button
-                                className="rounded border px-3 py-1 text-sm font-semibold transition border-orange-500 text-orange-400"
-                            >
-                                KWANT 
+                            <button className="rounded border border-orange-500 px-3 py-1 text-sm font-semibold text-orange-400 transition">
+                                KWANT
                             </button>
                         </div>
                     </div>

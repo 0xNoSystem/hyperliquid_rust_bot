@@ -20,8 +20,15 @@ const Header: React.FC = () => (
                     </div>
                 </div>
             </Link>
+           
 
             <div className="flex items-center gap-2">
+            
+             <Link to="/backtest/BTC">
+                    <div className="relative right-20 rounded w-fit border border-orange-500 px-3 py-1 text-md font-semibold text-orange-400">
+                    {">>> BACKTESTING (BETA)"}
+                    </div>
+                </Link>
                 <a
                     href="https://app.hyperliquid.xyz"
                     target="_blank"

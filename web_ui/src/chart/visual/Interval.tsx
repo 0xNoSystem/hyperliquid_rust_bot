@@ -5,8 +5,6 @@ import { timeToX } from "../utils";
 const MIN_WINDOW_RATIO = 0.04; // 2% of visible range
 const MIN_WINDOW_MS = 60 * 1000; // 1 minute fallback
 
-
-
 const clamp = (value: number, min: number, max: number) => {
     return Math.min(Math.max(value, min), max);
 };

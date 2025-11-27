@@ -250,4 +250,3 @@ export function computeTimePan(
         end: initialEnd - shift,
     };
 }
-
