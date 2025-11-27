@@ -215,13 +215,16 @@ async function loadCandles(
         updatePrev(rangeStart, rangeEnd);
         return fullCache;
     }
+    const prefetchBuffer = 200 * candleIntervalMs;
 
     try {
         for (const segment of missing) {
+            const paddedStart = Math.max(segment.start - prefetchBuffer, 0);
+            const paddedEnd = Math.max(segment.end + prefetchBuffer, 0);
             const data = await fetchCandles(
                 asset,
-                segment.start,
-                segment.end,
+                paddedStart,
+                paddedEnd,
                 fromTimeFrame(tf)
             );
 
@@ -264,7 +267,6 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         setPrevStartTime(newStart);
         setPrevEndTime(newEnd);
     };
-    const [canFill, setCanFill] = useState(true);
 
     const [timeframe, setTimeframe] = useState<TimeFrame>("hour4");
     const [intervalOn, setIntervalOn] = useState(false);
@@ -606,9 +608,9 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         )}
                         <div className="ml-auto">
                             <button
-                                className={`rounded border px-3 py-1 text-sm font-semibold transition ${canFill ? "border-orange-500 text-orange-400" : "border-white/40 text-white/70"}`}
+                                className="rounded border px-3 py-1 text-sm font-semibold transition border-orange-500 text-orange-400"
                             >
-                                Fill
+                                KWANT 
                             </button>
                         </div>
                     </div>
