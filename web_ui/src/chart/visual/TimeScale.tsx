@@ -63,6 +63,12 @@ const TimeScale: React.FC = () => {
     } = useChartContext();
 
     const minRange = timeframe ? (TF_TO_MS[timeframe] ?? 1) : 1;
+    const candleDurationMs = timeframe ? (TF_TO_MS[timeframe] ?? 0) : 0;
+    const minRangeForMaxWidth =
+        width > 0 && candleDurationMs > 0
+            ? (candleDurationMs * width) / MAX_CANDLE_WIDTH
+            : 0;
+    const minZoomRange = Math.max(minRange, minRangeForMaxWidth);
 
     const ref = useRef<SVGSVGElement>(null);
 
@@ -79,10 +85,6 @@ const TimeScale: React.FC = () => {
         crosshairX !== null
             ? xToTime(crosshairX, startTime, endTime, width)
             : null;
-
-    const pxPerMs = width > 0 ? width / Math.max(1, endTime - startTime) : 0;
-    const candleDurationMs = timeframe ? (TF_TO_MS[timeframe] ?? 0) : 0;
-    const candleWidthEstimate = pxPerMs * candleDurationMs;
 
     // --- Wheel zoom / horizontal pan ---
     const onWheel = (e: React.WheelEvent) => {
@@ -111,11 +113,8 @@ const TimeScale: React.FC = () => {
             e.deltaY
         );
 
-        if (
-            e.deltaY < 0 &&
-            (end - start < minRange || candleWidthEstimate >= MAX_CANDLE_WIDTH)
-        )
-            return;
+        const newRange = end - start;
+        if (e.deltaY < 0 && newRange <= minZoomRange) return;
 
         setTimeRange(start, end);
     };
@@ -138,12 +137,8 @@ const TimeScale: React.FC = () => {
                 totalDx
             );
 
-            if (
-                totalDx < 0 &&
-                (end - start < minRange ||
-                    candleWidthEstimate >= MAX_CANDLE_WIDTH)
-            )
-                return;
+            const newRange = end - start;
+            if (totalDx < 0 && newRange <= minZoomRange) return;
 
             setTimeRange(start, end);
         };

@@ -141,8 +141,8 @@ export const TIMEFRAME_CAMELCASE: Record<string, TimeFrame> = {
     "12h": "hour12",
     "1d": "day1",
     "3d": "day3",
-    w: "week",
-    m: "month",
+    "1w": "week",
+    "1M": "month",
 };
 
 const TIMEFRAME_SHORT: Record<TimeFrame, string> = Object.entries(

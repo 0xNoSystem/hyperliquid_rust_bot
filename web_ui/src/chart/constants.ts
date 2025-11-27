@@ -1,2 +1,2 @@
-export const MIN_CANDLE_WIDTH = 3;
-export const MAX_CANDLE_WIDTH = 40;
+export const MIN_CANDLE_WIDTH = 1;
+export const MAX_CANDLE_WIDTH = 1000;

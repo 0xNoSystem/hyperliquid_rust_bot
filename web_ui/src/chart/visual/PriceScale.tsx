@@ -48,8 +48,8 @@ const PriceScale: React.FC = () => {
     const step = (maxPrice - minPrice) / (levels - 1);
 
     const prices = Array.from({ length: levels }, (_, i) => {
-        const price = minPrice + i * step * 0.95;
-        const y = priceToY(price, minPrice, maxPrice, height) * 0.95;
+        const price = minPrice + i * step ;
+        const y = priceToY(price, minPrice, maxPrice, height);
         return { price, y };
     });
 

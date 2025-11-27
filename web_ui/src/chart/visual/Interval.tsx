@@ -160,7 +160,7 @@ const IntervalOverlay: React.FC = () => {
     return (
         <div className="pointer-events-none absolute inset-0">
             <div
-                className="pointer-events-auto absolute top-0 flex h-full cursor-grab items-stretch border-2 border-orange-400/60 bg-orange-500/15"
+                className="pointer-events-auto absolute top-0 flex h-full cursor-grab items-stretch border-2 border-b-0 border-orange-400/60 bg-orange-500/15"
                 style={{ left, width: overlayWidth }}
                 onMouseDown={beginDrag("move")}
             >
