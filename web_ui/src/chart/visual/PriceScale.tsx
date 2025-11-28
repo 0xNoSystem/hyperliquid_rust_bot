@@ -9,9 +9,10 @@ import {
 } from "../utils";
 
 const formatPrice = (n: number) => {
-    if (n > 1 && n < 2) return n.toFixed(4);
-    if (n < 1) return n.toFixed(6);
-    if (n > 10000) return Number(n.toFixed(0)).toLocaleString("en-US");
+    const abs = Math.abs(n);
+    if (abs > 1 && abs < 2) return n.toFixed(4);
+    if (abs < 1) return n.toFixed(6);
+    if (abs > 10000) return Number(n.toFixed(0)).toLocaleString("en-US");
     return Number(n.toFixed(2)).toLocaleString("en-US");
 };
 
@@ -177,9 +178,13 @@ const PriceScale: React.FC = () => {
         setPriceRange(min, max);
     };
 
+    const fontSize = Math.max(10, Math.min(16, height * 0.06));
+    const labelWidth = Math.max(65, Math.min(150, width * 0.07));
+    console.log(labelWidth);
+
     return (
         <svg
-            width={100}
+            width={labelWidth}
             height={height}
             style={{ overflow: "visible", touchAction: "none", overscrollBehavior: "contain" }}
             ref={svgRef}
@@ -235,10 +240,10 @@ const PriceScale: React.FC = () => {
                         key={idx}
                         x={65}
                         y={p.y}
-                        textAnchor="end"
+                        textAnchor="middle"
                         alignmentBaseline="middle"
                         fill="#aaa"
-                        fontSize={14}
+                        fontSize={fontSize}
                     >
                         {formatPrice(p.price)}
                     </text>
@@ -264,10 +269,10 @@ const PriceScale: React.FC = () => {
                     <text
                         x={65}
                         y={crosshairY}
-                        textAnchor="end"
+                        textAnchor="middle"
                         alignmentBaseline="middle"
                         fill="white"
-                        fontSize={12}
+                        fontSize={fontSize + 1}
                         fontWeight="bold"
                     >
                         {formatPrice(crosshairPrice)}
@@ -279,3 +284,5 @@ const PriceScale: React.FC = () => {
 };
 
 export default PriceScale;
+
+

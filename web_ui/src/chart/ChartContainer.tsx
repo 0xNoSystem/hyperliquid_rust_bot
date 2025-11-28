@@ -86,7 +86,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
     }, [selectingInterval, crosshairX, width, startTime, endTime, candles]);
 
     return (
-        <div className="flex h-full flex-1 flex-col overflow-hidden">
+        <div className="flex h-full max-h-[60vh] flex-1 flex-col overflow-hidden">
             {/* MAIN ROW */}
             <div className="flex h-full w-full flex-1">
                 {/* LEFT: CHART */}
@@ -115,7 +115,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
 
             {/* BOTTOM TIME SCALE */}
             <div className="flex bg-black/20 text-white">
-                <div className="flex-1 cursor-w-resize">
+                <div className="flex-1 cursor-w-resize overflow-hidden">
                     <TimeScale />
                 </div>
 

@@ -27,7 +27,7 @@ interface ChartContextState {
     intervalStartX: number | null;
     intervalEndX: number | null;
 
-    mouseOnChart: bool;
+    mouseOnChart: boolean;
 }
 
 interface ChartContextActions {
@@ -47,7 +47,7 @@ interface ChartContextActions {
     setIntervalStartX: (x: number | null) => void;
     setIntervalEndX: (x: number | null) => void;
 
-    setMouseOnChart: (y: bool) => void;
+    setMouseOnChart: (y: boolean) => void;
 }
 
 export default function ChartProvider({ children }) {

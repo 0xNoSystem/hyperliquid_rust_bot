@@ -451,7 +451,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     }, [startTime, endTime, routeAsset, intervalOn]);
 
     return (
-        <div className="flex h-full flex-col bg-black/70 pb-50">
+        <div className="flex flex-1 flex-col bg-black/70 pb-50">
             {/* Title */}
             <h1 className="mt-6 p-2 text-center text-3xl font-bold tracking-widest">
                 STRATEGY LAB
@@ -465,7 +465,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                 </div>
 
                 {/* CHART (middle) */}
-                <div className="mb-30 flex min-h-[70vh] w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 bg-white/10 p-4 tracking-widest">
+                <div className="mb-30 flex min-h-fit h-[70vh] w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 bg-white/10 p-4 tracking-widest">
                     {/* Toggle + Dates */}
                     <div className="flex flex-wrap items-center gap-4 p-4 pl-1">
                         {/* Toggle Button */}

@@ -80,7 +80,7 @@ const TimeScale: React.FC = () => {
 
     const ref = useRef<SVGSVGElement>(null);
 
-    const ticks = 12;
+    const ticks = Math.round(width / 200);
     const step = (endTime - startTime) / (ticks - 1);
 
     const times = Array.from({ length: ticks }, (_, i) => {
