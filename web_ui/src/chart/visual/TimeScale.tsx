@@ -280,6 +280,8 @@ const TimeScale: React.FC = () => {
         };
     }, []);
 
+    const fontSize = Math.max(10, Math.min(16, height * 0.06));
+
     return (
         <div
             className="pb-2"
@@ -314,7 +316,7 @@ const TimeScale: React.FC = () => {
                             y={20}
                             textAnchor="middle"
                             fill="#aaa"
-                            fontSize={11}
+                            fontSize={fontSize}
                         >
                             {formatUTC(p.t)}
                         </text>
@@ -329,8 +331,8 @@ const TimeScale: React.FC = () => {
                             <rect
                                 x={crosshairX - 60}
                                 y={0}
-                                width={120}
-                                height={18}
+                                width={140}
+                                height={22}
                                 fill="#2a2a2a"
                                 stroke="#ffffff44"
                                 strokeWidth={1}
@@ -341,7 +343,7 @@ const TimeScale: React.FC = () => {
                                 y={13}
                                 textAnchor="middle"
                                 fill="white"
-                                fontSize={12}
+                                fontSize={fontSize}
                                 fontWeight="bold"
                             >
                                 {formatUTC(crosshairTime)}

@@ -115,7 +115,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
 
             {/* BOTTOM TIME SCALE */}
             <div className="flex bg-black/20 text-white">
-                <div className="flex-1 cursor-w-resize overflow-hidden">
+                <div className="flex-1 cursor-w-resize">
                     <TimeScale />
                 </div>
 

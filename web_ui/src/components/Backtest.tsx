@@ -248,7 +248,6 @@ type BacktestContentProps = {
 function BacktestContent({ routeAsset }: BacktestContentProps) {
     const { startTime, endTime, setTimeRange } = useChartContext();
 
-    const timeframeChangingRef = useRef(false);
     const defaultStartParts = useMemo(
         () => dateToParts(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
         []
@@ -374,63 +373,16 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         customEndParts,
         committedEndParts,
     ]);
-    useEffect(() => {
-        timeframeChangingRef.current = true;
-
-        const t = setTimeout(() => {
-            timeframeChangingRef.current = false;
-        }, 400);
-
-        return () => clearTimeout(t);
-    }, [timeframe]);
 
     useEffect(() => {
         if (rangePreset !== "CUSTOM") {
             applyPresetTimeRange(rangePreset);
         }
-
-        (async () => {
-            const data = await loadCandles(
-                timeframe,
-                intervalOn,
-                startTime,
-                endTime,
-                routeAsset,
-                updatePrevTimeRange,
-                setCandleData
-            );
-            setCandleData(data);
-        })();
     }, []);
 
-    // Auto-reload candles when TF, toggle, or date inputs change
     useEffect(() => {
         if (!routeAsset) return;
         if (startTime <= 0 || endTime <= startTime) return;
-
-        (async () => {
-            const data = await loadCandles(
-                timeframe,
-                intervalOn,
-                startTime,
-                endTime,
-                routeAsset,
-                updatePrevTimeRange,
-                setCandleData
-            );
-            setCandleData(data);
-        })();
-    }, [timeframe, intervalOn, routeAsset]);
-
-    useEffect(() => {
-        if (!routeAsset) return;
-        if (startTime <= 0 || endTime <= startTime) return;
-        if (timeframeChangingRef.current) return;
-        if (
-            startTime > prevStartTime &&
-            (endTime < prevEndTime || prevEndTime > Date.now())
-        )
-            return;
 
         const timer = setTimeout(() => {
             (async () => {
@@ -445,10 +397,10 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                 );
                 setCandleData(data);
             })();
-        }, 300);
+        }, 200);
 
         return () => clearTimeout(timer);
-    }, [startTime, endTime, routeAsset, intervalOn]);
+    }, [startTime, endTime, timeframe, intervalOn, routeAsset]);
 
     return (
         <div className="flex flex-1 flex-col bg-black/70 pb-50">

@@ -1,5 +1,10 @@
-import React, { useRef, useEffect, useState, useMemo } from "react";
-import Candle from "./visual/Candle";
+import React, {
+    useRef,
+    useEffect,
+    useState,
+    useMemo,
+    useCallback,
+} from "react";
 import CrossHair from "./visual/CrossHair";
 import { useChartContext } from "./ChartContext";
 
@@ -13,11 +18,235 @@ import {
 } from "./utils";
 import { MIN_CANDLE_WIDTH, MAX_CANDLE_WIDTH } from "./constants";
 import type { TimeFrame } from "../types";
+import type { CandleData } from "./utils";
 
 export interface ChartProps {
     asset: string;
     tf: TimeFrame;
     settingInterval: boolean;
+}
+
+type CandleCanvasProps = {
+    width: number;
+    height: number;
+    candles: CandleData[];
+    startTime: number;
+    endTime: number;
+    minPrice: number;
+    maxPrice: number;
+    candleWidth: number;
+    className?: string;
+    onMouseMove?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
+    onMouseEnter?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
+    onMouseLeave?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
+};
+
+const CandleCanvas: React.FC<CandleCanvasProps> = ({
+    width,
+    height,
+    candles,
+    startTime,
+    endTime,
+    minPrice,
+    maxPrice,
+    candleWidth,
+    className,
+    onMouseMove,
+    onMouseEnter,
+    onMouseLeave,
+}) => {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const rafRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const cssWidth = Math.max(0, width);
+        const cssHeight = Math.max(0, height);
+        if (cssWidth === 0 || cssHeight === 0) {
+            canvas.width = 0;
+            canvas.height = 0;
+            return;
+        }
+
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
+
+        const targetWidth = Math.floor(cssWidth * dpr);
+        const targetHeight = Math.floor(cssHeight * dpr);
+
+        if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+        }
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        const draw = () => {
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+            if (candles.length === 0) return;
+            if (endTime <= startTime) return;
+
+            const upColor = "#cf7b15";
+            const downColor = "#c4c3c2";
+            const wickWidth = candleWidth / 2 <= 1 ? 0.2 : 1;
+
+            const drawWicks = (isUp: boolean, color: string) => {
+                ctx.beginPath();
+                for (let i = 0; i < candles.length; i++) {
+                    const cd = candles[i];
+                    if ((cd.close >= cd.open) !== isUp) continue;
+
+                    const centerX =
+                        timeToX(cd.start, startTime, endTime, cssWidth) +
+                        candleWidth / 2;
+                    const lineX = Math.round(centerX) + 0.5;
+                    const yHigh = priceToY(
+                        cd.high,
+                        minPrice,
+                        maxPrice,
+                        cssHeight
+                    );
+                    const yLow = priceToY(
+                        cd.low,
+                        minPrice,
+                        maxPrice,
+                        cssHeight
+                    );
+
+                    ctx.moveTo(lineX, yHigh);
+                    ctx.lineTo(lineX, yLow);
+                }
+                ctx.lineWidth = wickWidth;
+                ctx.strokeStyle = color;
+                ctx.stroke();
+            };
+
+            const drawBodies = (isUp: boolean, color: string) => {
+                ctx.fillStyle = color;
+                for (let i = 0; i < candles.length; i++) {
+                    const cd = candles[i];
+                    if ((cd.close >= cd.open) !== isUp) continue;
+
+                    const x = timeToX(cd.start, startTime, endTime, cssWidth);
+                    const yOpen = priceToY(
+                        cd.open,
+                        minPrice,
+                        maxPrice,
+                        cssHeight
+                    );
+                    const yClose = priceToY(
+                        cd.close,
+                        minPrice,
+                        maxPrice,
+                        cssHeight
+                    );
+                    const top = Math.min(yOpen, yClose);
+                    const heightPx = Math.max(1, Math.abs(yOpen - yClose));
+
+                    ctx.fillRect(x, top, candleWidth, heightPx);
+                }
+            };
+
+            drawWicks(true, upColor);
+            drawWicks(false, downColor);
+            drawBodies(true, upColor);
+            drawBodies(false, downColor);
+        };
+
+        if (rafRef.current !== null) {
+            cancelAnimationFrame(rafRef.current);
+        }
+        rafRef.current = requestAnimationFrame(draw);
+
+        return () => {
+            if (rafRef.current !== null) {
+                cancelAnimationFrame(rafRef.current);
+            }
+        };
+    }, [
+        width,
+        height,
+        candles,
+        startTime,
+        endTime,
+        minPrice,
+        maxPrice,
+        candleWidth,
+    ]);
+
+    return (
+        <canvas
+            ref={canvasRef}
+            className={className}
+            onMouseMove={onMouseMove}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+        />
+    );
+};
+
+function lowerBound<T>(arr: readonly T[], target: number, key: (x: T) => number) {
+    let lo = 0;
+    let hi = arr.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (key(arr[mid]) < target) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+function upperBound<T>(arr: readonly T[], target: number, key: (x: T) => number) {
+    let lo = 0;
+    let hi = arr.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (key(arr[mid]) <= target) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+function aggregateCandles(c: CandleData[], groupSize: number): CandleData[] {
+    if (groupSize <= 1) return c;
+    const out: CandleData[] = [];
+    for (let i = 0; i < c.length; i += groupSize) {
+        const startCandle = c[i];
+        const lastIdx = Math.min(i + groupSize - 1, c.length - 1);
+        const endCandle = c[lastIdx];
+
+        let high = -Infinity;
+        let low = Infinity;
+        let volume = 0;
+        let trades = 0;
+        for (let j = i; j <= lastIdx; j++) {
+            const item = c[j];
+            if (item.high > high) high = item.high;
+            if (item.low < low) low = item.low;
+            volume += item.volume;
+            trades += item.trades;
+        }
+
+        out.push({
+            start: startCandle.start,
+            end: endCandle.end,
+            open: startCandle.open,
+            high,
+            low,
+            close: endCandle.close,
+            volume,
+            trades,
+            asset: startCandle.asset,
+            interval: startCandle.interval,
+        });
+    }
+    return out;
 }
 
 const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
@@ -45,9 +274,9 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     } = useChartContext();
 
     const [isInside, setIsInside] = useState(false);
+    const wheelBusy = useRef(false);
 
     const containerRef = useRef<HTMLDivElement>(null);
-    const [localSize, setLocalSize] = useState({ width: 0, height: 0 });
     const touchState = useRef<{
         mode: "pan" | "pinch";
         touchId?: number;
@@ -82,9 +311,119 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     // ------------------------------------------------------------
     // Visible candles
     // ------------------------------------------------------------
-    const visibleCandles = useMemo(() => {
-        return candles.filter((c) => c.end >= startTime && c.start <= endTime);
+    const visibleRange = useMemo(() => {
+        if (candles.length === 0 || endTime <= startTime) {
+            return { first: 0, lastExcl: 0 };
+        }
+        const first = lowerBound(candles, startTime, (c) => c.end);
+        const lastExcl = upperBound(candles, endTime, (c) => c.start);
+        return { first, lastExcl };
     }, [candles, startTime, endTime]);
+
+    const visibleCandles = useMemo(() => {
+        if (visibleRange.lastExcl <= visibleRange.first) return [];
+        return candles.slice(visibleRange.first, visibleRange.lastExcl);
+    }, [candles, visibleRange]);
+
+    // ------------------------------------------------------------
+    // Candle width + LOD
+    // ------------------------------------------------------------
+    const rawCandleWidth = useMemo(() => {
+        if (visibleCandles.length === 0 || width <= 0) return 0;
+
+        const range = endTime - startTime;
+        if (range <= 0) return 0;
+        const pxPerMs = width / Math.max(range, 1);
+        const cDur = visibleCandles[0].end - visibleCandles[0].start;
+
+        return pxPerMs * cDur;
+    }, [visibleCandles, width, startTime, endTime]);
+
+    const barsPerPx =
+        width > 0 ? visibleCandles.length / Math.max(1, width) : 0;
+    const lodK = barsPerPx > 8 ? 16 : barsPerPx > 4 ? 8 : barsPerPx > 2 ? 4 : 1;
+
+    const drawCandles = useMemo(() => {
+        return lodK === 1 ? visibleCandles : aggregateCandles(visibleCandles, lodK);
+    }, [lodK, visibleCandles]);
+
+    const minSpacingPx = useMemo(() => {
+        if (drawCandles.length < 2 || width <= 0 || endTime <= startTime) {
+            return null;
+        }
+
+        let spacing = Infinity;
+        for (let i = 1; i < drawCandles.length; i++) {
+            const prevX = timeToX(
+                drawCandles[i - 1].start,
+                startTime,
+                endTime,
+                width
+            );
+            const x = timeToX(drawCandles[i].start, startTime, endTime, width);
+            const gap = x - prevX;
+            if (gap > 0 && gap < spacing) spacing = gap;
+        }
+
+        if (!Number.isFinite(spacing) || spacing <= 0) return null;
+        return spacing;
+    }, [drawCandles, endTime, startTime, width]);
+
+    const targetCandleWidth = rawCandleWidth * lodK;
+    const widthRespectingSpacing =
+        minSpacingPx === null
+            ? targetCandleWidth
+            : Math.min(targetCandleWidth, minSpacingPx * 0.9);
+    const renderCandleWidth = Math.min(
+        MAX_CANDLE_WIDTH,
+        minSpacingPx === null
+            ? Math.max(MIN_CANDLE_WIDTH, widthRespectingSpacing)
+            : Math.max(0, widthRespectingSpacing)
+    );
+
+    // ------------------------------------------------------------
+    // Touch zoom constraints
+    // ------------------------------------------------------------
+    const candleDurationMs = useMemo(() => {
+        if (visibleCandles.length > 0) {
+            const duration = visibleCandles[0].end - visibleCandles[0].start;
+            return duration || 1;
+        }
+        return 0;
+    }, [visibleCandles]);
+
+    const minTimeRangeForMaxWidth = useMemo(() => {
+        if (width <= 0 || candleDurationMs <= 0) return 0;
+        return (candleDurationMs * width) / MAX_CANDLE_WIDTH;
+    }, [width, candleDurationMs]);
+
+    const minTimeRange = useMemo(() => {
+        const base = candleDurationMs || 1;
+        const clampRange = minTimeRangeForMaxWidth || 0;
+        return Math.max(1, base, clampRange);
+    }, [candleDurationMs, minTimeRangeForMaxWidth]);
+
+    const applyTimeRange = useCallback(
+        (start: number, end: number) => {
+            if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+            let s = start;
+            let e = end;
+            if (s > e) {
+                const tmp = s;
+                s = e;
+                e = tmp;
+            }
+            const minRange = Math.max(1, minTimeRange);
+            const currentRange = e - s;
+            if (currentRange < minRange) {
+                const mid = (s + e) / 2;
+                s = mid - minRange / 2;
+                e = mid + minRange / 2;
+            }
+            setTimeRange(s, e);
+        },
+        [minTimeRange, setTimeRange]
+    );
 
     // ------------------------------------------------------------
     // Initialize time range when new candles arrive
@@ -93,7 +432,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     useEffect(() => {
         if (!candles.length) return;
 
-        const signature = `${candles[0].start}-${candles[candles.length - 1].end}`;
+        const signature = `${asset}-${candles[0].start}-${candles[candles.length - 1].end}`;
         if (dataSignatureRef.current === signature) return;
 
         dataSignatureRef.current = signature;
@@ -114,10 +453,17 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     useEffect(() => {
         if (visibleCandles.length === 0 || manualPriceRange) return;
 
-        const lows = visibleCandles.map((c) => c.low);
-        const highs = visibleCandles.map((c) => c.high);
+        let low = Infinity;
+        let high = -Infinity;
+        for (let i = 0; i < visibleCandles.length; i++) {
+            const c = visibleCandles[i];
+            if (c.low < low) low = c.low;
+            if (c.high > high) high = c.high;
+        }
 
-        setPriceRange(Math.min(...lows) * 0.98, Math.max(...highs) * 1.02);
+        if (Number.isFinite(low) && Number.isFinite(high) && low < high) {
+            setPriceRange(low * 0.98, high * 1.02);
+        }
     }, [visibleCandles, manualPriceRange, setPriceRange]);
 
     // ------------------------------------------------------------
@@ -128,7 +474,6 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
 
         const obs = new ResizeObserver(([entry]) => {
             const { width, height } = entry.contentRect;
-            setLocalSize({ width, height });
             setSize(width, height);
         });
 
@@ -170,7 +515,13 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     // Wheel zoom / horizontal pan
     // ------------------------------------------------------------
     const onWheel = (e: React.WheelEvent) => {
+        e.preventDefault();
         e.stopPropagation();
+        if (wheelBusy.current) return;
+        wheelBusy.current = true;
+        requestAnimationFrame(() => {
+            wheelBusy.current = false;
+        });
 
         const wantsPan = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
 
@@ -186,7 +537,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
                 width
             );
 
-            setTimeRange(start, end);
+            applyTimeRange(start, end);
             return;
         }
 
@@ -198,7 +549,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
 
         if (rawCandleWidth >= MAX_CANDLE_WIDTH && e.deltaY < 0) return;
 
-        setTimeRange(start, end);
+        applyTimeRange(start, end);
     };
 
     // ------------------------------------------------------------
@@ -246,7 +597,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
                 nextMax = max;
             }
 
-            setTimeRange(nextStart, nextEnd);
+            applyTimeRange(nextStart, nextEnd);
 
             if (nextMin !== initialMin || nextMax !== initialMax) {
                 setManualPriceRange(true);
@@ -265,11 +616,15 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     // ------------------------------------------------------------
     // Crosshair
     // ------------------------------------------------------------
-    const handleMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const handleMove = (e: React.MouseEvent<Element>) => {
         const rect = e.currentTarget.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        if (!width || selectingInterval || visibleCandles.length === 0) {
+        if (
+            !width ||
+            selectingInterval ||
+            visibleRange.lastExcl <= visibleRange.first
+        ) {
             setCrosshair(x, y);
             return;
         }
@@ -280,13 +635,28 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         }
 
         const hoverTime = xToTime(x, startTime, endTime, width);
-        const candleDuration =
-            visibleCandles[0].end - visibleCandles[0].start || 1;
 
-        const steps = Math.round((hoverTime - startTime) / candleDuration);
-        const snappedTime = startTime + steps * candleDuration;
-        const clampedTime = Math.min(endTime, Math.max(startTime, snappedTime));
-        const snapX = timeToX(clampedTime, startTime, endTime, width);
+        let lo = visibleRange.first;
+        let hi = visibleRange.lastExcl - 1;
+        if (lo > hi) {
+            setCrosshair(x, y);
+            return;
+        }
+
+        let best = lo;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const midTime = candles[mid].start;
+            if (midTime <= hoverTime) {
+                best = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+
+        const snapT = candles[best]?.start ?? hoverTime;
+        const snapX = timeToX(snapT, startTime, endTime, width);
         setCrosshair(snapX, y);
     };
 
@@ -299,46 +669,6 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         setIsInside(false);
         setMouseOnChart(false);
     };
-
-    // ------------------------------------------------------------
-    // Candle width
-    // ------------------------------------------------------------
-    const rawCandleWidth = useMemo(() => {
-        if (visibleCandles.length < 2) return MIN_CANDLE_WIDTH;
-
-        const range = endTime - startTime;
-        const pxPerMs = width / range;
-        const cDur = visibleCandles[0].end - visibleCandles[0].start;
-
-        return pxPerMs * cDur;
-    }, [visibleCandles, width, startTime, endTime]);
-
-    const candleWidth = Math.min(
-        MAX_CANDLE_WIDTH,
-        Math.max(MIN_CANDLE_WIDTH, rawCandleWidth)
-    );
-
-    // ------------------------------------------------------------
-    // Touch zoom constraints
-    // ------------------------------------------------------------
-    const candleDurationMs = useMemo(() => {
-        if (visibleCandles.length > 0) {
-            const duration = visibleCandles[0].end - visibleCandles[0].start;
-            return duration || 1;
-        }
-        return 0;
-    }, [visibleCandles]);
-
-    const minTimeRangeForMaxWidth = useMemo(() => {
-        if (width <= 0 || candleDurationMs <= 0) return 0;
-        return (candleDurationMs * width) / MAX_CANDLE_WIDTH;
-    }, [width, candleDurationMs]);
-
-    const minTimeRange = useMemo(() => {
-        const base = candleDurationMs || 1;
-        const clampRange = minTimeRangeForMaxWidth || 0;
-        return Math.max(1, base, clampRange);
-    }, [candleDurationMs, minTimeRangeForMaxWidth]);
 
     // ------------------------------------------------------------
     // Touch interactions (pan + pinch zoom)
@@ -442,7 +772,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
                 nextMax = max;
             }
 
-            setTimeRange(nextStart, nextEnd);
+            applyTimeRange(nextStart, nextEnd);
 
             if (nextMin !== state.initialMin || nextMax !== state.initialMax) {
                 setManualPriceRange(true);
@@ -476,7 +806,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
             const newStart = anchorTime - anchorRatio * newRange;
             const newEnd = newStart + newRange;
 
-            setTimeRange(newStart, newEnd);
+            applyTimeRange(newStart, newEnd);
         }
     };
 
@@ -505,58 +835,26 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
             onTouchEnd={onTouchEnd}
             onTouchCancel={onTouchEnd}
         >
-            <svg
-                width={localSize.width}
-                height={localSize.height}
-                className="min-h-full min-w-full"
+            <CandleCanvas
+                width={width}
+                height={height}
+                candles={drawCandles}
+                startTime={startTime}
+                endTime={endTime}
+                minPrice={minPrice}
+                maxPrice={maxPrice}
+                candleWidth={renderCandleWidth}
+                className="absolute inset-0 h-full w-full"
                 onMouseMove={handleMove}
                 onMouseEnter={handleEnter}
                 onMouseLeave={handleLeave}
+            />
+
+            <svg
+                width={width}
+                height={height}
+                className="pointer-events-none absolute inset-0"
             >
-                <g>
-                    {visibleCandles.map((c) => {
-                        const x = timeToX(c.start, startTime, endTime, width);
-
-                        const yOpen = priceToY(
-                            c.open,
-                            minPrice,
-                            maxPrice,
-                            height
-                        );
-                        const yClose = priceToY(
-                            c.close,
-                            minPrice,
-                            maxPrice,
-                            height
-                        );
-                        const yHigh = priceToY(
-                            c.high,
-                            minPrice,
-                            maxPrice,
-                            height
-                        );
-                        const yLow = priceToY(
-                            c.low,
-                            minPrice,
-                            maxPrice,
-                            height
-                        );
-
-                        return (
-                            <Candle
-                                key={c.start}
-                                x={x}
-                                width={candleWidth}
-                                bodyTop={Math.min(yOpen, yClose)}
-                                bodyHeight={Math.abs(yOpen - yClose)}
-                                wickTop={yHigh}
-                                wickHeight={yLow - yHigh}
-                                color={c.close >= c.open ? "#cf7b15" : "#c4c3c2"}
-                            />
-                        );
-                    })}
-                </g>
-
                 {isInside && !settingInterval && <CrossHair />}
             </svg>
         </div>

@@ -180,7 +180,6 @@ const PriceScale: React.FC = () => {
 
     const fontSize = Math.max(10, Math.min(16, height * 0.06));
     const labelWidth = Math.max(65, Math.min(150, width * 0.07));
-    console.log(labelWidth);
 
     return (
         <svg
@@ -257,7 +256,7 @@ const PriceScale: React.FC = () => {
                     <rect
                         x={5}
                         y={crosshairY - 9}
-                        width={60}
+                        width={120}
                         height={18}
                         fill="#2a2a2a"
                         stroke="#ffffff44"
