@@ -280,7 +280,7 @@ const TimeScale: React.FC = () => {
         };
     }, []);
 
-    const fontSize = Math.max(10, Math.min(16, height * 0.06));
+    const fontSize = Math.max(10, Math.min(14, height * 0.06));
 
     return (
         <div
