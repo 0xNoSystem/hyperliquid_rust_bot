@@ -417,7 +417,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                 </div>
 
                 {/* CHART (middle) */}
-                <div className="mb-30 flex min-h-fit h-[70vh] w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 bg-white/10 p-4 tracking-widest">
+                <div className="mb-30 flex h-[70vh] min-h-fit w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 bg-white/10 p-4 tracking-widest">
                     {/* Toggle + Dates */}
                     <div className="flex flex-wrap items-center gap-4 p-4 pl-1">
                         {/* Toggle Button */}
@@ -602,13 +602,14 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                             candleData={candleData}
                         />
                     </div>
+                    {/* CONSOLE*/}
+                <div className="mt-20 p-2 text-xl font-semibold tracking-wide">
+                    <h2 className="p-2 text-2xl text-center font-semibold">Result</h2>
                 </div>
 
-                {/* CONSOLE (bottom) */}
-                <div className="w-[60%] border-2 border-white/70 bg-black/60 p-2 text-center text-xl font-semibold tracking-wide">
-                    <h2 className="p-2 text-xl font-semibold">Console</h2>
                 </div>
-            </div>
+
+                            </div>
         </div>
     );
 }

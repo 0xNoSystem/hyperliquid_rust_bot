@@ -22,7 +22,6 @@ export async function fetchCandles(
             `https://api.binance.com/api/v3/klines?symbol=${symbol}` +
             `&interval=${interval}&startTime=${fetchStart}&endTime=${endTime}&limit=1000`;
 
-
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Binance error ${res.status}`);
 

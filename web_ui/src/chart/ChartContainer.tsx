@@ -3,9 +3,11 @@ import Chart from "./Chart";
 import PriceScale from "./visual/PriceScale";
 import TimeScale from "./visual/TimeScale";
 import IntervalOverlay from "./visual/Interval";
+import ChartSettings from "./visual/ChartSettings";
 import CandleInfo from "./visual/CandleInfo";
 import { useChartContext } from "./ChartContext";
 import { xToTime } from "./utils";
+import { Settings } from "lucide-react";
 
 import type { TimeFrame, CandleData } from "../types";
 
@@ -29,6 +31,8 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
         startTime,
         endTime,
         candles,
+        candleColor,
+        setCandleColor,
         width,
         crosshairX,
         mouseOnChart,
@@ -36,6 +40,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
     const rightRef = useRef<HTMLDivElement>(null);
     const [rightWidth, setRightWidth] = useState(0);
     const [hoveredCandle, setHoveredCandle] = useState<CandleData | null>(null);
+    const [setting, setSetting] = useState(false);
 
     // Load candle data into context
     useEffect(() => {
@@ -101,7 +106,20 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                         {hoveredCandle && mouseOnChart && (
                             <CandleInfo candle={hoveredCandle} />
                         )}
-                    </div>
+
+                                            </div>
+                                            {setting && 
+                             (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-50">
+                            <ChartSettings
+                                initialColors={candleColor}
+                                onApply={setCandleColor}
+                                onReset={() => setCandleColor("#cf7b15", "#c4c3c2" )}
+                                onClose={() => setSetting(false)}
+                            />
+                            </div>
+                        )}
+
                 </div>
 
                 {/* RIGHT PRICE SCALE */}
@@ -120,8 +138,17 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                 </div>
 
                 {/* Right-side width preview box */}
-                <div className="bg-black/60" style={{ width: rightWidth }} />
+                <div
+                    className="flex items-center justify-center bg-black text-center"
+                    style={{ width: rightWidth }}
+                >
+                    <Settings 
+                        className="h-5 w-5 text-gray-300"
+                        onClick={() => setSetting((prev) => !prev)}
+                    />
+                </div>
             </div>
+            
         </div>
     );
 };

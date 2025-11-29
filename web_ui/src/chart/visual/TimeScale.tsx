@@ -111,11 +111,7 @@ const TimeScale: React.FC = () => {
         const rect = ref.current?.getBoundingClientRect();
         const midX =
             rect && width > 0
-                ? clamp(
-                      (t1.clientX + t2.clientX) / 2 - rect.left,
-                      0,
-                      width
-                  )
+                ? clamp((t1.clientX + t2.clientX) / 2 - rect.left, 0, width)
                 : width / 2;
 
         touchState.current = {
@@ -169,8 +165,7 @@ const TimeScale: React.FC = () => {
             newRange = Math.max(minZoomRange, newRange);
 
             const anchorRatio = state.anchorRatio ?? 0.5;
-            const anchorTime =
-                state.initialStart + anchorRatio * initialRange;
+            const anchorTime = state.initialStart + anchorRatio * initialRange;
             const newStart = anchorTime - anchorRatio * newRange;
             const newEnd = newStart + newRange;
 
@@ -329,18 +324,18 @@ const TimeScale: React.FC = () => {
                     !selectingInterval && (
                         <>
                             <rect
-                                x={crosshairX - 60}
+                                x={crosshairX - 70}
                                 y={0}
-                                width={140}
-                                height={22}
+                                width={160}
+                                height={24}
                                 fill="#2a2a2a"
                                 stroke="#ffffff44"
                                 strokeWidth={1}
                                 rx={4}
                             />
                             <text
-                                x={crosshairX}
-                                y={13}
+                                x={crosshairX + 10}
+                                y={15}
                                 textAnchor="middle"
                                 fill="white"
                                 fontSize={fontSize}

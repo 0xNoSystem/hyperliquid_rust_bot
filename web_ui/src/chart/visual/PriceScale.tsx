@@ -16,7 +16,6 @@ const formatPrice = (n: number) => {
     return Number(n.toFixed(2)).toLocaleString("en-US");
 };
 
-
 const PriceScale: React.FC = () => {
     const {
         height,
@@ -70,7 +69,7 @@ const PriceScale: React.FC = () => {
     const step = (maxPrice - minPrice) / (levels - 1);
 
     const prices = Array.from({ length: levels }, (_, i) => {
-        const price = minPrice + i * step ;
+        const price = minPrice + i * step;
         const y = priceToY(price, minPrice, maxPrice, height);
         return { price, y };
     });
@@ -185,7 +184,11 @@ const PriceScale: React.FC = () => {
         <svg
             width={labelWidth}
             height={height}
-            style={{ overflow: "visible", touchAction: "none", overscrollBehavior: "contain" }}
+            style={{
+                overflow: "visible",
+                touchAction: "none",
+                overscrollBehavior: "contain",
+            }}
             ref={svgRef}
             onWheel={onWheel}
             onTouchStart={onTouchStart}
@@ -283,5 +286,3 @@ const PriceScale: React.FC = () => {
 };
 
 export default PriceScale;
-
-

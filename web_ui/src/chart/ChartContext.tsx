@@ -11,6 +11,7 @@ interface ChartContextState {
     height: number;
 
     candles: CandleData[];
+    candleColor: { up: string; down: string };
     timeframe: TimeFrame;
 
     minPrice: number;
@@ -57,6 +58,14 @@ export default function ChartProvider({ children }) {
     const [timeframe, setTimeframe] = useState<TimeFrame | null>(null);
     const [candles, setCandles] = useState<CandleData[]>([]);
 
+    const [candleColor, setCandleColorState] = useState<{
+        up: string;
+        down: string;
+    }>({
+        up: "#cf7b15",
+        down: "#c4c3c2",
+    });
+
     const [minPrice, setMinPrice] = useState(0);
     const [maxPrice, setMaxPrice] = useState(0);
     const [manualPriceRange, setManualPriceRangeState] = useState(false);
@@ -102,6 +111,13 @@ export default function ChartProvider({ children }) {
         setCrosshairY(y);
     };
 
+    const setCandleColor = (up: string | null, down: string | null) => {
+        setCandleColorState((prev) => ({
+            up: up ?? prev.up,
+            down: down ?? prev.down,
+        }));
+    };
+
     return (
         <ChartContext.Provider
             value={{
@@ -110,6 +126,7 @@ export default function ChartProvider({ children }) {
                 height,
 
                 candles,
+                candleColor,
                 timeframe,
 
                 minPrice,
@@ -132,6 +149,7 @@ export default function ChartProvider({ children }) {
                 setSize,
                 setTf,
                 setCandles,
+                setCandleColor,
                 setPriceRange,
                 setManualPriceRange,
                 setTimeRange,

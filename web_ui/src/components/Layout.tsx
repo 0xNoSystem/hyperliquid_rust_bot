@@ -8,7 +8,7 @@ export default function Layout() {
         <div className="relative flex min-h-screen flex-col bg-[#1D1D1D] text-white">
             <BackgroundFX intensity={1} />
             <Header />
-            <main className="flex flex-col flex-1">
+            <main className="flex flex-1 flex-col">
                 <Outlet />
             </main>
             <Footer />

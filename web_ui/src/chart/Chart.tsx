@@ -29,6 +29,7 @@ type CandleCanvasProps = {
     width: number;
     height: number;
     candles: CandleData[];
+    candleColor: {up: string, down: string};
     startTime: number;
     endTime: number;
     minPrice: number;
@@ -44,6 +45,7 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
     width,
     height,
     candles,
+    candleColor,
     startTime,
     endTime,
     minPrice,
@@ -91,15 +93,15 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
             if (candles.length === 0) return;
             if (endTime <= startTime) return;
 
-            const upColor = "#cf7b15";
-            const downColor = "#c4c3c2";
+            const upColor = candleColor.up;
+            const downColor = candleColor.down;
             const wickWidth = candleWidth / 2 <= 1 ? 0.2 : 1;
 
             const drawWicks = (isUp: boolean, color: string) => {
                 ctx.beginPath();
                 for (let i = 0; i < candles.length; i++) {
                     const cd = candles[i];
-                    if ((cd.close >= cd.open) !== isUp) continue;
+                    if (cd.close >= cd.open !== isUp) continue;
 
                     const centerX =
                         timeToX(cd.start, startTime, endTime, cssWidth) +
@@ -130,7 +132,7 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
                 ctx.fillStyle = color;
                 for (let i = 0; i < candles.length; i++) {
                     const cd = candles[i];
-                    if ((cd.close >= cd.open) !== isUp) continue;
+                    if (cd.close >= cd.open !== isUp) continue;
 
                     const x = timeToX(cd.start, startTime, endTime, cssWidth);
                     const yOpen = priceToY(
@@ -190,7 +192,11 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
     );
 };
 
-function lowerBound<T>(arr: readonly T[], target: number, key: (x: T) => number) {
+function lowerBound<T>(
+    arr: readonly T[],
+    target: number,
+    key: (x: T) => number
+) {
     let lo = 0;
     let hi = arr.length;
     while (lo < hi) {
@@ -201,7 +207,11 @@ function lowerBound<T>(arr: readonly T[], target: number, key: (x: T) => number)
     return lo;
 }
 
-function upperBound<T>(arr: readonly T[], target: number, key: (x: T) => number) {
+function upperBound<T>(
+    arr: readonly T[],
+    target: number,
+    key: (x: T) => number
+) {
     let lo = 0;
     let hi = arr.length;
     while (lo < hi) {
@@ -261,7 +271,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         setTimeRange,
         setIntervalStartX,
         setIntervalEndX,
-
+        candleColor,
         height,
         width,
         minPrice,
@@ -343,7 +353,9 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     const lodK = barsPerPx > 8 ? 16 : barsPerPx > 4 ? 8 : barsPerPx > 2 ? 4 : 1;
 
     const drawCandles = useMemo(() => {
-        return lodK === 1 ? visibleCandles : aggregateCandles(visibleCandles, lodK);
+        return lodK === 1
+            ? visibleCandles
+            : aggregateCandles(visibleCandles, lodK);
     }, [lodK, visibleCandles]);
 
     const minSpacingPx = useMemo(() => {
@@ -801,8 +813,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
             newRange = Math.max(minTimeRange, newRange);
 
             const anchorRatio = state.anchorRatio ?? 0.5;
-            const anchorTime =
-                state.initialStart + anchorRatio * initialRange;
+            const anchorTime = state.initialStart + anchorRatio * initialRange;
             const newStart = anchorTime - anchorRatio * newRange;
             const newEnd = newStart + newRange;
 
@@ -826,7 +837,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     return (
         <div
             ref={containerRef}
-            className="relative flex-1  max-h-[60vh] cursor-crosshair"
+            className="relative max-h-[60vh] flex-1 cursor-crosshair"
             style={{ touchAction: "none", overscrollBehavior: "contain" }}
             onWheel={onWheel}
             onMouseDown={onMouseDown}
@@ -839,6 +850,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
                 width={width}
                 height={height}
                 candles={drawCandles}
+                candleColor={candleColor}
                 startTime={startTime}
                 endTime={endTime}
                 minPrice={minPrice}
