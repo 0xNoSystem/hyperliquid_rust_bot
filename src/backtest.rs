@@ -16,6 +16,12 @@ pub struct BackTester{
 
 impl BackTester{
 
+    pub fn new(client: InfoClient) -> Self{
+        BackTester{
+            info: client,
+        }
+    }
+
     pub fn run(asset: &str,params: ExecParams, strategy: Strategy, start: u64, end: u64) -> Result<(), Error>{
         if !MARKETS.contains(&asset){
             return Err(Error::BacktestError(format!("ASSET ({}) ISN'T TRADABLE", asset)));

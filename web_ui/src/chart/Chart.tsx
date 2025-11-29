@@ -11,7 +11,6 @@ import { useChartContext } from "./ChartContext";
 import {
     priceToY,
     timeToX,
-    xToTime,
     computeTimeWheelZoom,
     computeTimePan,
     computePricePan,
@@ -618,46 +617,47 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     // ------------------------------------------------------------
     const handleMove = (e: React.MouseEvent<Element>) => {
         const rect = e.currentTarget.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        const effectiveWidth = width || rect.width || 0;
+        const effectiveHeight = height || rect.height || 0;
+        const scaleX = rect.width ? effectiveWidth / rect.width : 1;
+        const scaleY = rect.height ? effectiveHeight / rect.height : 1;
+
+        // Normalize mouse position back into the chart's logical pixel space.
+        const rawX = (e.clientX - rect.left) * scaleX;
+        const rawY = (e.clientY - rect.top) * scaleY;
+        const x = Math.min(Math.max(rawX, 0), effectiveWidth);
+        const y = Math.min(Math.max(rawY, 0), effectiveHeight);
+
         if (
-            !width ||
+            !effectiveWidth ||
+            !effectiveHeight ||
             selectingInterval ||
-            visibleRange.lastExcl <= visibleRange.first
+            drawCandles.length === 0 ||
+            endTime <= startTime
         ) {
             setCrosshair(x, y);
             return;
         }
 
-        if (x < 0 || x > rect.width) {
-            setCrosshair(x, y);
-            return;
-        }
+        const pxPerMs = effectiveWidth / Math.max(endTime - startTime, 1);
+        let bestX = x;
+        let bestDiff = Infinity;
 
-        const hoverTime = xToTime(x, startTime, endTime, width);
+        for (let i = 0; i < drawCandles.length; i++) {
+            const startOffset = (drawCandles[i].start - startTime) * pxPerMs;
+            const centerX = startOffset + renderCandleWidth / 2;
+            const diff = Math.abs(centerX - x);
 
-        let lo = visibleRange.first;
-        let hi = visibleRange.lastExcl - 1;
-        if (lo > hi) {
-            setCrosshair(x, y);
-            return;
-        }
-
-        let best = lo;
-        while (lo <= hi) {
-            const mid = (lo + hi) >> 1;
-            const midTime = candles[mid].start;
-            if (midTime <= hoverTime) {
-                best = mid;
-                lo = mid + 1;
-            } else {
-                hi = mid - 1;
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                bestX = centerX;
+            } else if (centerX > x && diff > bestDiff) {
+                break;
             }
         }
 
-        const snapT = candles[best]?.start ?? hoverTime;
-        const snapX = timeToX(snapT, startTime, endTime, width);
-        setCrosshair(snapX, y);
+        const snappedX = Math.min(Math.max(bestX, 0), effectiveWidth);
+        setCrosshair(snappedX, y);
     };
 
     const handleEnter = () => {

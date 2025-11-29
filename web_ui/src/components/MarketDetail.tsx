@@ -74,7 +74,7 @@ const BtnOK =
 const Chip =
     "inline-flex items-center gap-2 rounded-md border border-white/10 bg-orange-400/10 px-2 py-1 text-[15px] hover:bg-orange-500 hover:cursor-pointer";
 const GridCols =
-    "grid grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)_360px] gap-4 p-8";
+    "grid grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)_360px] gap-4 p-8 ";
 
 function px(n: number) {
     if (n > 1 && n < 2) return n.toFixed(4);
@@ -244,8 +244,8 @@ export default function MarketDetail() {
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
-        <div className="relative mx-auto min-h-screen max-w-[2400px] overflow-hidden py-8 pb-80 font-mono text-white">
-            <div className="mt-10 mb-1 flex items-center justify-center">
+        <div className="relative mx-10 min-h-screen max-w-[3000px] overflow-hidden py-8 pb-80 font-mono text-white">
+            <div className="mt-10 mb-1 flex items-center justify-around">
                 <div className="relative right-[3vw] flex items-center gap-3">
                     <button
                         onClick={() =>

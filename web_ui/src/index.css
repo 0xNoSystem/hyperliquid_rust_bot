@@ -3,7 +3,9 @@
 html,
 body,
 #root {
+    background-color: "black";
     height: 100%;
+    zoom: 0.94;
 }
 
 @keyframes gradientBG {
