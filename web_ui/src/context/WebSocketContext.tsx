@@ -350,7 +350,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const requestRemoveMarket = useCallback(
         async (asset: string) => {
-            await sendCommand({ removeMarket: asset.toUpperCase() });
+            await sendCommand({ removeMarket: asset });
             setMarkets((p) => p.filter((m) => m.asset !== asset));
         },
         [sendCommand]
@@ -358,7 +358,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const requestToggleMarket = useCallback(
         async (asset: string) => {
-            await sendCommand({ toggleMarket: asset.toUpperCase() });
+            await sendCommand({ toggleMarket: asset });
             setMarkets((p) =>
                 p.map((m) =>
                     m.asset === asset ? { ...m, isPaused: !m.isPaused } : m

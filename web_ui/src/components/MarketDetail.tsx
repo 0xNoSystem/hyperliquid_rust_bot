@@ -126,7 +126,7 @@ export default function MarketDetail() {
     };
 
     const market = useMemo<MarketInfo | undefined>(
-        () => markets.find((m) => m.asset === (routeAsset ?? "").toUpperCase()),
+        () => markets.find((m) => m.asset === (routeAsset ?? "")),
         [markets, routeAsset]
     );
     const meta = useMemo(
@@ -152,7 +152,7 @@ export default function MarketDetail() {
         JSON.stringify(a) === JSON.stringify(b);
 
     const sendMarketCmd = (asset: string, cmd: unknown) =>
-        sendCommand({ marketComm: { asset: asset.toUpperCase(), cmd } });
+        sendCommand({ marketComm: { asset: asset, cmd } });
 
     const buildKind = useCallback((): IndicatorKind => {
         switch (kindKey) {
@@ -465,7 +465,7 @@ export default function MarketDetail() {
                         </div>
                         <div className={`${Chart} relative h-[60vh]`}>
                             <TradingViewWidget
-                                symbol={`CRYPTO:${market.asset}USD`}
+                                symbol={`${market.asset}`}
                                 interval="D"
                                 theme="dark"
                             />

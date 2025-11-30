@@ -8,6 +8,11 @@ type Props = {
 
 function TradingViewWidget({ symbol, interval = "D", theme = "dark" }: Props) {
     const container = useRef<HTMLDivElement | null>(null);
+    if (symbol[0] == "k"){
+        symbol = symbol.slice(1);
+    }
+
+    symbol = `CRYPTO:${symbol}USD`;
 
     useEffect(() => {
         if (!container.current) return;

@@ -77,7 +77,7 @@ impl Bot {
             trade_params,
             config,
         } = info;
-        let asset = asset.trim().to_uppercase();
+        let asset = asset.trim().to_string();
         let asset_str = asset.as_str();
 
         if self.markets.contains_key(&asset) {
@@ -90,9 +90,6 @@ impl Bot {
             return Ok(());
         }
 
-        if !MARKETS.contains(&asset_str) {
-            return Err(Error::AssetNotFound);
-        }
 
         let mut book = margin_book.lock().await;
         self.chain_open_positions = book.sync().await?;
@@ -168,7 +165,7 @@ impl Bot {
         asset: &String,
         margin_book: &Arc<Mutex<MarginBook>>,
     ) -> Result<(), Error> {
-        let asset = asset.trim().to_uppercase();
+        let asset = asset.trim().to_string();
 
         if let Some(sub_id) = self.candle_subs.remove(&asset) {
             self.info_client.unsubscribe(sub_id).await?;
@@ -205,7 +202,7 @@ impl Bot {
     }
 
     pub async fn pause_or_resume_market(&self, asset: &String) {
-        let asset = asset.trim().to_uppercase();
+        let asset = asset.trim().to_string();
 
         if let Some(tx) = self.markets.get(&asset) {
             let tx = tx.clone();
@@ -258,7 +255,7 @@ impl Bot {
     }
 
     pub async fn send_cmd(&self, asset: &String, cmd: MarketCommand) {
-        let asset = asset.trim().to_uppercase();
+        let asset = asset.trim().to_string();
 
         if let Some(tx) = self.markets.get(&asset) {
             let tx = tx.clone();

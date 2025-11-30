@@ -116,7 +116,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
         e.preventDefault();
         const validConfig = config.map(([ind, tf]) => [ind, into(tf)]);
         const info: AddMarketInfo = {
-            asset: asset.toUpperCase(),
+            asset: asset,
             marginAlloc:
                 marginType === "alloc"
                     ? { alloc: marginValue / 100 }
