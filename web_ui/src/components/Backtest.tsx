@@ -417,7 +417,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                 </div>
 
                 {/* CHART (middle) */}
-                <div className="mb-30 flex h-[70vh] min-h-fit w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 bg-white/10 p-4 tracking-widest">
+                <div className="mb-30 flex h-[80vh] min-h-fit w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 bg-white/10 p-4 tracking-widest">
                     {/* Toggle + Dates */}
                     <div className="flex flex-wrap items-center gap-4 p-4 pl-1">
                         {/* Toggle Button */}

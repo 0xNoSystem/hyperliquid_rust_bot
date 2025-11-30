@@ -837,7 +837,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     return (
         <div
             ref={containerRef}
-            className="relative max-h-[60vh] flex-1 cursor-crosshair"
+            className="relative max-h-[70vh] h-[60vh] flex-1 cursor-crosshair"
             style={{ touchAction: "none", overscrollBehavior: "contain" }}
             onWheel={onWheel}
             onMouseDown={onMouseDown}

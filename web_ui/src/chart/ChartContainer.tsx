@@ -91,7 +91,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
     }, [selectingInterval, crosshairX, width, startTime, endTime, candles]);
 
     return (
-        <div className="flex h-full max-h-[60vh] flex-1 flex-col overflow-hidden">
+        <div className="flex max-h-[70vh] flex-1 flex-col overflow-hidden">
             {/* MAIN ROW */}
             <div className="flex h-full w-full flex-1">
                 {/* LEFT: CHART */}
