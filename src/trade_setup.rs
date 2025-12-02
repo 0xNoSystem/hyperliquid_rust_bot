@@ -273,8 +273,8 @@ impl std::str::FromStr for TimeFrame {
             "12h" => Ok(TimeFrame::Hour12),
             "1d" => Ok(TimeFrame::Day1),
             "3d" => Ok(TimeFrame::Day3),
-            "w" => Ok(TimeFrame::Week),
-            "m" => Ok(TimeFrame::Month),
+            "1w" => Ok(TimeFrame::Week),
+            "1M" => Ok(TimeFrame::Month),
             _ => Err(format!("Invalid TimeFrame string: '{}'", s)),
         }
     }

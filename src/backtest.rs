@@ -1,39 +1,65 @@
-use crate::{MARKETS, Error};  
-use crate::helper::{load_candles};
-use kwant::indicators::{Price};
-use crate::trade_setup::{TradeParams, TimeFrame};
-use crate::strategy::{Strategy, CustomStrategy, Style, Stance};
-use crate::signal::{SignalEngine, ExecParams, IndexId};
-use crate::helper::{get_asset};
+use reqwest::Client;
+use serde::Deserialize;
+use crate::{Error};  
+use crate::trade_setup::{TimeFrame};
+use crate::strategy::{Strategy, CustomStrategy};
+use crate::signal::{SignalEngine, IndexId};
 use tokio::time::{sleep, Duration};
-use hyperliquid_rust_sdk::{InfoClient, BaseUrl};
+
 
 pub struct BackTester{
-    info: InfoClient,
+    client: Client,
 }
 
+
+#[derive(Debug, Clone, Deserialize)]
+struct BackTestRequest{
+    asset: String,
+    lev: u64,
+    margin: u64,
+    startTime: u64,
+    endTime: u64,
+    strategy: Strategy,
+}
 
 
 impl BackTester{
 
-    pub fn new(client: InfoClient) -> Self{
+    pub fn new() -> Self{
         BackTester{
-            info: client,
+            client: Client::new(),
         }
     }
 
-    pub fn run(asset: &str,params: ExecParams, strategy: Strategy, start: u64, end: u64) -> Result<(), Error>{
-        if !MARKETS.contains(&asset){
-            return Err(Error::BacktestError(format!("ASSET ({}) ISN'T TRADABLE", asset)));
+    pub async fn fetch_binance_price_data(&self, asset: &str, tf: TimeFrame, startTime: u64, endTime: u64){
+        let url = format!(
+        "https://api.binance.com/api/v3/klines?symbol={}USDT&interval={}&startTime={}&endTime={}&limit=1000",
+        asset, tf.as_str(), startTime, endTime
+        );
+
+        let res = self.client.get(&url).send().await;
+        
+        match res{
+            Ok(response) => {
+                println!("{:?}", response.text().await.unwrap());
+            }
+
+            Err(e) => {
+                println!("REQUEST ERROR: {:?}", e);
+            }
         }
-        if end >= start{
+    }
+
+
+
+    pub fn run(BackTestRequest{asset, lev, margin, startTime, endTime, strategy}: BackTestRequest) -> Result<(), Error>{
+        if endTime >= startTime{
             return Err(Error::BacktestError(format!("Invalid time slice <start> should be less than <end>")));
         }
         
-          
 
 
-         
+        
         Ok(()) 
         
     }

@@ -22,7 +22,7 @@ pub use helper::*;
 pub use market::{AssetPrice, Market, MarketCommand, MarketUpdate};
 pub use signal::{EditType, Entry, IndexId, IndicatorKind, SignalEngine};
 pub use wallet::Wallet;
-// pub use backtest::BackTester;
+pub use backtest::BackTester;
 pub use margin::{AssetMargin, MarginAllocation};
 pub use trade_setup::{
     LiquidationFillInfo, MarketTradeInfo, TimeFrame, TradeCommand, TradeFillInfo, TradeInfo,

@@ -174,6 +174,7 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
         width,
         height,
         candles,
+        candleColor,
         startTime,
         endTime,
         minPrice,
