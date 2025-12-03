@@ -16,6 +16,7 @@ import {
     fromTimeFrame,
     get_value,
     into,
+    sanitizeAsset,
 } from "../types";
 import type {
     IndicatorKind,
@@ -247,6 +248,12 @@ export default function MarketDetail() {
         <div className="relative mx-10 min-h-screen max-w-[3000px] overflow-hidden py-8 pb-80 font-mono text-white">
             <div className="mt-10 mb-1 flex items-center justify-around">
                 <div className="relative right-[3vw] flex items-center gap-3">
+                <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>
+                    <div className="text-md relative right-20 w-fit rounded border border-orange-500/40 px-3 py-1 font-semibold text-orange-400">
+                        {"BACKTEST (BETA)"}
+                    </div>
+                </Link>
+
                     <button
                         onClick={() =>
                             handleConfirmToggle(market.asset, market.isPaused)

@@ -23,8 +23,8 @@ const Header: React.FC = () => (
 
             <div className="flex items-center gap-2">
                 <Link to="/backtest/BTC">
-                    <div className="text-md relative right-20 w-fit rounded border border-orange-500 px-3 py-1 font-semibold text-orange-400">
-                        {">>> BACKTESTING (BETA)"}
+                    <div className="text-md relative right-20 w-fit rounded border border-orange-500/60 px-3 py-1 font-semibold text-white">
+                        {"BACKTESTING (BETA)"}
                     </div>
                 </Link>
                 <a

@@ -288,3 +288,13 @@ export const TF_TO_MS: Record<TimeFrame, number> = {
     week: 7 * 24 * 60 * 60_000,
     month: 30 * 24 * 60 * 60_000,
 };
+
+
+export const sanitizeAsset = (asset: string) => {
+    if (asset[0] == "k"){
+        return asset.slice(1);
+    }
+    return asset;
+};
+
+

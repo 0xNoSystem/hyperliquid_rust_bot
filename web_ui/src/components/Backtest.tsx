@@ -1,12 +1,14 @@
 import React, { useRef, useState, useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
-import { TIMEFRAME_CAMELCASE, fromTimeFrame, TF_TO_MS } from "../types";
+import { useParams, useNavigate } from "react-router-dom";
+import { TIMEFRAME_CAMELCASE, fromTimeFrame, TF_TO_MS, sanitizeAsset } from "../types";
 import type { TimeFrame } from "../types";
 import ChartContainer from "../chart/ChartContainer";
 import { getTimeframeCache } from "../chart/candleCache";
 import { fetchCandles } from "../chart/utils";
+import AssetIcon from "../chart/visual/AssetIcon";
 import type { CandleData } from "../chart/utils";
 import { useChartContext } from "../chart/ChartContext";
+import { useWebSocketContext } from "../context/WebSocketContext";
 
 type RangePreset = "24H" | "7D" | "30D" | "YTD" | "CUSTOM";
 
@@ -246,8 +248,9 @@ type BacktestContentProps = {
 // Backtest Content
 // -----------------------
 function BacktestContent({ routeAsset }: BacktestContentProps) {
+    const nav = useNavigate();
     const { startTime, endTime, setTimeRange } = useChartContext();
-
+    const { universe } = useWebSocketContext();
     const defaultStartParts = useMemo(
         () => dateToParts(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
         []
@@ -557,14 +560,25 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                             </div>
                         )}
                         <div className="ml-auto">
-                            <button className="rounded border border-orange-500 px-3 py-1 text-sm font-semibold text-orange-400 transition">
-                                KWANT
-                            </button>
+                            <select
+                            value={routeAsset}
+                            onChange={(e) => nav(`/backtest/${sanitizeAsset(e.target.value)}`)}
+                            required
+                            className="rounded border border-orange-500 bg-black/80 px-3 py-1 text-sm font-semibold text-orange-400 transition"
+                        >
+                            {universe.map((u) => (
+                                <option key={u.name} value={sanitizeAsset(u.name)}>
+                                    {sanitizeAsset(u.name)}
+                                </option>
+                            ))}
+                        </select>
+
                         </div>
                     </div>
 
                     {/* Asset Title */}
                     <h2 className="rounded-t-lg bg-black/80 p-2 text-center text-2xl font-semibold">
+                        <AssetIcon symbol={sanitizeAsset(routeAsset)} className="inline-block mr-2 mb-1" />
                         {routeAsset}
                     </h2>
 
