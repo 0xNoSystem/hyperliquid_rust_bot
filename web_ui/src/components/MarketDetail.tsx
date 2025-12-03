@@ -411,12 +411,17 @@ export default function MarketDetail() {
                                         </span>
                                     </div>
                                 </div>
+                                <div className="flex items-end justify-between">
                                 <button
                                     onClick={onSaveMargin}
                                     className={BtnOK}
                                 >
                                     Apply
                                 </button>
+                                <span className="">
+                                    Margin: {market.margin} $
+                                </span>
+                                </div>
                             </div>
                         </div>
 
