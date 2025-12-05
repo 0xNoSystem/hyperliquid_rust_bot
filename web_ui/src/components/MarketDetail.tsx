@@ -245,7 +245,8 @@ export default function MarketDetail() {
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
-        <div className="relative mx-10 min-h-screen max-w-[3000px] overflow-hidden py-8 pb-80 font-mono text-white">
+        <div className="relative min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white">
+                    <BackgroundFX intensity={1} />
             <div className="mt-10 mb-1 flex items-center justify-around">
                 <div className="relative right-[3vw] flex items-center gap-3">
                 <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>
@@ -419,7 +420,7 @@ export default function MarketDetail() {
                                     Apply
                                 </button>
                                 <span className="">
-                                    Margin: {market.margin} $
+                                    Margin: {market.margin.toFixed(2)} $
                                 </span>
                                 </div>
                             </div>

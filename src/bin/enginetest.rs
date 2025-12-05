@@ -200,7 +200,6 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-
 async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error> {
     let wallet = std::env::var("PRIVATE_KEY")
         .expect("Error fetching PRIVATE_KEY")

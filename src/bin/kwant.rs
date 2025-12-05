@@ -172,5 +172,3 @@ pub async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error> {
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
     Ok(Wallet::new(url, pubkey, wallet.unwrap()).await?)
 }
-
-

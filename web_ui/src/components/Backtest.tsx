@@ -406,7 +406,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     }, [startTime, endTime, timeframe, intervalOn, routeAsset]);
 
     return (
-        <div className="flex flex-1 flex-col bg-black/70 pb-50">
+        <div className="flex flex-1 flex-col bg-black/10 pb-50">
             {/* Title */}
             <h1 className="mt-6 p-2 text-center text-3xl font-bold tracking-widest">
                 STRATEGY LAB
@@ -427,7 +427,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         <button
                             onClick={() => setIntervalOn(!intervalOn)}
                             className={`relative mr-3 flex h-6 w-12 cursor-pointer items-center rounded-full transition-colors duration-300 ${
-                                intervalOn ? "bg-orange-500" : "bg-gray-600"
+                                intervalOn ? "bg-orange-500" : "bg-gray-500"
                             }`}
                         >
                             <span

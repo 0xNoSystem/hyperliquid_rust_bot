@@ -19,7 +19,7 @@ export function BackgroundFX({
         >
             {/* radial glows */}
             <div className="absolute inset-0" style={{ opacity: 0.08 * i }}>
-                <div className="h-full w-full [background:radial-gradient(60%_60%_at_0%_0%,rgba(56,189,248,0.5),transparent_60%),radial-gradient(50%_50%_at_100%_0%,rgba(232,121,249,0.5),transparent_60%),radial-gradient(60%_60%_at_50%_100%,rgba(52,211,153,0.4),transparent_60%)]" />
+                <div />
             </div>
 
             {/* subtle grid */}

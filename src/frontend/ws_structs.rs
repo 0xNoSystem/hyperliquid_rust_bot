@@ -58,5 +58,3 @@ pub enum UpdateFrontend {
     UserError(String),
     LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),
 }
-
-

@@ -35,8 +35,7 @@ impl SignalEngine {
         trade_tx: Sender<TradeCommand>,
         margin: f64,
     ) -> Self {
-        let mut trackers: TrackersMap =
-            HashMap::default();
+        let mut trackers: TrackersMap = HashMap::default();
         trackers.insert(
             trade_params.time_frame,
             Box::new(Tracker::new(trade_params.time_frame)),
@@ -167,7 +166,7 @@ impl SignalEngine {
     }
 
     #[inline(always)]
-    fn digest(&mut self, price: Price){
+    fn digest(&mut self, price: Price) {
         for (_tf, tracker) in self.trackers.iter_mut() {
             tracker.digest(price);
         }
@@ -265,8 +264,7 @@ impl SignalEngine {
         strategy: Strategy,
         config: Option<Vec<IndexId>>,
     ) -> Self {
-        let mut trackers: TrackersMap =
-            HashMap::default();
+        let mut trackers: TrackersMap = HashMap::default();
 
         if let Some(list) = config {
             if !list.is_empty() {

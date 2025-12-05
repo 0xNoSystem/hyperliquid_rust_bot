@@ -1,5 +1,5 @@
 use crate::TimeFrame;
-use hyperliquid_rust_sdk::{AssetMeta, Error, InfoClient, Message, Subscription, CandleData};
+use hyperliquid_rust_sdk::{AssetMeta, CandleData, Error, InfoClient, Message, Subscription};
 use kwant::indicators::Price;
 use log::info;
 use log::warn;
@@ -102,6 +102,7 @@ pub async fn load_candles(
     Ok(price_data)
 }
 
+#[inline(always)]
 pub fn address(address: &String) -> Address {
     address.to_string().parse().unwrap()
 }
@@ -139,28 +140,28 @@ pub fn get_time_now() -> u64 {
         .as_millis() as u64
 }
 
-pub fn parse_candle(candle: CandleData) -> Result<Price, Error>{
-        let h = candle
-            .high
-            .parse::<f64>()
-            .map_err(|e| Error::GenericParse(format!("Failed to parse high: {}", e)))?;
-        let l = candle
-            .low
-            .parse::<f64>()
-            .map_err(|e| Error::GenericParse(format!("Failed to parse low: {}", e)))?;
-        let o = candle
-            .open
-            .parse::<f64>()
-            .map_err(|e| Error::GenericParse(format!("Failed to parse open: {}", e)))?;
-        let c = candle
-            .close
-            .parse::<f64>()
-            .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
-        
-        Ok(Price {
-            high: h,
-            low: l,
-            open: o,
-            close: c,
-        })
+pub fn parse_candle(candle: CandleData) -> Result<Price, Error> {
+    let h = candle
+        .high
+        .parse::<f64>()
+        .map_err(|e| Error::GenericParse(format!("Failed to parse high: {}", e)))?;
+    let l = candle
+        .low
+        .parse::<f64>()
+        .map_err(|e| Error::GenericParse(format!("Failed to parse low: {}", e)))?;
+    let o = candle
+        .open
+        .parse::<f64>()
+        .map_err(|e| Error::GenericParse(format!("Failed to parse open: {}", e)))?;
+    let c = candle
+        .close
+        .parse::<f64>()
+        .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
+
+    Ok(Price {
+        high: h,
+        low: l,
+        open: o,
+        close: c,
+    })
 }

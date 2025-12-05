@@ -90,7 +90,6 @@ impl Bot {
             return Ok(());
         }
 
-
         let mut book = margin_book.lock().await;
         self.chain_open_positions = book.sync().await?;
         if self

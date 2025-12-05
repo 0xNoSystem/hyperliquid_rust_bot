@@ -85,7 +85,6 @@ export default function MarketsPage() {
     return (
         <div className="relative min-h-screen overflow-hidden bg-[#07090B] pb-100 text-white">
             {/* layered background */}
-            <BackgroundFX intensity={1} />
             <div className="mx-auto mt-20 grid max-w-7xl grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[280px,1fr]">
                 {/* Command Dock */}
                 <aside className="h-fit rounded-md border border-white/10 bg-[#0B0E12]/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">

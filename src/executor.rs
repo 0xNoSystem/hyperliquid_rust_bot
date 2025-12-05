@@ -78,7 +78,7 @@ impl Executor {
             is_buy: is_long,
             sz: size as f64,
             px: None,
-            slippage: Some(0.01), // 1% slippage
+            slippage: Some(0.01), // 1%
             cloid: None,
             wallet: None,
         };

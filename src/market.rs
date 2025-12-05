@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use hyperliquid_rust_sdk::{AssetMeta, Error, ExchangeClient, InfoClient, Message};
 
-
 use crate::executor::Executor;
 use crate::helper::{load_candles, parse_candle};
 use crate::signal::{

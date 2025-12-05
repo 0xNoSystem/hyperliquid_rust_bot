@@ -49,7 +49,7 @@ impl MarginBook {
 
         self.sync().await?;
         if requested_margin > free {
-            return Err(Error::InsufficientFreeMargin(free));
+            return Err(Error::InsufficientFreeMargin(round_2dp(free)));
         }
         self.map.insert(asset, requested_margin);
 
@@ -68,7 +68,7 @@ impl MarginBook {
                 let requested_margin = self.total_on_chain * ptc;
                 if requested_margin > free {
                     log::warn!("Error::InsufficientFreeMargin({})", free);
-                    return Err(Error::InsufficientFreeMargin(free));
+                    return Err(Error::InsufficientFreeMargin(round_2dp(free)));
                 }
                 self.map.insert(asset, requested_margin);
                 Ok(requested_margin)
@@ -80,7 +80,7 @@ impl MarginBook {
                 }
                 if amount > free {
                     log::warn!("Error::InsufficientFreeMargin({})", free);
-                    return Err(Error::InsufficientFreeMargin(free));
+                    return Err(Error::InsufficientFreeMargin(round_2dp(free)));
                 }
                 self.map.insert(asset, amount);
                 Ok(amount)
@@ -106,3 +106,7 @@ impl MarginBook {
 }
 
 pub type AssetMargin = (String, f64);
+
+fn round_2dp(val: f64) -> f64 {
+    (val * 100.0).round() / 100.0
+}
