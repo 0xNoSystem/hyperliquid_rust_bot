@@ -65,7 +65,7 @@ impl MarginBook {
                 if ptc <= 0.0 {
                     return Err(Error::InvalidMarginAmount);
                 }
-                let requested_margin = self.total_on_chain * ptc;
+                let requested_margin = free * ptc;
                 if requested_margin > free {
                     log::warn!("Error::InsufficientFreeMargin({})", free);
                     return Err(Error::InsufficientFreeMargin(round_2dp(free)));
