@@ -168,7 +168,7 @@ pub fn parse_candle(candle: CandleData) -> Result<Price, Error> {
 
 #[macro_export]
 macro_rules! roundf {
-    ($arg:tt, $dp: literal) => {$crate::helper::round_ndp($arg, $dp)};
+    ($arg:expr, $dp: literal) => {$crate::helper::round_ndp($arg, $dp)};
 }
 
 pub fn round_ndp(value: f64, dp: u32) -> f64{
