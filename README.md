@@ -1,98 +1,71 @@
 # Hyperliquid Rust Bot
 
-Hyperliquid Rust Bot is an experimental trading system built with
-[`hyperliquid_rust_sdk`](https://github.com/0xNoSystem/hyperliquid-rust-sdk) and
-[`kwant`](https://github.com/0xNoSystem/Indicators_rs). It manages multiple
-markets on the Hyperliquid exchange and places trades based on signals from
-user-selected indicators.
-
-The repository currently ships a React UI (BETA).
-The server instance is in bin/kwant.rs.
+A Hyperliquid trading terminal (not a library) built with Rust and React/TS. It automates indicator-driven strategies, orchestrates margin across markets, and ships with a beta backtesting view (Binance candles for history, live trading on Hyperliquid).
 
 <img width="2090" height="1277" alt="image" src="https://github.com/user-attachments/assets/d1ed699f-a1ef-48d9-882e-63291ae9a8c3" />
 
 <img width="2506" height="1251" alt="image" src="https://github.com/user-attachments/assets/0a27d4db-1b79-4c36-b00e-3b3da6fbfb38" />
 
+## What it does
 
-## Features
+- Manage multiple Hyperliquid markets with a margin book that syncs on-chain balances before allocating size to the bot.
+- Automated signals from `kwant` indicators (RSI, StochRSI, EMA cross, ADX, ATR, SMA/EMA) with per-market timeframes and strategy presets (risk/style/stance/follow trend).
+- React dashboard to add/pause/close markets, cache setups locally, view PnL/trades, and inspect indicator values in real time.
+- Backtesting (beta) pulls historical candles from Binance to bypass Hyperliquid’s 5k-candle history cap; only live trading touches Hyperliquid.
+- Actix backend (`src/bin/kwant.rs`) exposes `POST /command` + `ws://localhost:8090/ws` to the UI and drives order flow via `hyperliquid_rust_sdk`.
+- Designed for dedicated bot accounts: manual positions on the same wallet can block markets because the bot keeps margin in sync with on-chain state.
 
-- Connect to Hyperliquid mainnet, testnet or localhost.
-- Manage several markets concurrently with configurable margin allocation.
-- Customisable strategy (risk, style, stance).
-- Indicator engine where each indicator is bound to a timeframe.
-- Asynchronous design using `tokio` and `flume` channels.
+## Requirements
 
-## Getting started
+- Rust toolchain (stable).
+- Bun (or Node.js) for the React/Vite frontend; `run.sh` uses Bun.
+- Hyperliquid API private key and wallet address; optional agent key.
 
-1. Install a recent Rust toolchain.
-2. Create a `.env` file in the src/bin/actix-web folder`:
+## Setup
+
+1. Clone and enter the repo:
+
+   ```bash
+   git clone <repo-url>
+   cd hyperliquid_rust_bot
+   ```
+
+2. Create a `.env` in the project root (loaded by the Actix backend):
 
    ```env
-   PRIVATE_KEY=<your API private key> -> https://app.hyperliquid.xyz/API
+   PRIVATE_KEY=<your API private key> # https://app.hyperliquid.xyz/API
    AGENT_KEY=<optional agent api public key>
    WALLET=<public wallet address>
    ```
 
-3. Run the app:
+   Use a wallet that is not traded manually so the bot fully controls margin.
+
+3. Make the runner executable if needed:
 
    ```bash
-   ./run.sh
+   chmod +x ./run.sh
    ```
 
-## Strategy
+## Run
 
-The bot uses `CustomStrategy` (see `src/strategy.rs`). It combines indicators
-such as RSI, StochRSI, EMA crosses, ADX and ATR. Risk level (`Low`, `Normal`,
-`High`), trading style (`Scalp` or `Swing`) and market stance (`Bull`, `Bear` or
-`Neutral`) can be set. Signals are generated when multiple indicator conditions
-agree—for example an oversold RSI with a bullish StochRSI crossover may trigger a
-long trade.
+Start everything with one command (backend + frontend):
 
-## Indicators
-
-Indicators are activated with `(IndicatorKind, TimeFrame)` pairs. Available kinds
-include:
-
-- `Rsi(u32)`
-- `SmaOnRsi { periods, smoothing_length }`
-- `StochRsi { periods, k_smoothing, d_smoothing }`
-- `Adx { periods, di_length }`
-- `Atr(u32)`
-- `Ema(u32)`
-- `EmaCross { short, long }`
-- `Sma(u32)`
-
-Each pair is wrapped in an `Entry` together with an `EditType` (`Add`, `Remove` or
-`Toggle`). The snippet below (from `enginetest.rs`) shows how a market can be
-created with a custom indicator configuration:
-
-```rust
-let config = vec![
-    (IndicatorKind::Rsi(12), TimeFrame::Min1),
-    (IndicatorKind::EmaCross { short: 21, long: 200 }, TimeFrame::Day1),
-];
-
-let market = AddMarketInfo {
-    asset: "BTC".to_string(),
-    margin_alloc: MarginAllocation::Alloc(0.1),
-    trade_params,
-    config: Some(config),
-};
+```bash
+./run.sh
 ```
 
-## Project structure
+- Backend: `cargo run --release --bin kwant` at `http://127.0.0.1:8090` (Actix, WebSocket at `/ws`, logs via `RUST_LOG=info`).
+- Frontend: Vite dev server via Bun (`http://localhost:5173` by default).
+- To target testnet/local, change `BaseUrl::Mainnet` in `src/bin/kwant.rs` before running.
 
-- `src/bot.rs` – orchestrates markets and keeps margin in sync.
-- `src/market.rs` – handles a single market: data feed, signal engine and order
-  execution.
-- `src/signal/` – indicator trackers and strategy logic.
-- `src/executor.rs` – sends orders via the Hyperliquid API.
-- `src/trade_setup.rs` – trading parameters and trade metadata.
-- `config.toml` – example strategy configuration.
+## Backend / frontend layout
 
-Supported trading pairs can be found in `src/consts.rs` (`MARKETS`).
+- `src/bin/kwant.rs` – Actix entrypoint; loads `.env`, spins up the bot, exposes `/command` and `/ws`.
+- `src/` – margin book (`margin.rs`), markets and signal engine (`market.rs`, `signal/`), strategy (`strategy.rs`), executor, wallet helpers, and a backtester scaffold.
+- `web_ui/` – React + TypeScript + Vite + Tailwind/MUI interface (markets, per-asset detail, settings, backtest). Backtesting candles come from Binance; live trading and margin updates stream from the Actix server.
 
-## Disclaimer
+## Notes
 
-This code is experimental and not audited. Use at your own risk when trading on
-live markets.
+- Backtesting is beta and purely uses Binance OHLCV; live trades execute on Hyperliquid.
+- Manual trades on the same account can interfere with the bot’s margin orchestration; a dedicated account is recommended.
+- Experimental software; use at your own risk.
