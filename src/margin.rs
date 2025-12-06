@@ -107,4 +107,3 @@ impl MarginBook {
 }
 
 pub type AssetMargin = (String, f64);
-

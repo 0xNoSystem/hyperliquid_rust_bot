@@ -21,7 +21,7 @@ export default function Settings() {
     };
 
     return (
-        <div className="relative min-h-screen overflow-hidden bg-[#07090B] px-6 py-10 text-white">
+        <div className="relative min-h-screen overflow-hidden bg-[#07090B] px-6 py-10 text-white pb-50">
             <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -64,7 +64,7 @@ export default function Settings() {
                         valid for
                     </li>
                     <li>
-                        Copy the generated <strong>Private Key</strong> (shown
+                        Copy the generated <strong>Private API Key</strong> (shown
                         once only in a red box) and{" "}
                         <strong>Agent Key(optional)</strong>. Store them
                         securely.
@@ -108,14 +108,14 @@ export default function Settings() {
                 <div className="space-y-4">
                     <div>
                         <label className="mb-1 block text-sm text-white/70">
-                            API PRIVATE KEY
+                            API KEY
                         </label>
                         <input
                             type="password"
                             className="w-full rounded-md border border-white/10 bg-[#101214] px-3 py-2 text-white"
                             value={privateKey}
                             onChange={(e) => setPrivateKey(e.target.value)}
-                            placeholder="Enter your API PRIVATE KEY"
+                            placeholder="Enter your API KEY"
                         />
                     </div>
 

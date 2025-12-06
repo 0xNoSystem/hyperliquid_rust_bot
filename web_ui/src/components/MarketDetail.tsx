@@ -692,8 +692,8 @@ export default function MarketDetail() {
                                         "12h",
                                         "1d",
                                         "3d",
-                                        "w",
-                                        "m",
+                                        "1w",
+                                        "1M",
                                     ].map((s) => (
                                         <option
                                             key={s}

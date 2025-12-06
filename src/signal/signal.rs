@@ -226,6 +226,16 @@ impl SignalEngine {
                             let _ = self.load(tf, prices).await;
                         }
                     }
+
+                    //Update frontend without waiting for next price update which makes indicators
+                    //editing appear laggy
+                    let ind = self.get_indicators_data();
+                    let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
+                    if !ind.is_empty() {
+                        if let Some(sender) = &self.data_tx {
+                            let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
+                        }
+                    }
                 }
 
                 EngineCommand::UpdateExecParams(param) => {

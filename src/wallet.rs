@@ -88,7 +88,8 @@ impl Wallet {
                             .leverage
                             .value as f64;
                         return Some(
-                            (o.sz.parse::<f64>().ok()? * o.limit_px.parse::<f64>().ok()?) / lev);
+                            (o.sz.parse::<f64>().ok()? * o.limit_px.parse::<f64>().ok()?) / lev,
+                        );
                     }
                     None
                 }
