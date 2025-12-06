@@ -102,9 +102,9 @@ pub async fn load_candles(
     Ok(price_data)
 }
 
-#[inline(always)]
+#[inline]
 pub fn address(address: &String) -> Address {
-    address.to_string().parse().unwrap()
+    address.parse().unwrap()
 }
 
 pub async fn get_max_lev(info_client: &InfoClient, token: &str) -> usize {
@@ -164,4 +164,14 @@ pub fn parse_candle(candle: CandleData) -> Result<Price, Error> {
         open: o,
         close: c,
     })
+}
+
+#[macro_export]
+macro_rules! roundf {
+    ($arg:tt, $dp: literal) => {$crate::helper::round_ndp($arg, $dp)};
+}
+
+pub fn round_ndp(value: f64, dp: u32) -> f64{
+    let factor = 10f64.powi(dp as i32);
+    (value * factor).round() / factor
 }

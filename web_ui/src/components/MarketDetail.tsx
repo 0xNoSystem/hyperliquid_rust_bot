@@ -245,8 +245,7 @@ export default function MarketDetail() {
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
-        <div className="relative min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white">
-                    <BackgroundFX intensity={1} />
+        <div className="relative min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white z-1">
             <div className="mt-10 mb-1 flex items-center justify-around">
                 <div className="relative right-[3vw] flex items-center gap-3">
                 <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>

@@ -152,7 +152,6 @@ impl SignalEngine {
         }
     }
 
-    #[inline(always)]
     fn get_signal(&self, price: f64, values: Vec<Value>) -> Option<TradeCommand> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_signal(values, price, self.exec_params),
@@ -165,7 +164,6 @@ impl SignalEngine {
         }
     }
 
-    #[inline(always)]
     fn digest(&mut self, price: Price) {
         for (_tf, tracker) in self.trackers.iter_mut() {
             tracker.digest(price);

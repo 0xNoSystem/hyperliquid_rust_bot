@@ -3,7 +3,7 @@ use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 
-use crate::Wallet;
+use crate::{Wallet, roundf};
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,7 @@ impl MarginBook {
             total_on_chain: f64::from_bits(1),
         }
     }
+
     pub async fn sync(&mut self) -> Result<Vec<AssetPosition>, Error> {
         let res = self.user.get_user_margin(&mut self.map.keys()).await?;
         self.total_on_chain = res.0;
@@ -49,7 +50,7 @@ impl MarginBook {
 
         self.sync().await?;
         if requested_margin > free {
-            return Err(Error::InsufficientFreeMargin(round_2dp(free)));
+            return Err(Error::InsufficientFreeMargin(roundf!(free, 2)));
         }
         self.map.insert(asset, requested_margin);
 
@@ -68,7 +69,7 @@ impl MarginBook {
                 let requested_margin = free * ptc;
                 if requested_margin > free {
                     log::warn!("Error::InsufficientFreeMargin({})", free);
-                    return Err(Error::InsufficientFreeMargin(round_2dp(free)));
+                    return Err(Error::InsufficientFreeMargin(roundf!(free, 2)));
                 }
                 self.map.insert(asset, requested_margin);
                 Ok(requested_margin)
@@ -80,7 +81,7 @@ impl MarginBook {
                 }
                 if amount > free {
                     log::warn!("Error::InsufficientFreeMargin({})", free);
-                    return Err(Error::InsufficientFreeMargin(round_2dp(free)));
+                    return Err(Error::InsufficientFreeMargin(roundf!(free, 2)));
                 }
                 self.map.insert(asset, amount);
                 Ok(amount)
@@ -107,6 +108,3 @@ impl MarginBook {
 
 pub type AssetMargin = (String, f64);
 
-fn round_2dp(val: f64) -> f64 {
-    (val * 100.0).round() / 100.0
-}
