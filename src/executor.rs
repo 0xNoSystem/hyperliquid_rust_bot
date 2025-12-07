@@ -67,7 +67,7 @@ impl Executor {
         let status = response
             .data
             .filter(|d| !d.statuses.is_empty())
-            .and_then(|d| d.statuses.get(0).cloned())
+            .and_then(|d| d.statuses.first().cloned())
             .ok_or_else(|| "Exchange Error: Couldn't fetch trade status".to_string())?;
 
         Ok(status)
@@ -76,7 +76,7 @@ impl Executor {
         let market_open_params = MarketOrderParams {
             asset: self.asset.as_str(),
             is_buy: is_long,
-            sz: size as f64,
+            sz: size,
             px: None,
             slippage: Some(0.01), // 1%
             cloid: None,
@@ -108,7 +108,7 @@ impl Executor {
         let market_close_params = MarketOrderParams {
             asset: self.asset.as_str(),
             is_buy: !is_long,
-            sz: size as f64,
+            sz: size,
             px: None,
             slippage: Some(0.01), // 1% slippage
             cloid: None,
@@ -128,7 +128,7 @@ impl Executor {
                     oid: order.oid,
                     is_long,
                 };
-                return Ok(fill_info);
+                Ok(fill_info)
             }
 
             _ => Err("Close order not filled".to_string()),
@@ -144,7 +144,7 @@ impl Executor {
         let market_close_params = MarketOrderParams {
             asset: asset.as_str(),
             is_buy: !is_long,
-            sz: size as f64,
+            sz: size,
             px: None,
             slippage: Some(0.01), // 1% slippage
             cloid: None,
@@ -164,7 +164,7 @@ impl Executor {
                     oid: order.oid,
                     is_long,
                 };
-                return Ok(fill_info);
+                Ok(fill_info)
             }
 
             _ => Err("Close order not filled".to_string()),

@@ -159,7 +159,7 @@ impl Tracker {
     }
 
     fn update_indicators(&mut self, price: Price, after_close: bool) {
-        for (_kind, handler) in &mut self.indicators {
+        for handler in &mut self.indicators.values_mut() {
             handler.update(price, after_close);
         }
     }
@@ -220,7 +220,7 @@ impl Tracker {
 
     pub fn get_active_values(&self) -> Vec<Value> {
         let mut values = Vec::new();
-        for (_kind, handler) in &self.indicators {
+        for handler in self.indicators.values() {
             if let Some(val) = handler.get_value() {
                 values.push(val);
             }
@@ -241,7 +241,7 @@ impl Tracker {
 
     pub fn reset(&mut self) {
         self.price_data.clear();
-        for (_kind, handler) in &mut self.indicators {
+        for handler in self.indicators.values_mut() {
             handler.reset();
         }
     }

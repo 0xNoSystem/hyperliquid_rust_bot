@@ -1,5 +1,5 @@
 use crate::{
-    AddMarketInfo, LiquidationFillInfo, MARKETS, Market, MarketCommand, MarketInfo, MarketUpdate,
+    AddMarketInfo, LiquidationFillInfo, Market, MarketCommand, MarketInfo, MarketUpdate,
     UpdateFrontend, Wallet,
 };
 use hyperliquid_rust_sdk::{
@@ -95,7 +95,7 @@ impl Bot {
         if self
             .chain_open_positions
             .iter()
-            .any(|p| &p.position.coin == &asset)
+            .any(|p| p.position.coin == asset)
         {
             if let Some(tx) = &self.app_tx {
                 let _ = tx.send(UpdateFrontend::UserError(format!(
@@ -161,7 +161,7 @@ impl Bot {
 
     pub async fn remove_market(
         &mut self,
-        asset: &String,
+        asset: &str,
         margin_book: &Arc<Mutex<MarginBook>>,
     ) -> Result<(), Error> {
         let asset = asset.trim().to_string();
@@ -200,7 +200,7 @@ impl Bot {
         Ok(())
     }
 
-    pub async fn pause_or_resume_market(&self, asset: &String) {
+    pub async fn pause_or_resume_market(&self, asset: &str) {
         let asset = asset.trim().to_string();
 
         if let Some(tx) = self.markets.get(&asset) {
@@ -253,7 +253,7 @@ impl Bot {
         session.clear();
     }
 
-    pub async fn send_cmd(&self, asset: &String, cmd: MarketCommand) {
+    pub async fn send_cmd(&self, asset: &str, cmd: MarketCommand) {
         let asset = asset.trim().to_string();
 
         if let Some(tx) = self.markets.get(&asset) {
@@ -409,7 +409,7 @@ impl Bot {
                         for (coin, fills) in liq_map.into_iter(){
                             let to_send = LiquidationFillInfo::from(fills);
                             let cmd = MarketCommand::ReceiveLiquidation(to_send);
-                            self.send_cmd(&coin, cmd).await;
+                            self.send_cmd(coin.as_str(), cmd).await;
                         }
                 },
 
@@ -422,8 +422,8 @@ impl Bot {
                                     let _ = err_tx.send(UserError(e.to_string()));
                             }
                         },
-                            ToggleMarket(asset) => {self.pause_or_resume_market(&asset).await;},
-                            RemoveMarket(asset) => {let _ = self.remove_market(&asset, &margin_user_edit).await;},
+                            ToggleMarket(asset) => {self.pause_or_resume_market(asset.as_str()).await;},
+                            RemoveMarket(asset) => {let _ = self.remove_market(asset.as_str(), &margin_user_edit).await;},
                             MarketComm(command) => {self.send_cmd(&command.asset, command.cmd).await;},
                             ManualUpdateMargin(asset_margin) => {
                                 let result = {
@@ -433,7 +433,7 @@ impl Bot {
                                 match result{
                                 Ok(new_margin) => {
                                     let cmd = MarketCommand::UpdateMargin(new_margin);
-                                    self.send_cmd(&asset_margin.0.to_string(), cmd).await;
+                                    self.send_cmd(&asset_margin.0, cmd).await;
                                 },
 
                                 Err(e) => {
@@ -455,7 +455,7 @@ impl Bot {
                                 if let Ok(session) = session{
                                     let _ = err_tx.send(LoadSession(session));
                                 }else{
-                                    let _ = err_tx.send(UserError(format!("Failed to load session from server.")));
+                                    let _ = err_tx.send(UserError("Failed to load session from server.".to_string()));
                                 }
                             },
                         }

@@ -103,7 +103,7 @@ pub async fn load_candles(
 }
 
 #[inline]
-pub fn address(address: &String) -> Address {
+pub fn address(address: &str) -> Address {
     address.parse().unwrap()
 }
 
@@ -124,7 +124,7 @@ pub async fn get_asset(info_client: &InfoClient, token: &str) -> Result<AssetMet
     if let Some(asset) = assets.into_iter().find(|a| a.name == token) {
         Ok(asset)
     } else {
-        return Err(Error::AssetNotFound);
+        Err(Error::AssetNotFound)
     }
 }
 

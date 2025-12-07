@@ -41,8 +41,8 @@ impl SignalEngine {
             Box::new(Tracker::new(trade_params.time_frame)),
         );
 
-        if let Some(list) = config {
-            if !list.is_empty() {
+        if let Some(list) = config
+            && !list.is_empty() {
                 for id in list {
                     if let Some(tracker) = &mut trackers.get_mut(&id.1) {
                         tracker.add_indicator(id.0, false);
@@ -52,7 +52,6 @@ impl SignalEngine {
                         trackers.insert(id.1, Box::new(new_tracker));
                     }
                 }
-            }
         };
 
         SignalEngine {
@@ -66,7 +65,7 @@ impl SignalEngine {
     }
 
     pub fn reset(&mut self) {
-        for (_tf, tracker) in &mut self.trackers {
+        for tracker in self.trackers.values_mut() {
             tracker.reset();
         }
     }
@@ -108,7 +107,7 @@ impl SignalEngine {
 
     pub fn get_active_values(&self) -> Vec<Value> {
         let mut values = Vec::new();
-        for (_tf, tracker) in &self.trackers {
+        for tracker in self.trackers.values() {
             values.extend(tracker.get_active_values());
         }
         values
@@ -116,7 +115,7 @@ impl SignalEngine {
 
     pub fn get_indicators_data(&self) -> Vec<IndicatorData> {
         let mut values = Vec::new();
-        for (_tf, tracker) in &self.trackers {
+        for tracker in self.trackers.values() {
             values.extend(tracker.get_indicators_data());
         }
         values
@@ -158,6 +157,7 @@ impl SignalEngine {
         }
     }
 
+    #[allow(unused)]
     fn get_test_trade(&self, price: f64) -> Option<TradeCommand> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_test_trade(price, self.exec_params),
@@ -184,11 +184,10 @@ impl SignalEngine {
                     let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
 
                     if !ind.is_empty() {
-                        if tick % 5 == 0 {
-                            if let Some(sender) = &self.data_tx {
+                        if tick.is_multiple_of(2) 
+                            && let Some(sender) = &self.data_tx {
                                 let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                             }
-                        }
 
                         if let Some(trade) = self.get_signal(price.close, values) {
                             let _ = self.trade_tx.try_send(trade);
@@ -230,13 +229,11 @@ impl SignalEngine {
                     //Update frontend without waiting for next price update which makes indicators
                     //editing appear laggy
                     let ind = self.get_indicators_data();
-                    let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
-                    if !ind.is_empty() {
-                        if let Some(sender) = &self.data_tx {
+                    if !ind.is_empty() 
+                        && let Some(sender) = &self.data_tx {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
                     }
-                }
 
                 EngineCommand::UpdateExecParams(param) => {
                     use ExecParam::*;
@@ -274,8 +271,8 @@ impl SignalEngine {
     ) -> Self {
         let mut trackers: TrackersMap = HashMap::default();
 
-        if let Some(list) = config {
-            if !list.is_empty() {
+        if let Some(list) = config 
+            && !list.is_empty() {
                 for id in list {
                     if let Some(tracker) = &mut trackers.get_mut(&id.1) {
                         tracker.add_indicator(id.0, false);
@@ -285,7 +282,6 @@ impl SignalEngine {
                         trackers.insert(id.1, Box::new(new_tracker));
                     }
                 }
-            }
         }
 
         //channels won't be used in backtesting, these are placeholders

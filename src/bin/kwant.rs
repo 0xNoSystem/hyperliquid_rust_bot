@@ -7,10 +7,8 @@ use actix_cors::Cors;
 use actix_web::{App, Error as ActixError, HttpRequest, HttpResponse, HttpServer, Responder, web};
 use actix_web_actors::ws;
 use dotenv::dotenv;
-use env_logger;
 use hyperliquid_rust_bot::{BaseUrl, Bot, BotEvent, Error, UpdateFrontend, Wallet};
 use log::{error, info};
-use serde_json;
 use std::env;
 use tokio::{
     sync::{
@@ -67,6 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/command", web::post().to(execute))
             .route("/ws", web::get().to(ws_route))
     })
+    .workers(2)
     .bind(("127.0.0.1", 8090))?
     .run()
     .await?;
@@ -170,5 +169,5 @@ pub async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error> {
         return Err(Error::Custom(format!("Failed to load wallet: {}", e)));
     }
     let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
-    Ok(Wallet::new(url, pubkey, wallet.unwrap()).await?)
+    Wallet::new(url, pubkey, wallet.unwrap()).await
 }

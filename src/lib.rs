@@ -1,5 +1,5 @@
 mod assets;
-mod backtest;
+//mod backtest;
 mod consts;
 mod executor;
 mod market;
@@ -14,7 +14,7 @@ pub mod strategy;
 pub mod trade_setup;
 
 pub use assets::MARKETS;
-pub use backtest::BackTester;
+//pub use backtest::BackTester;
 pub use bot::{Bot, BotEvent, BotToMarket};
 pub use consts::MAX_HISTORY;
 pub use executor::Executor;

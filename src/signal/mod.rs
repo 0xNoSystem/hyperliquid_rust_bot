@@ -1,7 +1,7 @@
-mod signal;
+mod engine;
 mod types;
 
-pub use signal::{EngineCommand, SignalEngine};
+pub use engine::{EngineCommand, SignalEngine};
 
 pub use types::{
     EditType, Entry, ExecParam, ExecParams, Handler, IndexId, IndicatorKind, TimeFrameData, Tracker,

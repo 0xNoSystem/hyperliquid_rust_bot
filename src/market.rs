@@ -197,7 +197,7 @@ impl Market {
                 let price = parse_candle(candle.data)?;
 
                 let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
-                if price.close != curr && tick % 5 == 0 {
+                if price.close != curr && tick.is_multiple_of(2) {
                     let _ = bot_price_update.send(MarketUpdate::PriceUpdate((
                         asset_name.clone().to_string(),
                         price.close,

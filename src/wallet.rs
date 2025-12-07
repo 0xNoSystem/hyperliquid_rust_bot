@@ -25,7 +25,7 @@ impl Wallet {
     }
 
     pub async fn get_user_fees(&self) -> Result<(f64, f64), Error> {
-        let user = address(&self.pubkey);
+        let user = address(self.pubkey.as_str());
         let user_fees = self.info_client.user_fees(user).await?;
         let add_fee = user_fees.user_add_rate.parse::<f64>().map_err(|_| {
             Error::GenericParse(format!(
@@ -45,7 +45,7 @@ impl Wallet {
     }
 
     pub async fn user_fills(&self) -> Result<Vec<UserFillsResponse>, Error> {
-        let user = address(&self.pubkey);
+        let user = address(self.pubkey.as_str());
 
         return self.info_client.user_fills(user).await;
     }
@@ -54,7 +54,7 @@ impl Wallet {
         &self,
         bot_assets: &mut std::collections::hash_map::Keys<'_, String, f64>,
     ) -> Result<(f64, Vec<AssetPosition>), Error> {
-        let user = address(&self.pubkey);
+        let user = address(self.pubkey.as_str());
 
         let state = self.info_client.user_state(user).await?;
         let open_orders = self.info_client.frontend_open_orders(user).await?;
@@ -74,7 +74,7 @@ impl Wallet {
         let ass = std::sync::Arc::new(bot_assets.cloned().collect::<HashSet<String>>());
         let open_orders_value_futures = open_orders.iter().filter_map(|o| {
             Some({
-                let mut assets = ass.clone();
+                let assets = ass.clone();
                 async move {
                     if o.is_position_tpsl || o.reduce_only {
                         return None;

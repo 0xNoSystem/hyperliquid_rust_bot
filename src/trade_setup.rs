@@ -27,7 +27,7 @@ impl TradeParams {
         first_time: bool,
     ) -> Result<usize, Error> {
         if !first_time && self.lev == lev {
-            return Err(Error::Custom(format!("Leverage is unchanged")));
+            return Err(Error::Custom("Leverage is unchanged".to_string()));
         }
 
         let response = client
@@ -224,9 +224,9 @@ impl TimeFrame {
     }
 }
 
-impl Into<u8> for TimeFrame {
-    fn into(self) -> u8 {
-        self.to_secs() as u8
+impl From<TimeFrame> for u8 {
+    fn from(tf: TimeFrame) -> Self {
+        tf.to_secs() as u8
     }
 }
 impl TimeFrame {
@@ -247,9 +247,7 @@ impl TimeFrame {
             TimeFrame::Month => "1M",
         }
     }
-    pub fn to_string(&self) -> String {
-        self.as_str().to_string()
-    }
+    
 }
 
 impl std::fmt::Display for TimeFrame {
