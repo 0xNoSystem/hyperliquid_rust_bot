@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use alloy::signers::local::PrivateKeySigner;
@@ -8,12 +9,18 @@ use tokio::{
     time::{Duration, sleep},
 };
 
+use rustc_hash::FxHasher;
+use std::hash::BuildHasherDefault;
+
 use hyperliquid_rust_sdk::{
-    BaseUrl, Error, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams,
+    BaseUrl, ClientLimit, ClientOrder, ClientOrderRequest, ClientTrigger, Error, ExchangeClient,
+    ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, RestingOrder,
 };
 
 use crate::market::MarketCommand;
-use crate::trade_setup::{TradeCommand, TradeFillInfo, TradeInfo};
+use crate::trade_setup::{
+    LimitOrderLocal,LimitOrderResponseLocal, Tif, TradeCommand, TradeFillInfo, TradeInfo, TriggerKind,
+};
 
 pub struct Executor {
     trade_rv: Receiver<TradeCommand>,
@@ -22,6 +29,7 @@ pub struct Executor {
     exchange_client: Arc<ExchangeClient>,
     is_paused: bool,
     fees: (f64, f64),
+    resting_orders: HashMap<RestingOrder, LimitOrderLocal, BuildHasherDefault<FxHasher>>,
     open_position: Arc<Mutex<Option<TradeFillInfo>>>,
 }
 
@@ -42,6 +50,7 @@ impl Executor {
             exchange_client,
             is_paused: false,
             fees,
+            resting_orders: HashMap::default(),
             open_position: Arc::new(Mutex::new(None)),
         })
     }
@@ -194,12 +203,148 @@ impl Executor {
         }
     }
 
-    /*
-     * try_limit_trade(Arc<ExchangeClient>,params: LimitOrderHL)
-     * limit_open(&self, size, price, is_long)
-     * limit_close(&self, size, price, is_long)
-     * limit_close_static(client, asset, size, price, is_long)
-     * */
+    async fn try_limit_trade(
+        client: Arc<ExchangeClient>,
+        params: ClientOrderRequest,
+    ) -> Result<ExchangeDataStatus, Error> {
+        let response = client.order(params, None).await?;
+
+        info!("Market order placed: {response:?}");
+
+        let response = match response {
+            ExchangeResponseStatus::Ok(exchange_response) => exchange_response,
+            ExchangeResponseStatus::Err(e) => {
+                return Err(Error::Custom(format!(
+                    "Exchange Error: Couldn't execute limit trade => {}",
+                    e
+                )));
+            }
+        };
+
+        let status = response
+            .data
+            .filter(|d| !d.statuses.is_empty())
+            .and_then(|d| d.statuses.first().cloned())
+            .ok_or_else(|| {
+                Error::GenericRequest("Exchange Error: Couldn't fetch trade status".to_string())
+            })?;
+
+        Ok(status)
+    }
+    async fn limit_open(
+        &self,
+        LimitOrderLocal {
+            size,
+            is_long,
+            limit_px,
+            tif,
+        }: LimitOrderLocal,
+    ) -> Result<LimitOrderResponseLocal, Error> {
+        let order = ClientOrderRequest {
+            asset: self.asset.clone(),
+            is_buy: is_long,
+            reduce_only: false,
+            limit_px,
+            sz: size,
+            cloid: None,
+            order_type: ClientOrder::Limit(ClientLimit {
+                tif: tif.to_string(),
+            }),
+        };
+
+        let status = Self::try_limit_trade(self.exchange_client.clone(), order).await?;
+
+        match status {
+            ExchangeDataStatus::Filled(ref order) => {
+                println!("Limit Open order filled as Taker: {order:?}");
+                let sz: f64 = order.total_sz.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!("Failed to parse filled order size: {}", e))
+                })?;
+                let price: f64 = order.avg_px.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!("Failed to parse filled order price: {}", e))
+                })?;
+                let fill_info = TradeFillInfo {
+                    fill_type: "Open".to_string(),
+                    sz,
+                    price,
+                    oid: order.oid,
+                    is_long,
+                };
+
+                Ok(LimitOrderResponseLocal::Filled(fill_info))
+            },
+
+            ExchangeDataStatus::Resting(order) => {
+                Ok(LimitOrderResponseLocal::Resting(order))
+            },
+
+            ExchangeDataStatus::Error(err) => {
+                Err(Error::Custom(err)) 
+            },
+
+            _ => Err(Error::Custom("Limit open order failed due to an unexpected exchange status response".to_string())),
+        }
+    }
+     async fn limit_close(
+        &self,
+        LimitOrderLocal {
+            size,
+            is_long,
+            limit_px,
+            tif,
+        }: LimitOrderLocal,
+    ) -> Result<LimitOrderResponseLocal, Error>{
+        
+        let order = ClientOrderRequest {
+            asset: self.asset.clone(),
+            is_buy: !is_long,
+            reduce_only: true,
+            limit_px,
+            sz: size,
+            cloid: None,
+            order_type: ClientOrder::Limit(ClientLimit {
+                tif: tif.to_string(),
+            }),
+        };
+
+        let status = Self::try_limit_trade(self.exchange_client.clone(), order).await?;
+
+        match status {
+            ExchangeDataStatus::Filled(ref order) => {
+                println!("Limit Close order filled as Taker: {order:?}");
+                let sz: f64 = order.total_sz.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!("Failed to parse filled order size: {}", e))
+                })?;
+                let price: f64 = order.avg_px.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!("Failed to parse filled order price: {}", e))
+                })?;
+                let fill_info = TradeFillInfo {
+                    fill_type: "Close".to_string(),
+                    sz,
+                    price,
+                    oid: order.oid,
+                    is_long,
+                };
+
+                Ok(LimitOrderResponseLocal::Filled(fill_info))
+            },
+
+            ExchangeDataStatus::Resting(order) => {
+                Ok(LimitOrderResponseLocal::Resting(order))
+            },
+
+            ExchangeDataStatus::Error(err) => {
+                Err(Error::Custom(err)) 
+            },
+
+            _ => Err(Error::Custom("Limit open order failed due to an unexpected exchange status response".to_string())),
+        }
+
+    }
+
+     /*
+        limit_close_static(client, asset, size, price, is_long)
+     */
 
     fn get_trade_info(open: TradeFillInfo, close: TradeFillInfo, fees: &(f64, f64)) -> TradeInfo {
         let is_long = open.is_long;
@@ -269,7 +414,6 @@ impl Executor {
                     size,
                     is_long,
                     duration,
-                    liq_side,
                 } => {
                     if self.is_active().await || self.is_paused {
                         continue;
@@ -309,11 +453,7 @@ impl Executor {
                     };
                 }
 
-                TradeCommand::OpenTrade {
-                    size,
-                    is_long,
-                    liq_side,
-                } => {
+                TradeCommand::OpenTrade { size, is_long } => {
                     info!("Open trade command received");
 
                     if !self.is_active().await && !self.is_paused {
@@ -328,7 +468,7 @@ impl Executor {
                     }
                 }
 
-                TradeCommand::CloseTrade { size, liq_side } => {
+                TradeCommand::CloseTrade { size } => {
                     if self.is_paused {
                         continue;
                     };

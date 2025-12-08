@@ -29,10 +29,10 @@ async fn main() {
 
     let order = ClientOrderRequest {
         asset: "ETH".to_string(),
-        is_buy: false,
+        is_buy: true,
         reduce_only: false,
         limit_px: 3119.0,
-        sz: 0.1,
+        sz: 0.0001,
         cloid: None,
         order_type: ClientOrder::Limit(ClientLimit {
             tif: "Gtc".to_string(),

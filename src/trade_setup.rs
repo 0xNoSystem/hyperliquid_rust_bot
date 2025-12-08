@@ -1,7 +1,7 @@
 use std::fmt;
 
 use hyperliquid_rust_sdk::{
-    Error, ExchangeClient, ExchangeResponseStatus, TradeInfo as HLTradeInfo,
+    Error, ExchangeClient, ExchangeResponseStatus, TradeInfo as HLTradeInfo, RestingOrder,
 };
 use log::info;
 //use kwant::indicators::Price;
@@ -76,17 +76,16 @@ pub enum TradeCommand {
         size: f64,
         is_long: bool,
         duration: u64,
-        liq_side: LiquiditySide,
     },
     OpenTrade {
         size: f64,
         is_long: bool,
-        liq_side: LiquiditySide,
     },
     CloseTrade {
         size: f64,
-        liq_side: LiquiditySide,
     },
+    Limit(LimitOrderLocal),
+    Trigger(TriggerOrderLocal),
     BuildPosition {
         size: f64,
         is_long: bool,
@@ -286,4 +285,65 @@ impl std::str::FromStr for TimeFrame {
 pub enum LiquiditySide {
     Maker,
     Taker,
+}
+
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitOrderLocal {
+    pub size: f64,
+    pub is_long: bool,
+    pub limit_px: f64,
+    pub tif: Tif,
+}
+
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerOrderLocal {
+    pub size: f64,
+    pub is_long: bool,
+    pub trigger_px: f64,
+    pub kind: TriggerKind,
+    pub is_market: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum LimitOrderResponseLocal{
+    Filled(TradeFillInfo),
+    Resting(RestingOrder),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum Tif {
+    Alo,
+    Ioc,
+    Gtc,
+}
+
+impl fmt::Display for Tif {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Tif::Alo => "Alo",
+            Tif::Ioc => "Ioc",
+            Tif::Gtc => "Gtc",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum TriggerKind {
+    Tp,
+    Sl,
+}
+
+impl fmt::Display for TriggerKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            TriggerKind::Tp => "tp",
+            TriggerKind::Sl => "sl",
+        };
+        write!(f, "{}", s)
+    }
 }
