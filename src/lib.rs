@@ -23,10 +23,7 @@ pub use helper::*;
 pub use margin::{AssetMargin, MarginAllocation};
 pub use market::{AssetPrice, Market, MarketCommand, MarketUpdate};
 pub use signal::{EditType, Entry, IndexId, IndicatorKind, SignalEngine};
-pub use trade_setup::{
-    LiquidationFillInfo, MarketTradeInfo, TimeFrame, TradeCommand, TradeFillInfo, TradeInfo,
-    TradeParams,
-};
+pub use trade_setup::*;
 pub use wallet::Wallet;
 
 //expost HL sdk types

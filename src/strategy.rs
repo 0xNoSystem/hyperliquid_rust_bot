@@ -1,7 +1,7 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
-use crate::TradeCommand;
+use crate::{LiquiditySide, TradeCommand};
 //use crate::signal::IndicatorKind;
 use crate::signal::ExecParams;
 use kwant::indicators::Value;
@@ -147,6 +147,7 @@ impl CustomStrategy {
             size: max_size * 0.5,
             is_long,
             duration,
+            liq_side: LiquiditySide::Taker,
         })
     }
 
@@ -219,6 +220,7 @@ impl CustomStrategy {
                     size: 0.9 * max_size,
                     is_long: false,
                     duration,
+                    liq_side: LiquiditySide::Taker,
                 });
             }
         }
@@ -233,6 +235,7 @@ impl CustomStrategy {
                     size: 0.9 * max_size,
                     is_long: true,
                     duration,
+                    liq_side: LiquiditySide::Taker,
                 });
             }
         }

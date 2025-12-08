@@ -42,16 +42,17 @@ impl SignalEngine {
         );
 
         if let Some(list) = config
-            && !list.is_empty() {
-                for id in list {
-                    if let Some(tracker) = &mut trackers.get_mut(&id.1) {
-                        tracker.add_indicator(id.0, false);
-                    } else {
-                        let mut new_tracker = Tracker::new(id.1);
-                        new_tracker.add_indicator(id.0, false);
-                        trackers.insert(id.1, Box::new(new_tracker));
-                    }
+            && !list.is_empty()
+        {
+            for id in list {
+                if let Some(tracker) = &mut trackers.get_mut(&id.1) {
+                    tracker.add_indicator(id.0, false);
+                } else {
+                    let mut new_tracker = Tracker::new(id.1);
+                    new_tracker.add_indicator(id.0, false);
+                    trackers.insert(id.1, Box::new(new_tracker));
                 }
+            }
         };
 
         SignalEngine {
@@ -184,10 +185,11 @@ impl SignalEngine {
                     let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
 
                     if !ind.is_empty() {
-                        if tick.is_multiple_of(2) 
-                            && let Some(sender) = &self.data_tx {
-                                let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
-                            }
+                        if tick.is_multiple_of(2)
+                            && let Some(sender) = &self.data_tx
+                        {
+                            let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
+                        }
 
                         if let Some(trade) = self.get_signal(price.close, values) {
                             let _ = self.trade_tx.try_send(trade);
@@ -229,11 +231,12 @@ impl SignalEngine {
                     //Update frontend without waiting for next price update which makes indicators
                     //editing appear laggy
                     let ind = self.get_indicators_data();
-                    if !ind.is_empty() 
-                        && let Some(sender) = &self.data_tx {
-                            let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
-                        }
+                    if !ind.is_empty()
+                        && let Some(sender) = &self.data_tx
+                    {
+                        let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                     }
+                }
 
                 EngineCommand::UpdateExecParams(param) => {
                     use ExecParam::*;
@@ -271,17 +274,18 @@ impl SignalEngine {
     ) -> Self {
         let mut trackers: TrackersMap = HashMap::default();
 
-        if let Some(list) = config 
-            && !list.is_empty() {
-                for id in list {
-                    if let Some(tracker) = &mut trackers.get_mut(&id.1) {
-                        tracker.add_indicator(id.0, false);
-                    } else {
-                        let mut new_tracker = Tracker::new(id.1);
-                        new_tracker.add_indicator(id.0, false);
-                        trackers.insert(id.1, Box::new(new_tracker));
-                    }
+        if let Some(list) = config
+            && !list.is_empty()
+        {
+            for id in list {
+                if let Some(tracker) = &mut trackers.get_mut(&id.1) {
+                    tracker.add_indicator(id.0, false);
+                } else {
+                    let mut new_tracker = Tracker::new(id.1);
+                    new_tracker.add_indicator(id.0, false);
+                    trackers.insert(id.1, Box::new(new_tracker));
                 }
+            }
         }
 
         //channels won't be used in backtesting, these are placeholders

@@ -46,21 +46,21 @@ impl Executor {
         })
     }
 
-    async fn try_trade(
+    async fn try_market_trade(
         client: Arc<ExchangeClient>,
         params: MarketOrderParams<'_>,
-    ) -> Result<ExchangeDataStatus, String> {
-        let response = client
-            .market_open(params)
-            .await
-            .map_err(|e| format!("Transport failure, {}", e))?;
+    ) -> Result<ExchangeDataStatus, Error> {
+        let response = client.market_open(params).await?;
 
         info!("Market order placed: {response:?}");
 
         let response = match response {
             ExchangeResponseStatus::Ok(exchange_response) => exchange_response,
             ExchangeResponseStatus::Err(e) => {
-                return Err(format!("Exchange Error: Couldn't execute trade => {}", e));
+                return Err(Error::Custom(format!(
+                    "Exchange Error: Couldn't execute trade => {}",
+                    e
+                )));
             }
         };
 
@@ -68,11 +68,13 @@ impl Executor {
             .data
             .filter(|d| !d.statuses.is_empty())
             .and_then(|d| d.statuses.first().cloned())
-            .ok_or_else(|| "Exchange Error: Couldn't fetch trade status".to_string())?;
+            .ok_or_else(|| {
+                Error::GenericRequest("Exchange Error: Couldn't fetch trade status".to_string())
+            })?;
 
         Ok(status)
     }
-    pub async fn open_order(&self, size: f64, is_long: bool) -> Result<TradeFillInfo, String> {
+    pub async fn market_open(&self, size: f64, is_long: bool) -> Result<TradeFillInfo, Error> {
         let market_open_params = MarketOrderParams {
             asset: self.asset.as_str(),
             is_buy: is_long,
@@ -83,13 +85,18 @@ impl Executor {
             wallet: None,
         };
 
-        let status = Self::try_trade(self.exchange_client.clone(), market_open_params).await?;
+        let status =
+            Self::try_market_trade(self.exchange_client.clone(), market_open_params).await?;
 
         match status {
             ExchangeDataStatus::Filled(ref order) => {
                 println!("Open order filled: {order:?}");
-                let sz: f64 = order.total_sz.parse::<f64>().unwrap();
-                let price: f64 = order.avg_px.parse::<f64>().unwrap();
+                let sz: f64 = order.total_sz.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!("Failed to parse filled order size: {}", e))
+                })?;
+                let price: f64 = order.avg_px.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!("Failed to parse filled order price: {}", e))
+                })?;
                 let fill_info = TradeFillInfo {
                     fill_type: "Open".to_string(),
                     sz,
@@ -101,10 +108,10 @@ impl Executor {
                 Ok(fill_info)
             }
 
-            _ => Err("Open order not filled".to_string()),
+            _ => Err(Error::Custom("Market open order failed".to_string())),
         }
     }
-    pub async fn close_order(&self, size: f64, is_long: bool) -> Result<TradeFillInfo, String> {
+    pub async fn market_close(&self, size: f64, is_long: bool) -> Result<TradeFillInfo, Error> {
         let market_close_params = MarketOrderParams {
             asset: self.asset.as_str(),
             is_buy: !is_long,
@@ -115,12 +122,21 @@ impl Executor {
             wallet: None,
         };
 
-        let status = Self::try_trade(self.exchange_client.clone(), market_close_params).await?;
+        let status =
+            Self::try_market_trade(self.exchange_client.clone(), market_close_params).await?;
         match status {
             ExchangeDataStatus::Filled(ref order) => {
                 println!("Close order filled: {order:?}");
-                let sz: f64 = order.total_sz.parse::<f64>().unwrap();
-                let price: f64 = order.avg_px.parse::<f64>().unwrap();
+                let sz: f64 = order.total_sz.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!("Failed to parse filled order size (close): {}", e))
+                })?;
+                let price: f64 = order.avg_px.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!(
+                        "Failed to parse filled order price (close): {}",
+                        e
+                    ))
+                })?;
+
                 let fill_info = TradeFillInfo {
                     fill_type: "Close".to_string(),
                     sz,
@@ -131,16 +147,16 @@ impl Executor {
                 Ok(fill_info)
             }
 
-            _ => Err("Close order not filled".to_string()),
+            _ => Err(Error::Custom("Close market order not filled".to_string())),
         }
     }
 
-    pub async fn close_order_static(
+    pub async fn market_close_static(
         client: Arc<ExchangeClient>,
         asset: String,
         size: f64,
         is_long: bool,
-    ) -> Result<TradeFillInfo, String> {
+    ) -> Result<TradeFillInfo, Error> {
         let market_close_params = MarketOrderParams {
             asset: asset.as_str(),
             is_buy: !is_long,
@@ -151,12 +167,19 @@ impl Executor {
             wallet: None,
         };
 
-        let status = Self::try_trade(client, market_close_params).await?;
+        let status = Self::try_market_trade(client, market_close_params).await?;
         match status {
             ExchangeDataStatus::Filled(ref order) => {
                 println!("Close order filled: {order:?}");
-                let sz: f64 = order.total_sz.parse::<f64>().unwrap();
-                let price: f64 = order.avg_px.parse::<f64>().unwrap();
+                let sz: f64 = order.total_sz.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!("Failed to parse filled order size (close): {}", e))
+                })?;
+                let price: f64 = order.avg_px.parse::<f64>().map_err(|e| {
+                    Error::GenericParse(format!(
+                        "Failed to parse filled order price (close): {}",
+                        e
+                    ))
+                })?;
                 let fill_info = TradeFillInfo {
                     fill_type: "Close".to_string(),
                     sz,
@@ -167,9 +190,16 @@ impl Executor {
                 Ok(fill_info)
             }
 
-            _ => Err("Close order not filled".to_string()),
+            _ => Err(Error::Custom("Close market order not filled".to_string())),
         }
     }
+
+    /*
+     * try_limit_trade(Arc<ExchangeClient>,params: LimitOrderHL)
+     * limit_open(&self, size, price, is_long)
+     * limit_close(&self, size, price, is_long)
+     * limit_close_static(client, asset, size, price, is_long)
+     * */
 
     fn get_trade_info(open: TradeFillInfo, close: TradeFillInfo, fees: &(f64, f64)) -> TradeInfo {
         let is_long = open.is_long;
@@ -210,7 +240,7 @@ impl Executor {
 
     pub async fn cancel_trade(&mut self) -> Option<TradeInfo> {
         if let Some(pos) = self.open_position.lock().await.take() {
-            let trade_fill = self.close_order(pos.sz, pos.is_long).await;
+            let trade_fill = self.market_close(pos.sz, pos.is_long).await;
             if let Ok(close) = trade_fill {
                 let trade_info = Self::get_trade_info(pos, close, &self.fees);
                 return Some(trade_info);
@@ -239,11 +269,12 @@ impl Executor {
                     size,
                     is_long,
                     duration,
+                    liq_side,
                 } => {
                     if self.is_active().await || self.is_paused {
                         continue;
                     };
-                    let trade_info = self.open_order(size, is_long).await;
+                    let trade_info = self.market_open(size, is_long).await;
                     if let Ok(trade_fill) = trade_info {
                         {
                             let mut pos = self.open_position.lock().await;
@@ -264,7 +295,8 @@ impl Executor {
 
                             if let Some(open) = maybe_open {
                                 let close_fill =
-                                    Self::close_order_static(client, asset, open.sz, is_long).await;
+                                    Self::market_close_static(client, asset, open.sz, is_long)
+                                        .await;
                                 if let Ok(fill) = close_fill {
                                     let trade_info = Self::get_trade_info(open, fill, &fees);
 
@@ -277,11 +309,15 @@ impl Executor {
                     };
                 }
 
-                TradeCommand::OpenTrade { size, is_long } => {
+                TradeCommand::OpenTrade {
+                    size,
+                    is_long,
+                    liq_side,
+                } => {
                     info!("Open trade command received");
 
                     if !self.is_active().await && !self.is_paused {
-                        let trade_fill = self.open_order(size, is_long).await;
+                        let trade_fill = self.market_open(size, is_long).await;
 
                         if let Ok(trade) = trade_fill {
                             info!("Trade Opened: {:?}", trade.clone());
@@ -292,7 +328,7 @@ impl Executor {
                     }
                 }
 
-                TradeCommand::CloseTrade { size } => {
+                TradeCommand::CloseTrade { size, liq_side } => {
                     if self.is_paused {
                         continue;
                     };
@@ -303,7 +339,7 @@ impl Executor {
 
                     if let Some(open_pos) = maybe_open {
                         let size = size.min(open_pos.sz);
-                        let trade_fill = self.close_order(size, open_pos.is_long).await;
+                        let trade_fill = self.market_close(size, open_pos.is_long).await;
 
                         if let Ok(fill) = trade_fill {
                             let trade_info = Self::get_trade_info(open_pos, fill, &self.fees);

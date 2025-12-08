@@ -76,19 +76,23 @@ pub enum TradeCommand {
         size: f64,
         is_long: bool,
         duration: u64,
+        liq_side: LiquiditySide,
     },
     OpenTrade {
         size: f64,
         is_long: bool,
+        liq_side: LiquiditySide,
     },
     CloseTrade {
         size: f64,
+        liq_side: LiquiditySide,
     },
     BuildPosition {
         size: f64,
         is_long: bool,
         interval: u64,
     },
+    //Canceling == Liq Taker
     CancelTrade,
     Liquidation(LiquidationFillInfo),
     Toggle,
@@ -247,7 +251,6 @@ impl TimeFrame {
             TimeFrame::Month => "1M",
         }
     }
-    
 }
 
 impl std::fmt::Display for TimeFrame {
@@ -276,4 +279,11 @@ impl std::str::FromStr for TimeFrame {
             _ => Err(format!("Invalid TimeFrame string: '{}'", s)),
         }
     }
+}
+
+#[derive(Debug, Copy, Clone, Deserialize, Serialize, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum LiquiditySide {
+    Maker,
+    Taker,
 }
