@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use alloy::signers::local::PrivateKeySigner;
 use flume::Receiver;
-use log::info;
+use log::{warn, info};
 use tokio::{
     sync::{Mutex, mpsc::Sender},
     time::{Duration, sleep},
@@ -13,13 +13,15 @@ use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 
 use hyperliquid_rust_sdk::{
-    BaseUrl, ClientLimit, ClientOrder, ClientOrderRequest, ClientTrigger, Error, ExchangeClient,
-    ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, RestingOrder,
+    BaseUrl, ClientCancelRequest, ClientLimit, ClientOrder, ClientOrderRequest, ClientTrigger,
+    Error, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams,
+    RestingOrder,
 };
 
 use crate::market::MarketCommand;
 use crate::trade_setup::{
-    LimitOrderLocal,LimitOrderResponseLocal, Tif, TradeCommand, TradeFillInfo, TradeInfo, TriggerKind,
+    LimitOrderLocal, LimitOrderResponseLocal, Tif, TradeCommand, TradeFillInfo, TradeInfo,
+    TriggerKind,
 };
 
 pub struct Executor {
@@ -28,8 +30,8 @@ pub struct Executor {
     asset: String,
     exchange_client: Arc<ExchangeClient>,
     is_paused: bool,
-    fees: (f64, f64),
-    resting_orders: HashMap<RestingOrder, LimitOrderLocal, BuildHasherDefault<FxHasher>>,
+    fees: (f64, f64), //Taker, Maker
+    resting_orders: HashMap<u64, LimitOrderLocal, BuildHasherDefault<FxHasher>>,
     open_position: Arc<Mutex<Option<TradeFillInfo>>>,
 }
 
@@ -272,20 +274,18 @@ impl Executor {
                 };
 
                 Ok(LimitOrderResponseLocal::Filled(fill_info))
-            },
+            }
 
-            ExchangeDataStatus::Resting(order) => {
-                Ok(LimitOrderResponseLocal::Resting(order))
-            },
+            ExchangeDataStatus::Resting(order) => Ok(LimitOrderResponseLocal::Resting(order)),
 
-            ExchangeDataStatus::Error(err) => {
-                Err(Error::Custom(err)) 
-            },
+            ExchangeDataStatus::Error(err) => Err(Error::Custom(err)),
 
-            _ => Err(Error::Custom("Limit open order failed due to an unexpected exchange status response".to_string())),
+            _ => Err(Error::Custom(
+                "Limit open order failed due to an unexpected exchange status response".to_string(),
+            )),
         }
     }
-     async fn limit_close(
+    async fn limit_close(
         &self,
         LimitOrderLocal {
             size,
@@ -293,8 +293,7 @@ impl Executor {
             limit_px,
             tif,
         }: LimitOrderLocal,
-    ) -> Result<LimitOrderResponseLocal, Error>{
-        
+    ) -> Result<LimitOrderResponseLocal, Error> {
         let order = ClientOrderRequest {
             asset: self.asset.clone(),
             is_buy: !is_long,
@@ -327,26 +326,23 @@ impl Executor {
                 };
 
                 Ok(LimitOrderResponseLocal::Filled(fill_info))
-            },
+            }
 
-            ExchangeDataStatus::Resting(order) => {
-                Ok(LimitOrderResponseLocal::Resting(order))
-            },
+            ExchangeDataStatus::Resting(order) => Ok(LimitOrderResponseLocal::Resting(order)),
 
-            ExchangeDataStatus::Error(err) => {
-                Err(Error::Custom(err)) 
-            },
+            ExchangeDataStatus::Error(err) => Err(Error::Custom(err)),
 
-            _ => Err(Error::Custom("Limit open order failed due to an unexpected exchange status response".to_string())),
+            _ => Err(Error::Custom(
+                "Limit open order failed due to an unexpected exchange status response".to_string(),
+            )),
         }
-
     }
 
-     /*
-        limit_close_static(client, asset, size, price, is_long)
-     */
+    /*
+       limit_close_static(client, asset, size, price, is_long)
+    */
 
-    fn get_trade_info(open: TradeFillInfo, close: TradeFillInfo, fees: &(f64, f64)) -> TradeInfo {
+    fn get_trade_info(open: TradeFillInfo, close: TradeFillInfo, fees: &f64) -> TradeInfo {
         let is_long = open.is_long;
         let (fee, pnl) = Self::calculate_pnl(fees, is_long, &open, &close);
 
@@ -362,13 +358,13 @@ impl Executor {
     }
 
     fn calculate_pnl(
-        fees: &(f64, f64),
+        fees: &f64,
         is_long: bool,
         trade_fill_open: &TradeFillInfo,
         trade_fill_close: &TradeFillInfo,
     ) -> (f64, f64) {
-        let fee_open = trade_fill_open.sz * trade_fill_open.price * fees.1;
-        let fee_close = trade_fill_close.sz * trade_fill_close.price * fees.1;
+        let fee_open = trade_fill_open.sz * trade_fill_open.price * fees;
+        let fee_close = trade_fill_close.sz * trade_fill_close.price * fees;
 
         let pnl = if is_long {
             trade_fill_close.sz * (trade_fill_close.price - trade_fill_open.price)
@@ -387,7 +383,7 @@ impl Executor {
         if let Some(pos) = self.open_position.lock().await.take() {
             let trade_fill = self.market_close(pos.sz, pos.is_long).await;
             if let Ok(close) = trade_fill {
-                let trade_info = Self::get_trade_info(pos, close, &self.fees);
+                let trade_info = Self::get_trade_info(pos, close, &self.fees.1);
                 return Some(trade_info);
             }
         }
@@ -395,9 +391,48 @@ impl Executor {
         None
     }
 
+    pub async fn cancel_all_resting(&mut self) -> Result<(), Error> {
+        let mut failed_cancels: HashSet<u64> = HashSet::new();
+        for oid in self.resting_orders.keys() {
+            let cancel = ClientCancelRequest {
+                asset: self.asset.clone(),
+                oid: *oid,
+            };
+            if let Err(e) = self.exchange_client.cancel(cancel, None).await {
+                warn!("Failed to cancel oid {}: {:?}", oid, e);
+                failed_cancels.insert(*oid);
+            }
+        }
+        let mut retries = 0;
+
+        while !failed_cancels.is_empty() {
+            retries += 1;
+            let iterator = failed_cancels.iter().copied().collect::<Vec<_>>();
+            for oid in iterator.iter() {
+                let cancel = ClientCancelRequest {
+                    asset: self.asset.clone(),
+                    oid: *oid,
+                };
+                if self.exchange_client.cancel(cancel, None).await.is_ok() {
+                    failed_cancels.remove(oid);
+                }
+            }
+
+            if retries > 5 {
+                return Err(Error::Custom(format!(
+                    "Failed to cancle resting order for {} market, please cancel manually on https://app.hyperliquid.xyz/trade/{}",
+                    self.asset.clone(),
+                    self.asset.clone()
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok(())
+    }
+
     async fn is_active(&self) -> bool {
         let guard = self.open_position.lock().await;
-        guard.is_some()
+        guard.is_some() || !self.resting_orders.is_empty()
     }
 
     fn toggle_pause(&mut self) {
@@ -442,7 +477,7 @@ impl Executor {
                                     Self::market_close_static(client, asset, open.sz, is_long)
                                         .await;
                                 if let Ok(fill) = close_fill {
-                                    let trade_info = Self::get_trade_info(open, fill, &fees);
+                                    let trade_info = Self::get_trade_info(open, fill, &fees.1);
 
                                     let _ =
                                         sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
@@ -477,12 +512,22 @@ impl Executor {
                         pos.take()
                     };
 
-                    if let Some(open_pos) = maybe_open {
+                    if let Some(mut open_pos) = maybe_open {
                         let size = size.min(open_pos.sz);
                         let trade_fill = self.market_close(size, open_pos.is_long).await;
 
                         if let Ok(fill) = trade_fill {
-                            let trade_info = Self::get_trade_info(open_pos, fill, &self.fees);
+                            let init_pos = if fill.sz >= open_pos.sz {
+                                let _ = self.cancel_all_resting().await;
+                                open_pos.clone()
+                            } else {
+                                let mut s = open_pos.clone();
+                                open_pos.sz -= fill.sz;
+                                s.sz = fill.sz;
+                                s
+                            };
+
+                            let trade_info = Self::get_trade_info(init_pos, fill, &self.fees.1);
                             let _ = info_sender
                                 .send(MarketCommand::ReceiveTrade(trade_info))
                                 .await;
@@ -512,7 +557,7 @@ impl Executor {
                         println!(
                             "MAKE SURE SIZES ARE THE SAME: \nLocal {open_pos:?}\nLiquidation: {liq_fill:?}"
                         );
-                        let trade_info = Self::get_trade_info(open_pos, liq_fill, &self.fees);
+                        let trade_info = Self::get_trade_info(open_pos, liq_fill, &self.fees.1);
 
                         let _ = info_sender
                             .send(MarketCommand::ReceiveTrade(trade_info))
@@ -546,7 +591,77 @@ impl Executor {
                     self.is_paused = false;
                 }
 
-                //TradeCommand::BuildPosition{size, is_long, interval} => {info!("Contacting Bob the builder")},
+                TradeCommand::LimitOpen(limit_order) => {
+                    if !self.is_active().await && !self.is_paused {
+                        let res = self.limit_open(limit_order).await;
+                        if let Ok(fill_type) = res {
+                            match fill_type {
+                                LimitOrderResponseLocal::Filled(fill_info) => {
+                                    //filled as taker
+                                    *self.open_position.lock().await = Some(fill_info);
+                                }
+                                LimitOrderResponseLocal::Resting(oid) => {
+                                    self.resting_orders.insert(oid.oid, limit_order.clone());
+                                }
+                            }
+                        }
+                    } else if self.is_active().await {
+                        info!("OpenTrade skipped: a trade is already active");
+                    }
+                }
+
+                TradeCommand::LimitClose {
+                    size,
+                    limit_px,
+                    tif,
+                } => {
+                    if self.is_paused {
+                        continue;
+                    };
+
+                    let maybe_open = {
+                        let mut pos = self.open_position.lock().await;
+                        pos.take()
+                    };
+
+                    if let Some(mut open_pos) = maybe_open {
+                        let size = size.min(open_pos.sz);
+                        let limit_order = LimitOrderLocal {
+                            size,
+                            is_long: open_pos.is_long,
+                            limit_px,
+                            tif,
+                        };
+                        let res = self.limit_close(limit_order).await;
+                        if let Ok(fill_type) = res {
+                            match fill_type {
+                                LimitOrderResponseLocal::Filled(fill) => {
+                                    let init_pos = if fill.sz >= open_pos.sz {
+                                        let _ = self.cancel_all_resting().await;
+                                        open_pos.clone()
+                                    } else {
+                                        let mut s = open_pos.clone();
+                                        open_pos.sz -= fill.sz;
+                                        s.sz = fill.sz;
+                                        s
+                                    };
+
+                                    let trade_info =
+                                        Self::get_trade_info(init_pos, fill, &self.fees.0);
+                                    let _ = info_sender
+                                        .send(MarketCommand::ReceiveTrade(trade_info))
+                                        .await;
+                                    info!("Trade Closed: {:?}", trade_info);
+                                }
+                                LimitOrderResponseLocal::Resting(oid) => {
+                                    let _ = self.cancel_all_resting().await;
+                                    self.resting_orders.insert(oid.oid, limit_order);
+                                }
+                            }
+                        };
+                    };
+                }
+
                 _ => {}
             }
         }

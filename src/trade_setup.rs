@@ -1,7 +1,7 @@
 use std::fmt;
 
 use hyperliquid_rust_sdk::{
-    Error, ExchangeClient, ExchangeResponseStatus, TradeInfo as HLTradeInfo, RestingOrder,
+    Error, ExchangeClient, ExchangeResponseStatus, RestingOrder, TradeInfo as HLTradeInfo,
 };
 use log::info;
 //use kwant::indicators::Price;
@@ -84,7 +84,12 @@ pub enum TradeCommand {
     CloseTrade {
         size: f64,
     },
-    Limit(LimitOrderLocal),
+    LimitOpen(LimitOrderLocal),
+    LimitClose {
+        size: f64,
+        limit_px: f64,
+        tif: Tif,
+    },
     Trigger(TriggerOrderLocal),
     BuildPosition {
         size: f64,
@@ -307,7 +312,7 @@ pub struct TriggerOrderLocal {
 }
 
 #[derive(Debug, Clone)]
-pub enum LimitOrderResponseLocal{
+pub enum LimitOrderResponseLocal {
     Filled(TradeFillInfo),
     Resting(RestingOrder),
 }
