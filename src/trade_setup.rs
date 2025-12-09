@@ -1,11 +1,10 @@
 use std::fmt;
 
-use hyperliquid_rust_sdk::{
-    Error, ExchangeClient, ExchangeResponseStatus, RestingOrder, TradeInfo as HLTradeInfo,
-};
+use hyperliquid_rust_sdk::{Error, ExchangeClient, ExchangeResponseStatus, RestingOrder};
 use log::info;
 //use kwant::indicators::Price;
 
+use crate::HLTradeInfo;
 use crate::strategy::{CustomStrategy, Strategy};
 use serde::{Deserialize, Serialize};
 
@@ -98,7 +97,7 @@ pub enum TradeCommand {
     },
     //Canceling == Liq Taker
     CancelTrade,
-    Liquidation(LiquidationFillInfo),
+    UserFills(TradeFillInfo),
     Toggle,
     Resume,
     Pause,
@@ -109,6 +108,7 @@ pub enum TradeCommand {
 pub struct TradeInfo {
     pub open: f64,
     pub close: f64,
+    pub close_type: FillType,
     pub pnl: f64,
     pub fee: f64,
     pub is_long: bool,
@@ -123,28 +123,100 @@ pub struct MarketTradeInfo {
     pub info: TradeInfo,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TradeFillInfo {
     pub price: f64,
-    pub fill_type: String,
+    pub fill_type: FillType,
     pub sz: f64,
     pub oid: u64,
+    pub fee: f64,
     pub is_long: bool,
 }
 
-impl From<LiquidationFillInfo> for TradeFillInfo {
-    fn from(liq: LiquidationFillInfo) -> Self {
-        let LiquidationFillInfo {
-            price,
-            sz,
-            oid,
-            is_long,
-        } = liq;
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FillType {
+    MarketOpen,
+    MarketClose,
+    LimitOpen,
+    LimitClose,
+    Trigger(TriggerKind),
+    Liquidation,
+    Mixed,
+}
 
-        TradeFillInfo {
-            price,
-            fill_type: "Liquidation".to_string(),
+impl From<&HLTradeInfo> for FillType {
+    fn from(trade: &HLTradeInfo) -> Self {
+        let dir = trade.dir.to_lowercase();
+        if trade.crossed {
+            if dir.contains("liquidation") {
+                FillType::Liquidation
+            } else if dir.contains("close") {
+                FillType::MarketClose
+            } else if dir.contains("open") {
+                FillType::MarketOpen
+            } else {
+                FillType::Mixed
+            }
+        } else {
+            if dir.contains("liquidation") {
+                FillType::Liquidation
+            } else if dir.contains("close") {
+                FillType::LimitClose
+            } else if dir.contains("open") {
+                FillType::LimitOpen
+            } else {
+                FillType::Mixed
+            }
+        }
+    }
+}
+
+impl FillType {
+    fn is_close(&self) -> bool {
+        use FillType::*;
+        match self {
+            Liquidation => true,
+            MarketClose => true,
+            LimitClose => true,
+            Mixed => true,
+            Trigger(_) => true,
+            _ => false,
+        }
+    }
+}
+
+impl From<Vec<HLTradeInfo>> for TradeFillInfo {
+    fn from(trades: Vec<HLTradeInfo>) -> Self {
+        let oid = trades[0].oid;
+        let is_long = match trades[0].side.as_str() {
+            "A" => false,
+            "B" => true,
+            _ => panic!("TRADE SIDE IS NOT A NOR B, HYPERLIQUID API ERROR"),
+        };
+
+        let mut sz: f64 = f64::from_bits(1);
+        let mut total: f64 = f64::from_bits(1);
+        let mut fee: f64 = f64::from_bits(1);
+        let mut fill_type: FillType = FillType::from(&trades[0]);
+
+        trades.into_iter().for_each(|t| {
+            if fill_type == FillType::Mixed && fill_type != FillType::from(&t) {
+                fill_type = FillType::Mixed;
+            }
+            let size = t.sz.parse::<f64>().unwrap();
+            total += size * t.px.parse::<f64>().unwrap();
+            sz += size;
+            fee += t.fee.parse::<f64>().unwrap();
+        });
+
+        let avg_px = total / sz;
+
+        Self {
+            price: avg_px,
+            fee,
+            fill_type,
             sz,
             oid,
             is_long,
@@ -152,40 +224,13 @@ impl From<LiquidationFillInfo> for TradeFillInfo {
     }
 }
 
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LiquidationFillInfo {
-    pub price: f64,
-    pub sz: f64,
-    pub oid: u64,
-    pub is_long: bool, //was the user going long ?
-}
+impl TradeFillInfo {
+    pub fn is_close(&self) -> bool {
+        self.fill_type.is_close()
+    }
 
-impl From<Vec<HLTradeInfo>> for LiquidationFillInfo {
-    fn from(trades: Vec<HLTradeInfo>) -> Self {
-        let is_long = match trades[0].side.as_str() {
-            "A" => true,
-            "B" => false,
-            _ => panic!("THIS IS INSANE"),
-        };
-
-        let mut sz: f64 = f64::from_bits(1);
-        let mut total: f64 = f64::from_bits(1);
-
-        trades.iter().for_each(|t| {
-            let size = t.sz.parse::<f64>().unwrap();
-            total += size * t.px.parse::<f64>().unwrap();
-            sz += size;
-        });
-
-        let avg_px = total / sz;
-
-        Self {
-            price: avg_px,
-            sz,
-            oid: 000000,
-            is_long,
-        }
+    pub fn is_liquidation(&self) -> bool {
+        self.fill_type == FillType::Liquidation
     }
 }
 
@@ -336,7 +381,7 @@ impl fmt::Display for Tif {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum TriggerKind {
     Tp,

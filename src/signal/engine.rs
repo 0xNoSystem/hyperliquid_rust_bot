@@ -191,7 +191,7 @@ impl SignalEngine {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
 
-                        if let Some(trade) = self.get_signal(price.close, values) {
+                        if let Some(trade) = self.get_test_trade(price.close) {
                             let _ = self.trade_tx.try_send(trade);
                         }
                     }

@@ -1,7 +1,7 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
-use crate::{LiquiditySide, TradeCommand};
+use crate::{LimitOrderLocal, Tif, TradeCommand, roundf};
 //use crate::signal::IndicatorKind;
 use crate::signal::ExecParams;
 use kwant::indicators::Value;
@@ -143,11 +143,13 @@ impl CustomStrategy {
 
         let max_size = (params.margin * params.lev as f64) / price;
 
-        Some(TradeCommand::ExecuteTrade {
-            size: max_size * 0.5,
-            is_long,
-            duration,
-        })
+        let order = LimitOrderLocal{
+            size: roundf!(max_size * 0.9, 2),
+            is_long: false,
+            limit_px: 30.0,
+            tif: Tif::Gtc,
+        };
+        Some(TradeCommand::LimitOpen(order))
     }
 
     pub fn generate_signal(

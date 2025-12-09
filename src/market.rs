@@ -12,7 +12,7 @@ use crate::signal::{
     EditType, EngineCommand, Entry, ExecParam, IndexId, SignalEngine, TimeFrameData,
 };
 use crate::strategy::Strategy;
-use crate::trade_setup::{LiquidationFillInfo, TimeFrame, TradeCommand, TradeInfo, TradeParams};
+use crate::trade_setup::{TimeFrame, TradeCommand, TradeFillInfo, TradeInfo, TradeParams};
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, UpdateFrontend};
 use crate::{MAX_HISTORY, MarketInfo, MarketTradeInfo, Wallet};
 
@@ -138,7 +138,7 @@ impl Market {
     }
 
     async fn load_engine(&mut self, candle_count: u64) -> Result<(), Error> {
-        info!("---------Loading Engine: this may take some time----------------");
+        info!("---------------Loading Engine---------------");
         for tf in &self.active_tfs {
             let price_data = load_candles(
                 &self.info_client,
@@ -278,11 +278,11 @@ impl Market {
                     )));
                 }
 
-                MarketCommand::ReceiveLiquidation(liq_fill) => {
+                MarketCommand::UserFills(fill) => {
                     let _ = self
                         .senders
                         .exec_tx
-                        .send_async(TradeCommand::Liquidation(liq_fill))
+                        .send_async(TradeCommand::UserFills(fill))
                         .await;
                 }
 
@@ -384,7 +384,7 @@ pub enum MarketCommand {
     EditIndicators(Vec<Entry>),
     UpdateTimeFrame(TimeFrame),
     ReceiveTrade(TradeInfo),
-    ReceiveLiquidation(LiquidationFillInfo),
+    UserFills(TradeFillInfo),
     UpdateMargin(f64),
     UpdateIndicatorData(Vec<IndicatorData>),
     Toggle,

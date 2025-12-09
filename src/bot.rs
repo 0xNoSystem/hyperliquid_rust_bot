@@ -1,6 +1,6 @@
 use crate::{
-    AddMarketInfo, LiquidationFillInfo, Market, MarketCommand, MarketInfo, MarketUpdate,
-    UpdateFrontend, Wallet,
+    AddMarketInfo, Market, MarketCommand, MarketInfo, MarketUpdate, TradeFillInfo, UpdateFrontend,
+    Wallet,
 };
 use hyperliquid_rust_sdk::{
     AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, TradeInfo as HLTradeInfo,
@@ -373,7 +373,7 @@ impl Bot {
             }
         });
 
-        //listen and send Liquidation events
+        //fill events
         let (liq_tx, mut liq_rv) = unbounded_channel();
         let _id = self
             .info_client
@@ -394,22 +394,33 @@ impl Bot {
                         if update.data.is_snapshot.is_some(){
                             continue;
                         }
-                        let mut liq_map: HashMap<String, Vec<HLTradeInfo>> = HashMap::new();
+                        let mut fills_map: HashMap<
+                            String,
+                            HashMap<
+                                u64,
+                                Vec<HLTradeInfo>,
+                                BuildHasherDefault<FxHasher>
+                            >,
+                            BuildHasherDefault<FxHasher>> = HashMap::default();
 
                         for trade in update.data.fills.into_iter(){
-                            if trade.liquidation.is_some(){
-                            liq_map
-                                .entry(trade.coin.clone())
+                            let coin = trade.coin.clone();
+                            let oid = trade.oid;
+                            fills_map
+                                .entry(coin)
+                                .or_default()
+                                .entry(oid)
                                 .or_default()
                                 .push(trade);
-                            }
                         }
-                        println!("\nTRADES  |||||||||| {:?}\n\n", liq_map);
+                        println!("\nTRADES  |||||||||| {:?}\n\n", fills_map);
 
-                        for (coin, fills) in liq_map.into_iter(){
-                            let to_send = LiquidationFillInfo::from(fills);
-                            let cmd = MarketCommand::ReceiveLiquidation(to_send);
-                            self.send_cmd(coin.as_str(), cmd).await;
+                        for (coin, map) in fills_map.into_iter(){
+                            for (_oid, fills) in map.into_iter(){
+                                let to_send = TradeFillInfo::from(fills);
+                                let cmd = MarketCommand::UserFills(to_send);
+                                self.send_cmd(coin.as_str(), cmd).await;
+                            }
                         }
                 },
 

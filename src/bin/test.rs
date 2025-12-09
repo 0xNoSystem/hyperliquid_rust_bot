@@ -1,4 +1,8 @@
 use alloy::primitives::address;
+use rustc_hash::FxHasher;
+use std::collections::HashMap;
+use std::hash::BuildHasherDefault;
+
 use tokio::{
     spawn,
     sync::mpsc::unbounded_channel,
@@ -7,6 +11,7 @@ use tokio::{
 
 use alloy::signers::local::PrivateKeySigner;
 use dotenv::dotenv;
+use hyperliquid_rust_bot::{HLTradeInfo, TradeFillInfo};
 use hyperliquid_rust_sdk::{
     BaseUrl, ClientCancelRequest, ClientLimit, ClientOrder, ClientOrderRequest, ExchangeClient,
     ExchangeDataStatus, ExchangeResponseStatus, InfoClient, Message, Subscription,
@@ -31,8 +36,8 @@ async fn main() {
         asset: "ETH".to_string(),
         is_buy: true,
         reduce_only: false,
-        limit_px: 3119.0,
-        sz: 0.0001,
+        limit_px: 3380.0,
+        sz: 0.01,
         cloid: None,
         order_type: ClientOrder::Limit(ClientLimit {
             tif: "Gtc".to_string(),
@@ -44,7 +49,7 @@ async fn main() {
 
     let (sender, mut receiver) = unbounded_channel();
     let subscription_id = info_client
-        .subscribe(Subscription::OrderUpdates { user }, sender)
+        .subscribe(Subscription::UserFills { user }, sender)
         .await
         .unwrap();
 
@@ -56,8 +61,27 @@ async fn main() {
 
     // this loop ends when we unsubscribe
     spawn(async move {
-        while let Some(Message::OrderUpdates(order_updates)) = receiver.recv().await {
-            println!("Received order update data: {order_updates:?}");
+        while let Some(Message::UserFills(update)) = receiver.recv().await {
+            if update.data.is_snapshot.is_some() {
+                continue;
+            }
+            let mut fills_map: HashMap<
+                String,
+                HashMap<u64, Vec<HLTradeInfo>, BuildHasherDefault<FxHasher>>,
+                BuildHasherDefault<FxHasher>,
+            > = HashMap::default();
+
+            for trade in update.data.fills.into_iter() {
+                let coin = trade.coin.clone();
+                let oid = trade.oid;
+                fills_map
+                    .entry(coin)
+                    .or_default()
+                    .entry(oid)
+                    .or_default()
+                    .push(trade);
+            }
+            println!("\nTRADES  |||||||||| {:?}\n\n", fills_map);
         }
     });
 

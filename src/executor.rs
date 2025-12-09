@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use alloy::signers::local::PrivateKeySigner;
 use flume::Receiver;
-use log::{warn, info};
+use log::{info, warn};
 use tokio::{
     sync::{Mutex, mpsc::Sender},
     time::{Duration, sleep},
@@ -19,9 +19,10 @@ use hyperliquid_rust_sdk::{
 };
 
 use crate::market::MarketCommand;
+use crate::roundf;
 use crate::trade_setup::{
-    LimitOrderLocal, LimitOrderResponseLocal, Tif, TradeCommand, TradeFillInfo, TradeInfo,
-    TriggerKind,
+    FillType, LimitOrderLocal, LimitOrderResponseLocal, Tif, TradeCommand, TradeFillInfo,
+    TradeInfo, TriggerKind,
 };
 
 pub struct Executor {
@@ -85,7 +86,7 @@ impl Executor {
 
         Ok(status)
     }
-    pub async fn market_open(&self, size: f64, is_long: bool) -> Result<TradeFillInfo, Error> {
+    async fn market_open(&self, size: f64, is_long: bool) -> Result<TradeFillInfo, Error> {
         let market_open_params = MarketOrderParams {
             asset: self.asset.as_str(),
             is_buy: is_long,
@@ -108,9 +109,11 @@ impl Executor {
                 let price: f64 = order.avg_px.parse::<f64>().map_err(|e| {
                     Error::GenericParse(format!("Failed to parse filled order price: {}", e))
                 })?;
+                let fee = sz * price * self.fees.1;
                 let fill_info = TradeFillInfo {
-                    fill_type: "Open".to_string(),
+                    fill_type: FillType::MarketClose,
                     sz,
+                    fee,
                     price,
                     oid: order.oid,
                     is_long,
@@ -122,7 +125,7 @@ impl Executor {
             _ => Err(Error::Custom("Market open order failed".to_string())),
         }
     }
-    pub async fn market_close(&self, size: f64, is_long: bool) -> Result<TradeFillInfo, Error> {
+    async fn market_close(&self, size: f64, is_long: bool) -> Result<TradeFillInfo, Error> {
         let market_close_params = MarketOrderParams {
             asset: self.asset.as_str(),
             is_buy: !is_long,
@@ -147,10 +150,11 @@ impl Executor {
                         e
                     ))
                 })?;
-
+                let fee = sz * price * self.fees.1;
                 let fill_info = TradeFillInfo {
-                    fill_type: "Close".to_string(),
+                    fill_type: FillType::MarketClose,
                     sz,
+                    fee,
                     price,
                     oid: order.oid,
                     is_long,
@@ -162,11 +166,12 @@ impl Executor {
         }
     }
 
-    pub async fn market_close_static(
+    async fn market_close_static(
         client: Arc<ExchangeClient>,
         asset: String,
         size: f64,
         is_long: bool,
+        taker_fee: &f64,
     ) -> Result<TradeFillInfo, Error> {
         let market_close_params = MarketOrderParams {
             asset: asset.as_str(),
@@ -191,9 +196,11 @@ impl Executor {
                         e
                     ))
                 })?;
+                let fee = sz * price * taker_fee;
                 let fill_info = TradeFillInfo {
-                    fill_type: "Close".to_string(),
+                    fill_type: FillType::MarketClose,
                     sz,
+                    fee,
                     price,
                     oid: order.oid,
                     is_long,
@@ -265,9 +272,11 @@ impl Executor {
                 let price: f64 = order.avg_px.parse::<f64>().map_err(|e| {
                     Error::GenericParse(format!("Failed to parse filled order price: {}", e))
                 })?;
+                let fee = sz * price * self.fees.1;
                 let fill_info = TradeFillInfo {
-                    fill_type: "Open".to_string(),
+                    fill_type: FillType::LimitOpen,
                     sz,
+                    fee,
                     price,
                     oid: order.oid,
                     is_long,
@@ -317,9 +326,11 @@ impl Executor {
                 let price: f64 = order.avg_px.parse::<f64>().map_err(|e| {
                     Error::GenericParse(format!("Failed to parse filled order price: {}", e))
                 })?;
+                let fee = sz * price * self.fees.1;
                 let fill_info = TradeFillInfo {
-                    fill_type: "Close".to_string(),
+                    fill_type: FillType::LimitClose,
                     sz,
+                    fee,
                     price,
                     oid: order.oid,
                     is_long,
@@ -342,56 +353,44 @@ impl Executor {
        limit_close_static(client, asset, size, price, is_long)
     */
 
-    fn get_trade_info(open: TradeFillInfo, close: TradeFillInfo, fees: &f64) -> TradeInfo {
+    fn get_trade_info_from_fills(open: &TradeFillInfo, close: &TradeFillInfo) -> TradeInfo {
         let is_long = open.is_long;
-        let (fee, pnl) = Self::calculate_pnl(fees, is_long, &open, &close);
+
+        let fees = open.fee + close.fee;
+
+        let pnl = if is_long {
+            close.sz * (close.price - open.price) - fees
+        } else {
+            close.sz * (open.price - close.price) - fees
+        };
 
         TradeInfo {
             open: open.price,
             close: close.price,
+            close_type: close.fill_type,
             pnl,
-            fee,
+            fee: fees,
             is_long,
             duration: None,
             oid: (open.oid, close.oid),
         }
     }
 
-    fn calculate_pnl(
-        fees: &f64,
-        is_long: bool,
-        trade_fill_open: &TradeFillInfo,
-        trade_fill_close: &TradeFillInfo,
-    ) -> (f64, f64) {
-        let fee_open = trade_fill_open.sz * trade_fill_open.price * fees;
-        let fee_close = trade_fill_close.sz * trade_fill_close.price * fees;
-
-        let pnl = if is_long {
-            trade_fill_close.sz * (trade_fill_close.price - trade_fill_open.price)
-                - fee_open
-                - fee_close
-        } else {
-            trade_fill_close.sz * (trade_fill_open.price - trade_fill_close.price)
-                - fee_open
-                - fee_close
-        };
-
-        (fee_open + fee_close, pnl)
-    }
-
-    pub async fn cancel_trade(&mut self) -> Option<TradeInfo> {
+    async fn cancel_trade(&mut self) -> Option<TradeInfo> {
         if let Some(pos) = self.open_position.lock().await.take() {
             let trade_fill = self.market_close(pos.sz, pos.is_long).await;
             if let Ok(close) = trade_fill {
-                let trade_info = Self::get_trade_info(pos, close, &self.fees.1);
+                let trade_info = Self::get_trade_info_from_fills(&pos, &close);
                 return Some(trade_info);
             }
         }
 
+        let _ = self.cancel_all_resting().await;
+
         None
     }
 
-    pub async fn cancel_all_resting(&mut self) -> Result<(), Error> {
+    async fn cancel_all_resting(&mut self) -> Result<(), Error> {
         let mut failed_cancels: HashSet<u64> = HashSet::new();
         for oid in self.resting_orders.keys() {
             let cancel = ClientCancelRequest {
@@ -439,6 +438,77 @@ impl Executor {
         self.is_paused = !self.is_paused
     }
 
+    pub async fn handle_close_fill(&mut self, oid: u64, fill: &TradeFillInfo){
+        let mut clean_up = false;
+        let mut pos_guard = self.open_position.lock().await;
+
+        if let (Some(open_pos), Some(resting_order)) =
+            (&mut *pos_guard, self.resting_orders.get_mut(&oid))
+        {
+            assert_ne!(fill.is_long, resting_order.is_long);
+
+            if fill.is_long {
+                assert!(fill.price >= resting_order.limit_px);
+            } else {
+                assert!(fill.price <= resting_order.limit_px);
+            }
+
+            resting_order.size -= fill.sz;
+
+            if roundf!(resting_order.size, 6) == 0.0 {
+                clean_up = true;
+            }
+        }
+
+        if clean_up {
+            pos_guard.take();
+            drop(pos_guard);
+            let _ = self.cancel_all_resting().await;
+        }
+    }
+
+    pub async fn handle_open_fill(&mut self, oid: u64, fill: &TradeFillInfo) {
+        let mut clean_up = false;
+        let mut pos_guard = self.open_position.lock().await;
+
+        if let Some(resting_order) = self.resting_orders.get_mut(&oid) {
+            assert_eq!(fill.is_long, resting_order.is_long);
+
+            if fill.is_long {
+                assert!(fill.price <= resting_order.limit_px);
+            } else {
+                assert!(fill.price >= resting_order.limit_px);
+            }
+
+            resting_order.size -= fill.sz;
+
+            if roundf!(resting_order.size, 6) == 0.0 {
+                clean_up = true;
+            }
+
+            if let Some(pos) = &mut *pos_guard {
+                let new_total = pos.sz + fill.sz;
+                let new_cost = pos.price * pos.sz + fill.price * fill.sz;
+                pos.sz = new_total;
+                pos.price = new_cost / new_total;
+                pos.fee += fill.fee;
+            } else {
+                *pos_guard = Some(TradeFillInfo {
+                    is_long: fill.is_long,
+                    sz: fill.sz,
+                    price: fill.price,
+                    oid: oid,
+                    fee: fill.fee,
+                    fill_type: fill.fill_type,
+                });
+            }
+        }
+
+        if clean_up {
+            self.resting_orders.remove(&oid);
+        }
+    }
+
     pub async fn start(&mut self) {
         println!("EXECUTOR STARTED");
 
@@ -473,11 +543,12 @@ impl Executor {
                             };
 
                             if let Some(open) = maybe_open {
-                                let close_fill =
-                                    Self::market_close_static(client, asset, open.sz, is_long)
-                                        .await;
+                                let close_fill = Self::market_close_static(
+                                    client, asset, open.sz, is_long, &fees.1,
+                                )
+                                .await;
                                 if let Ok(fill) = close_fill {
-                                    let trade_info = Self::get_trade_info(open, fill, &fees.1);
+                                    let trade_info = Self::get_trade_info_from_fills(&open, &fill);
 
                                     let _ =
                                         sender.send(MarketCommand::ReceiveTrade(trade_info)).await;
@@ -505,6 +576,7 @@ impl Executor {
 
                 TradeCommand::CloseTrade { size } => {
                     if self.is_paused {
+                        assert!(!self.is_active().await);
                         continue;
                     };
                     let maybe_open = {
@@ -527,7 +599,7 @@ impl Executor {
                                 s
                             };
 
-                            let trade_info = Self::get_trade_info(init_pos, fill, &self.fees.1);
+                            let trade_info = Self::get_trade_info_from_fills(&init_pos, &fill);
                             let _ = info_sender
                                 .send(MarketCommand::ReceiveTrade(trade_info))
                                 .await;
@@ -546,23 +618,32 @@ impl Executor {
                     return;
                 }
 
-                TradeCommand::Liquidation(liq_fill) => {
-                    let maybe_open = {
-                        let mut pos = self.open_position.lock().await;
-                        pos.take()
-                    };
-
-                    if let Some(open_pos) = maybe_open {
-                        let liq_fill: TradeFillInfo = liq_fill.into();
-                        println!(
-                            "MAKE SURE SIZES ARE THE SAME: \nLocal {open_pos:?}\nLiquidation: {liq_fill:?}"
-                        );
-                        let trade_info = Self::get_trade_info(open_pos, liq_fill, &self.fees.1);
-
-                        let _ = info_sender
-                            .send(MarketCommand::ReceiveTrade(trade_info))
-                            .await;
-                        info!("LIQUIDATION INFO: {:?}", trade_info);
+                TradeCommand::UserFills(fill) => {
+                    use FillType::*;
+                    let fill_type = fill.fill_type;
+                    let oid = fill.oid;
+                    match fill_type {
+                        MarketClose => {
+                            let _ = self.handle_close_fill(oid, &fill).await;
+                        }
+                        MarketOpen => {
+                            let _ = self.handle_open_fill(oid, &fill).await;
+                        }
+                        LimitOpen => {
+                            let _ = self.handle_open_fill(oid, &fill).await;
+                        }
+                        LimitClose => {
+                            let _ = self.handle_close_fill(oid, &fill).await;
+                        }
+                        Trigger(tpsl) => {
+                            let _ = self.handle_close_fill(oid, &fill).await;
+                        }
+                        Liquidation => {
+                            let _ = self.handle_close_fill(oid, &fill).await;
+                        }
+                        Mixed => {
+                            warn!("MIXED FILL_TYPE CHECK LOG TO DEBUG");
+                        }
                     }
                 }
 
@@ -592,9 +673,11 @@ impl Executor {
                 }
 
                 TradeCommand::LimitOpen(limit_order) => {
+                    info!("{:?}", &limit_order);
                     if !self.is_active().await && !self.is_paused {
-                        let res = self.limit_open(limit_order).await;
-                        if let Ok(fill_type) = res {
+                        match self.limit_open(limit_order).await{
+
+                        Ok(fill_type) => {
                             match fill_type {
                                 LimitOrderResponseLocal::Filled(fill_info) => {
                                     //filled as taker
@@ -605,6 +688,12 @@ impl Executor {
                                 }
                             }
                         }
+
+                        Err(e) => {
+                                warn!("{}", e);
+                            }
+                        }
+
                     } else if self.is_active().await {
                         info!("OpenTrade skipped: a trade is already active");
                     }
@@ -616,6 +705,7 @@ impl Executor {
                     tif,
                 } => {
                     if self.is_paused {
+                        assert!(!self.is_active().await);
                         continue;
                     };
 
@@ -647,7 +737,8 @@ impl Executor {
                                     };
 
                                     let trade_info =
-                                        Self::get_trade_info(init_pos, fill, &self.fees.0);
+                                        Self::get_trade_info_from_fills(&init_pos, &fill);
+
                                     let _ = info_sender
                                         .send(MarketCommand::ReceiveTrade(trade_info))
                                         .await;
