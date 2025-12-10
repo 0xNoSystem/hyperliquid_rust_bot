@@ -331,7 +331,6 @@ impl Bot {
                         continue;
                     }
                 }
-                let _ = sleep(Duration::from_millis(500)).await;
             }
         });
 

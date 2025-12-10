@@ -6,8 +6,9 @@ import React, { useMemo, useState, useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import TradingViewWidget from "./TradingViewWidget";
-import { BackgroundFX } from "../components/BackgroundFX";
+import { BackgroundFX } from "./BackgroundFX";
 import { motion, AnimatePresence } from "framer-motion";
+import {formatUTC} from "../chart/utils";
 
 import {
     decompose,
@@ -565,8 +566,13 @@ export default function MarketDetail() {
                                             <th className="py-2 pr-4 text-right">
                                                 Fee
                                             </th>
+
+                                            <th className="py-2 pr-4 text-right">
+                                                Funding
+                                            </th>
+
                                             <th className="py-2 text-right">
-                                                OID
+                                                Open Time - Close Time
                                             </th>
                                         </tr>
                                     </thead>
@@ -585,10 +591,10 @@ export default function MarketDetail() {
                                                             : "Short"}
                                                     </td>
                                                     <td className="py-2 pr-4 text-right">
-                                                        {formatPrice(t.open)}
+                                                        {formatPrice(t.openPx)}
                                                     </td>
                                                     <td className="py-2 pr-4 text-right">
-                                                        {formatPrice(t.close)}
+                                                        {formatPrice(t.closePx)}
                                                     </td>
                                                     <td
                                                         className={`py-2 pr-4 text-right ${t.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}
@@ -596,10 +602,14 @@ export default function MarketDetail() {
                                                         {num(t.pnl, 2)}$
                                                     </td>
                                                     <td className="py-2 pr-4 text-right">
-                                                        {num(t.fee, 2)}$
+                                                        {num(t.fees, 2)}$
                                                     </td>
+                                                    <td className="py-2 text-center">
+                                                        {t.funding}
+                                                    </td>
+
                                                     <td className="py-2 text-right">
-                                                        {t.oid[0]} / {t.oid[1]}
+                                                        {formatUTC(t.openTime)} - {formatUTC(t.closeTime)}
                                                     </td>
                                                 </tr>
                                             )

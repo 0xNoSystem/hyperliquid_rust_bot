@@ -4,8 +4,8 @@ use hyperliquid_rust_sdk::{Error, ExchangeClient, ExchangeResponseStatus, Restin
 use log::info;
 //use kwant::indicators::Price;
 
-use crate::HLTradeInfo;
 use crate::strategy::{CustomStrategy, Strategy};
+use crate::{HLTradeInfo, get_time_now, roundf};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -103,17 +103,18 @@ pub enum TradeCommand {
     Pause,
 }
 
-#[derive(Clone, Debug, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TradeInfo {
-    pub open: f64,
-    pub close: f64,
-    pub close_type: FillType,
-    pub pnl: f64,
-    pub fee: f64,
+    pub open_px: f64,
+    pub close_px: f64,
     pub is_long: bool,
-    pub duration: Option<u64>,
-    pub oid: (u64, u64),
+    pub size: f64,
+    pub pnl: f64,
+    pub fees: f64,
+    pub funding: f64,
+    pub open_time: u64,
+    pub close_time: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -356,6 +357,90 @@ pub struct TriggerOrderLocal {
     pub is_market: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenPositionLocal {
+    pub asset: String,
+    pub open_time: u64,
+    pub size: f64,
+    pub entry_px: f64,
+    pub is_long: bool,
+    pub fees: f64,
+    pub funding: f64,
+    pub realised_pnl: f64,
+}
+
+impl OpenPositionLocal {
+    pub fn new(asset: String, fill: TradeFillInfo) -> Self {
+        Self {
+            asset,
+            open_time: get_time_now(),
+            size: fill.sz,
+            entry_px: fill.price,
+            is_long: fill.is_long,
+            realised_pnl: 0.0,
+            fees: fill.fee,
+            funding: 0.0,
+        }
+    }
+
+    pub fn apply_close_fill(&mut self, fill: &TradeFillInfo) -> Option<TradeInfo> {
+        let close_px = fill.price;
+        let close_sz = fill.sz;
+        let close_fee = fill.fee;
+
+        let price_diff = if self.is_long {
+            close_px - self.entry_px
+        } else {
+            self.entry_px - close_px
+        };
+
+        let partial_trade_pnl = price_diff * close_sz;
+        let chunk_realized = partial_trade_pnl - close_fee;
+
+        self.realised_pnl += chunk_realized;
+        self.size -= close_sz;
+        self.fees += close_fee;
+
+        if roundf!(self.size, 5) > 0.0 {
+            return None;
+        }
+
+        Some(TradeInfo {
+            open_px: self.entry_px,
+            close_px,
+            is_long: self.is_long,
+            size: close_sz,
+            pnl: self.realised_pnl + self.funding,
+            fees: self.fees,
+            funding: self.funding,
+            open_time: self.open_time,
+            close_time: get_time_now(),
+        })
+    }
+
+    pub fn apply_open_fill(&mut self, fill: &TradeFillInfo) {
+        let fill_px = fill.price;
+        let fill_sz = fill.sz;
+        let fill_fee = fill.fee;
+
+        assert_eq!(self.is_long, fill.is_long);
+
+        let old_size = self.size;
+        let new_size = old_size + fill_sz;
+
+        let new_entry_px = if roundf!(old_size, 6) == 0.0 {
+            fill_px
+        } else {
+            (self.entry_px * old_size + fill_px * fill_sz) / new_size
+        };
+
+        self.entry_px = new_entry_px;
+        self.size = new_size;
+        self.fees += fill_fee;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum LimitOrderResponseLocal {
     Filled(TradeFillInfo),
@@ -397,3 +482,4 @@ impl fmt::Display for TriggerKind {
         write!(f, "{}", s)
     }
 }
+

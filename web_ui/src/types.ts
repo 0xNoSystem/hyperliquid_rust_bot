@@ -231,18 +231,31 @@ export type editMarketInfo =
     | { margin: number };
 
 export interface TradeInfo {
-    open: number;
-    close: number;
+    openPx: number;
+    closePx: number;
+    size: number;
     pnl: number;
-    fee: number;
+    fees: number;
+    funding: number;
     isLong: number;
-    duration?: number;
-    oid: [number, number];
+    openTime: number;
+    closeTime: number;
 }
 
 export interface MarketTradeInfo {
     asset: string;
     info: TradeInfo;
+}
+
+export interface OpenPositionLocal {
+    asset: string;
+    openTime: number;
+    size: number;
+    entryPx: number;
+    isLong: boolean;
+    fees: number;
+    funding: number;
+    realisedPnl: number;
 }
 
 export const indicatorLabels: Record<string, string> = {

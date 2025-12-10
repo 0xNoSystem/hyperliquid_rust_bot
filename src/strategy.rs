@@ -143,7 +143,7 @@ impl CustomStrategy {
 
         let max_size = (params.margin * params.lev as f64) / price;
 
-        let order = LimitOrderLocal{
+        let order = LimitOrderLocal {
             size: roundf!(max_size * 0.9, 2),
             is_long: false,
             limit_px: 30.0,
