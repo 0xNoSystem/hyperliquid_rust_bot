@@ -21,7 +21,7 @@ use crate::market::MarketCommand;
 use crate::roundf;
 use crate::trade_setup::{
     FillType, LimitOrderLocal, LimitOrderResponseLocal, OpenPositionLocal, TradeCommand,
-    TradeFillInfo, TradeInfo, TriggerKind,
+    TradeFillInfo, TradeInfo, ClientOrderLocal,
 };
 
 pub struct Executor {
@@ -241,23 +241,17 @@ impl Executor {
     }
     async fn limit_open(
         &self,
-        LimitOrderLocal {
-            size,
-            is_long,
-            limit_px,
-            tif,
-        }: LimitOrderLocal,
+        limit_order: LimitOrderLocal,
     ) -> Result<LimitOrderResponseLocal, Error> {
+        
         let order = ClientOrderRequest {
             asset: self.asset.clone(),
-            is_buy: is_long,
+            is_buy: limit_order.is_long,
             reduce_only: false,
-            limit_px,
-            sz: size,
+            limit_px: limit_order.limit_px,
+            sz: limit_order.size,
             cloid: None,
-            order_type: ClientOrder::Limit(ClientLimit {
-                tif: tif.to_string(),
-            }),
+            order_type: limit_order.client_order(),
         };
 
         let status = Self::try_limit_trade(self.exchange_client.clone(), order).await?;
@@ -278,7 +272,7 @@ impl Executor {
                     fee,
                     price,
                     oid: order.oid,
-                    is_long,
+                    is_long: limit_order.is_long,
                 }))
             }
 
@@ -293,23 +287,23 @@ impl Executor {
     }
     async fn limit_close(
         &self,
-        LimitOrderLocal {
-            size,
-            is_long,
-            limit_px,
-            tif,
-        }: LimitOrderLocal,
+        limit_order: LimitOrderLocal,
     ) -> Result<LimitOrderResponseLocal, Error> {
+
+        let order_type = limit_order.client_order();
         let order = ClientOrderRequest {
             asset: self.asset.clone(),
-            is_buy: !is_long,
+            is_buy: !limit_order.is_long,
             reduce_only: true,
-            limit_px,
-            sz: size,
+            limit_px: limit_order.limit_px,
+            sz: limit_order.size,
             cloid: None,
-            order_type: ClientOrder::Limit(ClientLimit {
-                tif: tif.to_string(),
-            }),
+            order_type,
+        };
+
+        let fill_type: FillType = match limit_order.order_type{
+            ClientOrderLocal::ClientLimit(_) => FillType::LimitClose,
+            ClientOrderLocal::ClientTrigger(order) => FillType::Trigger(order.kind),
         };
 
         let status = Self::try_limit_trade(self.exchange_client.clone(), order).await?;
@@ -325,12 +319,12 @@ impl Executor {
                 })?;
                 let fee = sz * price * self.fees.1;
                 let fill_info = TradeFillInfo {
-                    fill_type: FillType::LimitClose,
+                    fill_type,
                     sz,
                     fee,
                     price,
                     oid: order.oid,
-                    is_long,
+                    is_long: !limit_order.is_long,
                 };
 
                 Ok(LimitOrderResponseLocal::Filled(fill_info))
@@ -400,7 +394,6 @@ impl Executor {
 
     async fn is_active(&self) -> bool {
         let guard = self.open_position.lock().await;
-        dbg!(&*guard);
         guard.is_some() || !self.resting_orders.is_empty()
     }
 
@@ -466,7 +459,6 @@ impl Executor {
     }
 
     pub async fn start(&mut self) {
-        println!("EXECUTOR STARTED");
 
         let info_sender = self.market_tx.clone();
         while let Ok(cmd) = self.trade_rv.recv_async().await {
@@ -569,8 +561,8 @@ impl Executor {
                         let _ = info_sender
                             .send(MarketCommand::ReceiveTrade(trade_info))
                             .await;
-                        let _ = self.cancel_all_resting().await;
                     };
+                    let _ = self.cancel_all_resting().await;
 
                     return;
                 }
@@ -655,7 +647,7 @@ impl Executor {
                 }
 
                 TradeCommand::LimitOpen(limit_order) => {
-                    info!("{:?}", &limit_order);
+                    println!("{:?}", &limit_order);
                     if !self.is_active().await && !self.is_paused {
                         match self.limit_open(limit_order).await {
                             Ok(fill_type) => {
@@ -687,31 +679,24 @@ impl Executor {
                     }
                 }
 
-                TradeCommand::LimitClose {
-                    size,
-                    limit_px,
-                    tif,
-                } => {
+                TradeCommand::LimitClose(mut limit_order) => {
+                    println!("{:?}", &limit_order);
                     if self.is_paused {
                         assert!(!self.is_active().await);
                         continue;
                     };
 
-                    let maybe_open = &mut *self.open_position.lock().await;
+                    let mut maybe_open = self.open_position.lock().await;
+                    let mut clean_up = false;
 
-                    if let Some(open_pos) = maybe_open {
-                        let size = size.min(open_pos.size);
-                        let limit_order = LimitOrderLocal {
-                            size,
-                            is_long: open_pos.is_long,
-                            limit_px,
-                            tif,
-                        };
+                    if let Some(open_pos) = &mut *maybe_open {
+                        limit_order.size = limit_order.size.min(open_pos.size);
                         let res = self.limit_close(limit_order).await;
                         if let Ok(fill_type) = res {
                             match fill_type {
                                 LimitOrderResponseLocal::Filled(fill) => {
                                     if let Some(trade_info) = open_pos.apply_close_fill(&fill) {
+                                        clean_up = true;
                                         let _ = info_sender
                                             .send(MarketCommand::ReceiveTrade(trade_info))
                                             .await;
@@ -720,10 +705,16 @@ impl Executor {
                                 }
                                 LimitOrderResponseLocal::Resting(oid) => {
                                     self.resting_orders.insert(oid.oid, limit_order);
+                                    println!("{:?}", &self.resting_orders);
                                 }
                             }
                         };
+
                     };
+                    if clean_up{
+                        drop(maybe_open);
+                        let _ = self.cancel_all_resting().await;
+                    }
                 }
 
                 _ => {}

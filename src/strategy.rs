@@ -1,7 +1,7 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
-use crate::{LimitOrderLocal, Tif, TradeCommand, roundf};
+use crate::{LimitOrderLocal, Tif, TradeCommand, roundf, ClientOrderLocal, TriggerOrder, TriggerKind};
 //use crate::signal::IndicatorKind;
 use crate::signal::ExecParams;
 use kwant::indicators::Value;
@@ -143,13 +143,37 @@ impl CustomStrategy {
 
         let max_size = (params.margin * params.lev as f64) / price;
 
+        let trigger = TriggerOrder{
+            kind: TriggerKind::Sl,
+            is_market: false,
+        };
+
         let order = LimitOrderLocal {
             size: roundf!(max_size * 0.9, 2),
-            is_long: false,
-            limit_px: 30.0,
-            tif: Tif::Gtc,
+            is_long: true,
+            limit_px: roundf!(price * 0.999, 0),
+            order_type: ClientOrderLocal::ClientLimit(Tif::Gtc),
         };
+
         Some(TradeCommand::LimitOpen(order))
+    }
+
+    pub fn generate_test_tpsl(&self, price: f64, params: ExecParams) -> Option<TradeCommand> {
+        let max_size = (params.margin * params.lev as f64) / price;
+
+        let trigger = TriggerOrder{
+            kind: TriggerKind::Sl,
+            is_market: true,
+        };
+
+        let order = LimitOrderLocal {
+            size: roundf!(max_size * 0.9, 2),
+            is_long: true,
+            limit_px: roundf!(price * 0.88, 0),
+            order_type: ClientOrderLocal::ClientTrigger(trigger),
+        };
+
+        Some(TradeCommand::LimitClose(order))
     }
 
     pub fn generate_signal(

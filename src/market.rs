@@ -62,10 +62,9 @@ impl Market {
             }
         }
 
-        info!("\n MARGIN: {}", margin);
         //setup channels
         let (market_tx, market_rv) = channel::<MarketCommand>(7);
-        let (exec_tx, exec_rv) = bounded::<TradeCommand>(0);
+        let (exec_tx, exec_rv) = bounded::<TradeCommand>(5);
         let (engine_tx, engine_rv) = unbounded_channel::<EngineCommand>();
 
         let senders = MarketSenders {

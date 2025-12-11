@@ -1,6 +1,6 @@
 use std::fmt;
 
-use hyperliquid_rust_sdk::{Error, ExchangeClient, ExchangeResponseStatus, RestingOrder};
+use hyperliquid_rust_sdk::{Error, ExchangeClient, ExchangeResponseStatus, RestingOrder, ClientOrder, ClientLimit, ClientTrigger};
 use log::info;
 //use kwant::indicators::Price;
 
@@ -84,12 +84,7 @@ pub enum TradeCommand {
         size: f64,
     },
     LimitOpen(LimitOrderLocal),
-    LimitClose {
-        size: f64,
-        limit_px: f64,
-        tif: Tif,
-    },
-    Trigger(TriggerOrderLocal),
+    LimitClose(LimitOrderLocal),
     BuildPosition {
         size: f64,
         is_long: bool,
@@ -344,15 +339,44 @@ pub struct LimitOrderLocal {
     pub size: f64,
     pub is_long: bool,
     pub limit_px: f64,
-    pub tif: Tif,
+    pub order_type: ClientOrderLocal,
 }
 
 #[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TriggerOrderLocal {
-    pub size: f64,
-    pub is_long: bool,
-    pub trigger_px: f64,
+pub enum ClientOrderLocal{
+    ClientLimit(Tif),
+    ClientTrigger(TriggerOrder),
+}
+
+impl LimitOrderLocal{
+    pub fn client_order(&self) -> ClientOrder
+    {
+        match self.order_type
+        {
+            ClientOrderLocal::ClientLimit(tif) => 
+            {
+                            ClientOrder::Limit(
+                                ClientLimit{
+                                    tif: tif.to_string(),
+                                })
+            },
+            ClientOrderLocal::ClientTrigger(trigger) => 
+            {
+                            ClientOrder::Trigger(
+                                ClientTrigger{
+                                is_market: trigger.is_market,
+                                trigger_px: self.limit_px,
+                                tpsl: trigger.kind.to_string(),
+                                })
+            }
+        }     
+    }
+}
+
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerOrder {
     pub kind: TriggerKind,
     pub is_market: bool,
 }

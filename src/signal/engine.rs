@@ -164,6 +164,13 @@ impl SignalEngine {
             Strategy::Custom(brr) => brr.generate_test_trade(price, self.exec_params),
         }
     }
+    
+    #[allow(unused)]
+    fn get_test_tpsl(&self, price: f64) -> Option<TradeCommand> {
+        match self.strategy {
+            Strategy::Custom(brr) => brr.generate_test_tpsl(price, self.exec_params),
+        }
+    }
 
     fn digest(&mut self, price: Price) {
         for (_tf, tracker) in self.trackers.iter_mut() {
@@ -185,7 +192,7 @@ impl SignalEngine {
                     let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
 
                     if !ind.is_empty() {
-                        if tick.is_multiple_of(2)
+                        if tick.is_multiple_of(8)
                             && let Some(sender) = &self.data_tx
                         {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
@@ -193,6 +200,11 @@ impl SignalEngine {
 
                         if let Some(trade) = self.get_test_trade(price.close) {
                             let _ = self.trade_tx.try_send(trade);
+                        }
+
+                        if tick % 80 == 0{
+                            println!("SENDING TPSL");
+                            let _ = self.trade_tx.try_send(self.get_test_tpsl(price.close).unwrap());
                         }
                     }
                     tick += 1;
@@ -206,11 +218,6 @@ impl SignalEngine {
                     indicators,
                     price_data,
                 } => {
-                    info!(
-                        "Received Indicator Edit Vec of length : {}",
-                        indicators.len()
-                    );
-
                     for entry in indicators {
                         match entry.edit {
                             EditType::Add => {
