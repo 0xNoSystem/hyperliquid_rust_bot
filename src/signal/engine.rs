@@ -7,8 +7,8 @@ use log::info;
 use kwant::indicators::{Price, Value};
 
 use crate::strategy::Strategy;
-use crate::trade_setup::{TimeFrame, TradeCommand, TradeParams};
-use crate::{IndicatorData, MarketCommand};
+use crate::trade_setup::{TimeFrame, TradeParams};
+use crate::{ExecCommand, IndicatorData, MarketCommand};
 
 use flume::{Sender, bounded};
 use tokio::sync::mpsc::{Sender as tokioSender, UnboundedReceiver, unbounded_channel};
@@ -19,7 +19,7 @@ type TrackersMap = HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>
 
 pub struct SignalEngine {
     engine_rv: UnboundedReceiver<EngineCommand>,
-    trade_tx: Sender<TradeCommand>,
+    trade_tx: Sender<ExecCommand>,
     data_tx: Option<tokioSender<MarketCommand>>,
     trackers: TrackersMap,
     strategy: Strategy,
@@ -32,8 +32,8 @@ impl SignalEngine {
         trade_params: TradeParams,
         engine_rv: UnboundedReceiver<EngineCommand>,
         data_tx: Option<tokioSender<MarketCommand>>,
-        trade_tx: Sender<TradeCommand>,
-        margin: f64,
+        trade_tx: Sender<ExecCommand>,
+        exec_params: ExecParams,
     ) -> Self {
         let mut trackers: TrackersMap = HashMap::default();
         trackers.insert(
@@ -61,7 +61,7 @@ impl SignalEngine {
             data_tx,
             trackers,
             strategy: trade_params.strategy,
-            exec_params: ExecParams::new(margin, trade_params.lev, trade_params.time_frame),
+            exec_params: exec_params,
         }
     }
 
@@ -152,21 +152,21 @@ impl SignalEngine {
         }
     }
 
-    fn get_signal(&self, price: f64, values: Vec<Value>) -> Option<TradeCommand> {
+    fn get_signal(&self, price: f64, values: Vec<Value>) -> Option<ExecCommand> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_signal(values, price, self.exec_params),
         }
     }
 
     #[allow(unused)]
-    fn get_test_trade(&self, price: f64) -> Option<TradeCommand> {
+    fn get_test_trade(&self, price: f64) -> Option<ExecCommand> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_test_trade(price, self.exec_params),
         }
     }
-    
+
     #[allow(unused)]
-    fn get_test_tpsl(&self, price: f64) -> Option<TradeCommand> {
+    fn get_test_tpsl(&self, price: f64) -> Option<ExecCommand> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_test_tpsl(price, self.exec_params),
         }
@@ -192,19 +192,14 @@ impl SignalEngine {
                     let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
 
                     if !ind.is_empty() {
-                        if tick.is_multiple_of(8)
+                        if tick.is_multiple_of(2)
                             && let Some(sender) = &self.data_tx
                         {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
 
-                        if let Some(trade) = self.get_test_trade(price.close) {
+                        if let Some(trade) = self.get_signal(price.close, values) {
                             let _ = self.trade_tx.try_send(trade);
-                        }
-
-                        if tick % 80 == 0{
-                            println!("SENDING TPSL");
-                            let _ = self.trade_tx.try_send(self.get_test_tpsl(price.close).unwrap());
                         }
                     }
                     tick += 1;
@@ -254,9 +249,6 @@ impl SignalEngine {
                         Lev(l) => {
                             self.exec_params.lev = l;
                         }
-                        Tf(t) => {
-                            self.exec_params.tf = t;
-                        }
                     }
                 }
 
@@ -297,7 +289,7 @@ impl SignalEngine {
 
         //channels won't be used in backtesting, these are placeholders
         let (_tx, dummy_rv) = unbounded_channel::<EngineCommand>();
-        let (dummy_tx, _rx) = bounded::<TradeCommand>(0);
+        let (dummy_tx, _rx) = bounded::<ExecCommand>(0);
 
         SignalEngine {
             engine_rv: dummy_rv,

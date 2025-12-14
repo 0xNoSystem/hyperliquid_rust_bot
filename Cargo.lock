@@ -2957,7 +2957,7 @@ dependencies = [
 [[package]]
 name = "hyperliquid_rust_sdk"
 version = "0.6.0"
-source = "git+https://github.com/0xNoSystem/hyperliquid-rust-sdk.git?branch=main#c753ca0969acdbd78b582c96b704cda22a470d73"
+source = "git+https://github.com/0xNoSystem/hyperliquid-rust-sdk.git?branch=main#06801c8548b36536cfe4b9f605c977d31dacfbdf"
 dependencies = [
  "alloy",
  "chrono",

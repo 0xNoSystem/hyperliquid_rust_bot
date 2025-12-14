@@ -1,11 +1,11 @@
 use crate::{
-    AddMarketInfo, Market, MarketCommand, MarketInfo, MarketUpdate, TradeFillInfo, UpdateFrontend,
-    Wallet,
+    AddMarketInfo, ExecEvent, HLTradeInfo, Market, MarketCommand, MarketInfo, MarketUpdate,
+    TradeFillInfo, UpdateFrontend, Wallet,
 };
 use hyperliquid_rust_sdk::{
-    AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, TradeInfo as HLTradeInfo,
+    AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, UserData,
 };
-use log::info;
+use log::{info, warn};
 use std::collections::HashMap;
 use tokio::time::{Duration, interval, sleep};
 
@@ -200,28 +200,6 @@ impl Bot {
         Ok(())
     }
 
-    pub async fn pause_or_resume_market(&self, asset: &str) {
-        let asset = asset.trim().to_string();
-
-        if let Some(tx) = self.markets.get(&asset) {
-            let tx = tx.clone();
-            let cmd = MarketCommand::Toggle;
-            tokio::spawn(async move {
-                if let Err(e) = tx.send(cmd).await {
-                    log::warn!("Failed to send Toggle command: {:?}", e);
-                }
-            });
-        } else {
-            info!("Failed: Pause {} market, it doesn't exist", asset);
-            return;
-        }
-
-        let mut sess_guard = self.session.lock().await;
-        if let Some(info) = sess_guard.get_mut(&asset) {
-            info.is_paused = !info.is_paused;
-        }
-    }
-
     pub async fn pause_all(&self) {
         info!("PAUSING ALL MARKETS");
         for tx in self.markets.values() {
@@ -253,9 +231,7 @@ impl Bot {
         session.clear();
     }
 
-    pub async fn send_cmd(&self, asset: &str, cmd: MarketCommand) {
-        let asset = asset.trim().to_string();
-
+    pub async fn send_cmd(&self, asset: String, cmd: MarketCommand) {
         if let Some(tx) = self.markets.get(&asset) {
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -373,14 +349,14 @@ impl Bot {
         });
 
         //fill events
-        let (liq_tx, mut liq_rv) = unbounded_channel();
+        let (user_tx, mut user_rv) = unbounded_channel();
         let _id = self
             .info_client
             .subscribe(
-                Subscription::UserFills {
+                Subscription::UserEvents {
                     user: address(&self.wallet.pubkey),
                 },
-                liq_tx,
+                user_tx,
             )
             .await?;
 
@@ -388,11 +364,12 @@ impl Bot {
             tokio::select!(
                     biased;
 
-                    Some(Message::UserFills(update)) = liq_rv.recv() => {
+                    Some(Message::User(user_event)) = user_rv.recv() => {
 
-                        if update.data.is_snapshot.is_some(){
-                            continue;
-                        }
+                    match user_event.data{
+
+                        UserData::Fills(fills_vec) =>{
+
                         let mut fills_map: HashMap<
                             String,
                             HashMap<
@@ -402,7 +379,7 @@ impl Bot {
                             >,
                             BuildHasherDefault<FxHasher>> = HashMap::default();
 
-                        for trade in update.data.fills.into_iter(){
+                        for trade in fills_vec.into_iter(){
                             let coin = trade.coin.clone();
                             let oid = trade.oid;
                             fills_map
@@ -414,14 +391,34 @@ impl Bot {
                         }
                         println!("\nTRADES  |||||||||| {:?}\n\n", fills_map);
 
-                        for (coin, map) in fills_map.into_iter(){
-                            for (_oid, fills) in map.into_iter(){
-                                let to_send = TradeFillInfo::from(fills);
-                                let cmd = MarketCommand::UserFills(to_send);
-                                self.send_cmd(coin.as_str(), cmd).await;
+                        for (coin, map) in fills_map.into_iter()
+                        {
+                            for (_oid, fills) in map.into_iter() {
+                                match TradeFillInfo::try_from(fills) {
+                                    Ok(fill) => {
+                                        let cmd = MarketCommand::UserEvent(ExecEvent::Fill(fill));
+                                        self.send_cmd(coin.clone(), cmd).await;
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to aggregate TradeFillInfo for {} market: {}", coin, e);
+                                    }
+                                }
                             }
+
                         }
-                },
+                    }
+
+                    UserData::Funding(funding_update) => {
+                        if let Ok(fd) = funding_update.usdc.parse::<f64>(){
+                            let cmd = MarketCommand::UserEvent(ExecEvent::Funding(fd));
+                            self.send_cmd(funding_update.coin, cmd).await;
+                        }else{
+                            warn!("Failed to parse user funding");
+                        }
+                    }
+                    _ => info!("{:?}", user_event)
+                }
+            },
 
 
                     Some(event) = self.bot_rv.recv() => {
@@ -432,9 +429,22 @@ impl Bot {
                                     let _ = err_tx.send(UserError(e.to_string()));
                             }
                         },
-                            ToggleMarket(asset) => {self.pause_or_resume_market(asset.as_str()).await;},
+                            ResumeMarket(asset) => {
+                                self.send_cmd(asset.clone(), MarketCommand::Resume).await;
+                                let mut sess_guard = self.session.lock().await;
+                                if let Some(info) = sess_guard.get_mut(&asset) {
+                                    info.is_paused = false;
+                                }
+                            },
+                            PauseMarket(asset) => {
+                                self.send_cmd(asset.clone(), MarketCommand::Pause).await;
+                                let mut sess_guard = self.session.lock().await;
+                                if let Some(info) = sess_guard.get_mut(&asset) {
+                                    info.is_paused = true;
+                                }
+                            },
                             RemoveMarket(asset) => {let _ = self.remove_market(asset.as_str(), &margin_user_edit).await;},
-                            MarketComm(command) => {self.send_cmd(&command.asset, command.cmd).await;},
+                            MarketComm(command) => {self.send_cmd(command.asset, command.cmd).await;},
                             ManualUpdateMargin(asset_margin) => {
                                 let result = {
                                     let mut book = margin_user_edit.lock().await;
@@ -443,7 +453,7 @@ impl Bot {
                                 match result{
                                 Ok(new_margin) => {
                                     let cmd = MarketCommand::UpdateMargin(new_margin);
-                                    self.send_cmd(&asset_margin.0, cmd).await;
+                                    self.send_cmd(asset_margin.0, cmd).await;
                                 },
 
                                 Err(e) => {
@@ -481,7 +491,8 @@ impl Bot {
 #[serde(rename_all = "camelCase")]
 pub enum BotEvent {
     AddMarket(AddMarketInfo),
-    ToggleMarket(String),
+    ResumeMarket(String),
+    PauseMarket(String),
     RemoveMarket(String),
     MarketComm(BotToMarket),
     ManualUpdateMargin(AssetMargin),

@@ -23,8 +23,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
     //env_logger::init();
     env_logger::Builder::from_default_env()
-    .filter_level(log::LevelFilter::Warn)
-    .init();
+        .filter_level(log::LevelFilter::Warn)
+        .init();
 
     let url = BaseUrl::Mainnet;
     let wallet = load_wallet(url).await?;

@@ -15,6 +15,11 @@ pub enum MarginAllocation {
     Amount(f64),
 }
 
+struct Margin {
+    total: f64,
+    used: f64,
+}
+
 pub type MarginMap = HashMap<String, f64, BuildHasherDefault<FxHasher>>;
 
 pub struct MarginBook {

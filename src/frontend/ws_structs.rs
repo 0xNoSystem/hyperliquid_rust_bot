@@ -1,6 +1,4 @@
-use crate::{
-    AssetMargin, AssetPrice, IndexId, MarginAllocation, MarketTradeInfo, TradeParams, Value,
-};
+use crate::{AssetMargin, AssetPrice, IndexId, MarginAllocation, TradeInfo, TradeParams, Value};
 use hyperliquid_rust_sdk::AssetMeta;
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +29,13 @@ pub struct MarketInfo {
 pub struct IndicatorData {
     pub id: IndexId,
     pub value: Option<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketTradeInfo {
+    pub asset: String,
+    pub info: TradeInfo,
 }
 
 #[derive(Clone, Debug, Serialize)]

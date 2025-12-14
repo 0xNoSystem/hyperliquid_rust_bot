@@ -1,0 +1,331 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use alloy::signers::local::PrivateKeySigner;
+use flume::Receiver;
+use log::{info, warn};
+use tokio::{
+    sync::{Mutex, mpsc::Sender},
+    time::{Duration, sleep},
+};
+
+use rustc_hash::FxHasher;
+use std::hash::BuildHasherDefault;
+
+use hyperliquid_rust_sdk::{
+    BaseUrl, ClientCancelRequest, ClientLimit, ClientOrder, ClientOrderRequest, ClientTrigger,
+    Error, ExchangeClient, ExchangeDataStatus, MarketOrderParams, AssetMeta,
+};
+
+use super::*;
+use crate::{MarketCommand, roundf};
+
+pub struct Executor {
+    trade_rv: Receiver<ExecCommand>,
+    market_tx: Sender<MarketCommand>,
+    asset: AssetMeta,
+    exchange_client: Arc<ExchangeClient>,
+    is_paused: bool,
+    fees: (f64, f64), //Maker, Taker
+    resting_orders: HashMap<u64, RestingOrderLocal, BuildHasherDefault<FxHasher>>,
+    open_position: Arc<Mutex<Option<OpenPositionLocal>>>,
+}
+
+impl Executor {
+    pub async fn new(
+        wallet: PrivateKeySigner,
+        asset: AssetMeta,
+        fees: (f64, f64),
+        trade_rv: Receiver<ExecCommand>,
+        market_tx: Sender<MarketCommand>,
+    ) -> Result<Executor, Error> {
+        let exchange_client =
+            Arc::new(ExchangeClient::new(None, wallet, Some(BaseUrl::Mainnet), None, None).await?);
+        Ok(Executor {
+            trade_rv,
+            market_tx,
+            asset,
+            exchange_client,
+            is_paused: false,
+            fees,
+            resting_orders: HashMap::default(),
+            open_position: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    async fn with_position<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut Option<OpenPositionLocal>) -> R,
+    {
+        let mut guard = self.open_position.lock().await;
+        f(&mut guard)
+    }
+
+    async fn open_trade(
+        &mut self,
+        order: HlOrder<'_>,
+        intent: PositionOp,
+        trigger: Option<TriggerKind>,
+    ) -> Result<RestingOrderLocal, Error> {
+        let side = order.get_side();
+        let limit_px = order.get_px();
+        let size = order.get_sz();
+
+        let status_res = match order {
+            HlOrder::Market(market_order) => self.exchange_client.market_open(market_order).await?,
+            HlOrder::Limit(limit_order) => self.exchange_client.order(limit_order, None).await?,
+        };
+
+        match extract_order_status(status_res)? {
+            ExchangeDataStatus::Filled(fill) => Ok(RestingOrderLocal {
+                oid: fill.oid,
+                limit_px,
+                sz: size,
+                side,
+                intent,
+                tpsl: trigger,
+            }),
+            ExchangeDataStatus::Resting(res) => Ok(RestingOrderLocal {
+                oid: res.oid,
+                limit_px,
+                sz: size,
+                side,
+                intent,
+                tpsl: trigger,
+            }),
+
+            ExchangeDataStatus::Error(err) => Err(Error::Custom(err)),
+
+            _ => Err(Error::ExecutionFailure(
+                "unexpected exchange status response".to_string(),
+            )),
+        }
+    }
+    async fn cancel_all_resting(&mut self) -> Result<(), Error> {
+        let asset = self.asset.name.clone();
+        let mut failed_cancels: HashSet<u64> = HashSet::new();
+        for oid in self.resting_orders.keys() {
+            let cancel = ClientCancelRequest {
+                asset: asset.clone(),
+                oid: *oid,
+            };
+            if let Err(e) = self.exchange_client.cancel(cancel, None).await {
+                warn!("Failed to cancel oid {}: {:?}", oid, e);
+                failed_cancels.insert(*oid);
+            }
+        }
+        let mut retries = 0;
+
+        while !failed_cancels.is_empty() {
+            retries += 1;
+            let iterator = failed_cancels.iter().copied().collect::<Vec<_>>();
+            for oid in iterator.iter() {
+                let cancel = ClientCancelRequest {
+                    asset: asset.clone(),
+                    oid: *oid,
+                };
+                if self.exchange_client.cancel(cancel, None).await.is_ok() {
+                    failed_cancels.remove(oid);
+                }
+            }
+
+            if retries > 5 {
+                return Err(Error::Custom(format!(
+                    "Failed to cancle resting order for {} market, please cancel manually on https://app.hyperliquid.xyz/trade/{}",
+                    &asset,
+                    &asset,
+                )));
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+        Ok(())
+    }
+
+    async fn is_active(&self) -> bool {
+        let guard = self.open_position.lock().await;
+        guard.is_some() || !self.resting_orders.is_empty()
+    }
+
+    fn into_hl_order(asset: &str, sz: f64, side: Side, limit: Option<Limit>) -> HlOrder<'_> {
+        let is_long = side == Side::Long;
+        if let Some(limit) = limit {
+            HlOrder::Limit(ClientOrderRequest {
+                asset: asset.to_string(),
+                is_buy: is_long,
+                reduce_only: limit.is_tpsl().is_some(),
+                limit_px: limit.limit_px,
+                sz,
+                cloid: None,
+                order_type: limit.order_type.convert(limit.limit_px),
+            })
+        } else {
+            HlOrder::Market(MarketOrderParams {
+                asset,
+                is_buy: is_long,
+                sz,
+                px: None,
+                slippage: None,
+                cloid: None,
+                wallet: None,
+            })
+        }
+    }
+    async fn apply_fill(&mut self, fill: TradeFillInfo) -> Option<TradeInfo> {
+        let mut clean_up = false;
+
+        if let Some(resting) = self.resting_orders.get_mut(&fill.oid) {
+            assert_eq!(resting.intent, fill.intent);
+            if let Some(px) = resting.limit_px {
+                match resting.side {
+                    Side::Long => assert!(fill.price <= px),
+                    Side::Short => assert!(fill.price >= px),
+                }
+            }
+            resting.sz -= fill.sz;
+            if roundf!(resting.sz, self.asset.sz_decimals) == 0.0 {
+                clean_up = true;
+            }
+        }
+
+        if clean_up {
+            self.resting_orders.remove(&fill.oid);
+        }
+
+        self.with_position(|pos| match fill.intent {
+            PositionOp::OpenLong | PositionOp::OpenShort => {
+                if let Some(open_pos) = pos {
+                    open_pos.apply_open_fill(&fill);
+                } else {
+                    *pos = Some(OpenPositionLocal::new(fill));
+                }
+                None
+            }
+
+            PositionOp::Close => {
+                if let Some(open_pos) = pos {
+                    open_pos.apply_close_fill(&fill, self.asset.sz_decimals)
+                } else {
+                    None
+                }
+            }
+        })
+        .await
+    }
+
+    #[inline]
+    async fn send_to_market(&self, trade_info: TradeInfo) {
+        let _ = self
+            .market_tx
+            .send(MarketCommand::ReceiveTrade(trade_info))
+            .await;
+    }
+
+    async fn kill(&mut self) {
+        let _ = self.cancel_all_resting().await;
+
+        let params = self
+            .with_position(|pos| {
+                if let Some(open_pos) = pos {
+                    Some((!open_pos.side, open_pos.size))
+                } else {
+                    None
+                }
+            })
+            .await;
+        if let Some((side, size)) = params {
+            let asset = self.asset.name.clone();
+            let op = PositionOp::Close;
+            let trade = Self::into_hl_order(&asset, size, side, None);
+            match self.open_trade(trade, op, None).await {
+                Ok(order_response) => {
+                    let _ = self
+                        .resting_orders
+                        .insert(order_response.oid, order_response);
+                }
+                Err(e) => warn!("{}", e.to_string()),
+            }
+        }
+    }
+
+    pub async fn start(&mut self) {
+        use ExecCommand::*;
+        while let Ok(cmd) = self.trade_rv.recv_async().await {
+            match cmd {
+                Order(order) => {
+                    if self.is_paused {
+                        continue;
+                    }
+                    let order_params: Option<(Side, f64)> = match order.action {
+                        PositionOp::OpenLong => Some((Side::Long, order.size)),
+                        PositionOp::OpenShort => Some((Side::Short, order.size)),
+                        PositionOp::Close => {
+                            self.with_position(|pos| {
+                                if let Some(open_pos) = pos {
+                                    let size = order.size.min(open_pos.size);
+                                    let side = !open_pos.side;
+                                    Some((side, size))
+                                } else {
+                                    None
+                                }
+                            })
+                            .await
+                        }
+                    };
+
+                    if let Some((side, size)) = order_params {
+                        let asset = self.asset.name.clone();
+                        let trade = Self::into_hl_order(&asset, size, side, order.limit);
+                        let trigger = order.is_tpsl();
+                        match self.open_trade(trade, order.action, trigger).await {
+                            Ok(order_response) => {
+                                self.resting_orders
+                                    .insert(order_response.oid, order_response);
+                            }
+                            Err(e) => warn!("{}", e.to_string()),
+                        }
+                    }
+                }
+                Control(control) => match control {
+                    ExecControl::Kill => {
+                        self.kill().await;
+                        return;
+                    }
+                    ExecControl::Pause => {
+                        self.kill().await;
+                        self.is_paused = true;
+                    }
+                    ExecControl::Resume => {
+                        self.is_paused = false;
+                    }
+                },
+
+                Event(event) => {
+                    match event {
+                        ExecEvent::Fill(fill) => {
+                            let oid = fill.oid;
+
+                            match fill.intent {
+                                PositionOp::OpenLong | PositionOp::OpenShort => {
+                                    let _ = self.apply_fill(fill).await;
+                                }
+                                PositionOp::Close => {
+                                    if let Some(trade_info) = self.apply_fill(fill).await {
+                                        self.send_to_market(trade_info).await;
+                                    }
+                                }
+                            }
+                        }
+                        ExecEvent::Funding(funding) => {
+                            self.with_position(|pos|{
+                                if let Some(open_pos) = pos{
+                                    open_pos.funding += funding;
+                                }else{
+                                    warn!("Received position funding but there was no OpenPositionLocal");
+                                }}).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

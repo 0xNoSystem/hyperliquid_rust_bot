@@ -1,10 +1,8 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
-use crate::{LimitOrderLocal, Tif, TradeCommand, roundf, ClientOrderLocal, TriggerOrder, TriggerKind};
-//use crate::signal::IndicatorKind;
 use crate::signal::ExecParams;
-use kwant::indicators::Value;
+use crate::{ClientOrderLocal, ExecCommand, Tif, TriggerKind, TriggerOrder, Value, roundf};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize, Serialize)]
@@ -137,43 +135,29 @@ impl CustomStrategy {
         self.follow_trend = follow_trend;
     }
 
-    pub fn generate_test_trade(&self, price: f64, params: ExecParams) -> Option<TradeCommand> {
+    pub fn generate_test_trade(&self, price: f64, params: ExecParams) -> Option<ExecCommand> {
         let duration = 30;
         let is_long = true;
 
         let max_size = (params.margin * params.lev as f64) / price;
 
-        let trigger = TriggerOrder{
+        let trigger = TriggerOrder {
             kind: TriggerKind::Sl,
             is_market: false,
         };
 
-        let order = LimitOrderLocal {
-            size: roundf!(max_size * 0.9, 2),
-            is_long: true,
-            limit_px: roundf!(price * 0.999, 0),
-            order_type: ClientOrderLocal::ClientLimit(Tif::Gtc),
-        };
-
-        Some(TradeCommand::LimitOpen(order))
+        None
     }
 
-    pub fn generate_test_tpsl(&self, price: f64, params: ExecParams) -> Option<TradeCommand> {
+    pub fn generate_test_tpsl(&self, price: f64, params: ExecParams) -> Option<ExecCommand> {
         let max_size = (params.margin * params.lev as f64) / price;
 
-        let trigger = TriggerOrder{
+        let trigger = TriggerOrder {
             kind: TriggerKind::Sl,
             is_market: true,
         };
 
-        let order = LimitOrderLocal {
-            size: roundf!(max_size * 0.9, 2),
-            is_long: true,
-            limit_px: roundf!(price * 0.88, 0),
-            order_type: ClientOrderLocal::ClientTrigger(trigger),
-        };
-
-        Some(TradeCommand::LimitClose(order))
+        None
     }
 
     pub fn generate_signal(
@@ -181,7 +165,7 @@ impl CustomStrategy {
         data: Vec<Value>,
         price: f64,
         params: ExecParams,
-    ) -> Option<TradeCommand> {
+    ) -> Option<ExecCommand> {
         // Extract indicator values from the data
         let mut rsi_value = None;
         let mut srsi_value = None;
@@ -210,19 +194,19 @@ impl CustomStrategy {
             && let Some(stoch) = stoch_rsi
         {
             let max_size = (params.margin * params.lev as f64) / price;
-            return self.rsi_based_scalp(rsi, srsi, stoch, max_size);
+            return None;
         }
 
         None
     }
-
+    /*
     fn rsi_based_scalp(
         &self,
         rsi: f64,
         srsi: f64,
         stoch_rsi: (f64, f64), // (K, D)
         max_size: f64,
-    ) -> Option<TradeCommand> {
+    ) -> Option<ExecCommand> {
         let (k, d) = stoch_rsi;
         let duration = 420;
 
@@ -241,7 +225,7 @@ impl CustomStrategy {
             let stoch_short = k > SRSI_OB && d > SRSI_OB;
 
             if rsi_short && srsi_short && stoch_short {
-                return Some(TradeCommand::ExecuteTrade {
+                return Some(ExecCommand::ExecuteTrade {
                     size: 0.9 * max_size,
                     is_long: false,
                     duration,
@@ -255,7 +239,7 @@ impl CustomStrategy {
             let stoch_long = k < SRSI_OS && d < SRSI_OS;
 
             if rsi_long && srsi_long && stoch_long {
-                return Some(TradeCommand::ExecuteTrade {
+                return Some(ExecCommand::ExecuteTrade {
                     size: 0.9 * max_size,
                     is_long: true,
                     duration,
@@ -265,6 +249,7 @@ impl CustomStrategy {
 
         None
     }
+    */
 }
 
 impl Default for CustomStrategy {

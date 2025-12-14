@@ -14,7 +14,7 @@ use dotenv::dotenv;
 use hyperliquid_rust_bot::{HLTradeInfo, TradeFillInfo};
 use hyperliquid_rust_sdk::{
     BaseUrl, ClientCancelRequest, ClientLimit, ClientOrder, ClientOrderRequest, ExchangeClient,
-    ExchangeDataStatus, ExchangeResponseStatus, InfoClient, Message, Subscription,
+    ExchangeDataStatus, ExchangeResponseStatus, InfoClient, Message, Subscription, UserData,
 };
 use log::info;
 
@@ -49,42 +49,65 @@ async fn main() {
 
     let (sender, mut receiver) = unbounded_channel();
     let subscription_id = info_client
-        .subscribe(Subscription::UserFills { user }, sender)
+        .subscribe(Subscription::UserEvents { user }, sender)
         .await
         .unwrap();
 
     let handle = spawn(async move {
-        sleep(Duration::from_secs(3000)).await;
+        sleep(Duration::from_secs(30000)).await;
         println!("Unsubscribing from order updates data");
         info_client.unsubscribe(subscription_id).await.unwrap()
     });
 
     // this loop ends when we unsubscribe
     spawn(async move {
-        while let Some(Message::UserFills(update)) = receiver.recv().await {
-            if update.data.is_snapshot.is_some() {
-                continue;
-            }
-            let mut fills_map: HashMap<
-                String,
-                HashMap<u64, Vec<HLTradeInfo>, BuildHasherDefault<FxHasher>>,
-                BuildHasherDefault<FxHasher>,
-            > = HashMap::default();
+        while let Some(Message::User(user_event)) = receiver.recv().await {
+            match user_event.data {
+                UserData::Fills(fills_vec) => {
+                    let mut fills_map: HashMap<
+                        String,
+                        HashMap<u64, Vec<HLTradeInfo>, BuildHasherDefault<FxHasher>>,
+                        BuildHasherDefault<FxHasher>,
+                    > = HashMap::default();
 
-            for trade in update.data.fills.into_iter() {
-                let coin = trade.coin.clone();
-                let oid = trade.oid;
-                fills_map
-                    .entry(coin)
-                    .or_default()
-                    .entry(oid)
-                    .or_default()
-                    .push(trade);
+                    for trade in fills_vec.into_iter() {
+                        let coin = trade.coin.clone();
+                        let oid = trade.oid;
+                        fills_map
+                            .entry(coin)
+                            .or_default()
+                            .entry(oid)
+                            .or_default()
+                            .push(trade);
+                    }
+                    println!("\nTRADES  |||||||||| {:?}\n\n", fills_map);
+
+                    for (coin, map) in fills_map.into_iter() {
+                        for (_oid, fills) in map.into_iter() {
+                            match TradeFillInfo::try_from(fills) {
+                                Ok(fill) => {
+                                    dbg!(fill);
+                                }
+                                Err(e) => {
+                                    println!(
+                                        "Failed to aggregate TradeFillInfo for {} market: {}",
+                                        coin, e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                UserData::Funding(funding_update) => {
+                    dbg!(funding_update);
+                }
+                _ => info!("{:?}", user_event),
             }
-            println!("\nTRADES  |||||||||| {:?}\n\n", fills_map);
         }
     });
 
+    /*
     let response = exchange_client.order(order, None).await.unwrap();
     info!("Order placed: {response:?}");
 
@@ -103,6 +126,7 @@ async fn main() {
         asset: "ETH".to_string(),
         oid,
     };
+    */
 
     handle.await.unwrap();
 }

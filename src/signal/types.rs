@@ -21,19 +21,18 @@ use serde::{Deserialize, Serialize};
 pub struct ExecParams {
     pub margin: f64,
     pub lev: usize,
-    pub tf: TimeFrame,
+    pub sz_decimals: u32,
 }
 
 impl ExecParams {
-    pub fn new(margin: f64, lev: usize, tf: TimeFrame) -> Self {
-        Self { margin, lev, tf }
+    pub fn new(margin: f64, lev: usize, sz_decimals: u32) -> Self {
+        Self { margin, lev, sz_decimals }
     }
 }
 
 pub enum ExecParam {
     Margin(f64),
     Lev(usize),
-    Tf(TimeFrame),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]

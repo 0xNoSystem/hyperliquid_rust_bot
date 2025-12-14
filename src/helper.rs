@@ -1,6 +1,5 @@
-use crate::TimeFrame;
+use crate::{Price, TimeFrame};
 use hyperliquid_rust_sdk::{AssetMeta, CandleData, Error, InfoClient, Message, Subscription};
-use kwant::indicators::Price;
 use log::info;
 use log::warn;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -168,7 +167,7 @@ pub fn parse_candle(candle: CandleData) -> Result<Price, Error> {
 
 #[macro_export]
 macro_rules! roundf {
-    ($arg:expr, $dp: literal) => {
+    ($arg:expr, $dp: expr) => {
         $crate::helper::round_ndp($arg, $dp)
     };
 }

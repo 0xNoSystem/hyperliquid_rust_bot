@@ -169,7 +169,6 @@ async fn main() -> Result<(), Error> {
             //let _ = sleep(Duration::from_secs(120)).await;
             //sender.send(MarketCommand::Pause).await;
             let _ = sleep(Duration::from_secs(20)).await;
-            //sender.send(MarketCommand::UpdateTimeFrame(TimeFrame::from_str("4h").unwrap())).await;
             let _ = sender.send(MarketCommand::EditIndicators(Vec::from([Entry{id: (Ema(33), TimeFrame::Hour1),edit: EditType::Add},
                                                                 Entry{id: (SmaOnRsi{periods: 12, smoothing_length: 9}, TimeFrame::Min1),edit: EditType::Add}
             ]))).await;

@@ -6,15 +6,14 @@ use std::sync::Arc;
 
 use hyperliquid_rust_sdk::{AssetMeta, Error, ExchangeClient, InfoClient, Message};
 
-use crate::executor::Executor;
-use crate::helper::{load_candles, parse_candle};
 use crate::signal::{
-    EditType, EngineCommand, Entry, ExecParam, IndexId, SignalEngine, TimeFrameData,
+    EditType, EngineCommand, Entry, ExecParam, ExecParams, IndexId, SignalEngine, TimeFrameData,
 };
 use crate::strategy::Strategy;
-use crate::trade_setup::{TimeFrame, TradeCommand, TradeFillInfo, TradeInfo, TradeParams};
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, UpdateFrontend};
+use crate::{ExecCommand, ExecControl, ExecEvent, Executor, load_candles, parse_candle};
 use crate::{MAX_HISTORY, MarketInfo, MarketTradeInfo, Wallet};
+use crate::{TimeFrame, TradeFillInfo, TradeInfo, TradeParams};
 
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -64,7 +63,7 @@ impl Market {
 
         //setup channels
         let (market_tx, market_rv) = channel::<MarketCommand>(7);
-        let (exec_tx, exec_rv) = bounded::<TradeCommand>(5);
+        let (exec_tx, exec_rv) = bounded::<ExecCommand>(5);
         let (engine_tx, engine_rv) = unbounded_channel::<EngineCommand>();
 
         let senders = MarketSenders {
@@ -77,6 +76,9 @@ impl Market {
             price_rv,
             market_rv,
         };
+
+        let lev = trade_params.lev.min(asset.max_leverage);
+        let exec_params = ExecParams::new(margin, lev, asset.sz_decimals);
 
         Ok((
             Market {
@@ -93,12 +95,12 @@ impl Market {
                     engine_rv,
                     Some(market_tx.clone()),
                     exec_tx,
-                    margin,
+                    exec_params,
                 )
                 .await,
                 executor: Executor::new(
                     wallet.wallet.clone(),
-                    asset.name,
+                    asset,
                     fees,
                     exec_rv,
                     market_tx.clone(),
@@ -159,6 +161,7 @@ impl Market {
 
 impl Market {
     pub async fn start(mut self) -> Result<(), Error> {
+        use ExecCommand::*;
         self.init().await?;
 
         let info = MarketInfo {
@@ -277,18 +280,8 @@ impl Market {
                     )));
                 }
 
-                MarketCommand::UserFills(fill) => {
-                    let _ = self
-                        .senders
-                        .exec_tx
-                        .send_async(TradeCommand::UserFills(fill))
-                        .await;
-                }
-
-                MarketCommand::UpdateTimeFrame(tf) => {
-                    self.trade_params.time_frame = tf;
-                    let _ =
-                        engine_update_tx.send(EngineCommand::UpdateExecParams(ExecParam::Tf(tf)));
+                MarketCommand::UserEvent(event) => {
+                    let _ = self.senders.exec_tx.send_async(Event(event)).await;
                 }
 
                 MarketCommand::UpdateMargin(marge) => {
@@ -311,16 +304,20 @@ impl Market {
                     ));
                 }
 
-                MarketCommand::Toggle => {
-                    let _ = self.senders.exec_tx.send_async(TradeCommand::Toggle).await;
-                }
-
                 MarketCommand::Pause => {
-                    let _ = self.senders.exec_tx.send_async(TradeCommand::Pause).await;
+                    let _ = self
+                        .senders
+                        .exec_tx
+                        .send_async(Control(ExecControl::Pause))
+                        .await;
                 }
 
                 MarketCommand::Resume => {
-                    let _ = self.senders.exec_tx.send_async(TradeCommand::Resume).await;
+                    let _ = self
+                        .senders
+                        .exec_tx
+                        .send_async(Control(ExecControl::Resume))
+                        .await;
                 }
 
                 MarketCommand::Close => {
@@ -328,7 +325,7 @@ impl Market {
                     let _ = engine_update_tx.send(EngineCommand::Stop);
                     //shutdown Executor
                     info!("\nShutting down executor\n");
-                    match self.senders.exec_tx.send(TradeCommand::CancelTrade) {
+                    match self.senders.exec_tx.send(Control(ExecControl::Kill)) {
                         Ok(_) => {
                             if let Some(cmd) = self.receivers.market_rv.recv().await {
                                 match cmd {
@@ -378,24 +375,22 @@ impl Market {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MarketCommand {
-    UpdateLeverage(usize),
-    UpdateStrategy(Strategy),
-    EditIndicators(Vec<Entry>),
-    UpdateTimeFrame(TimeFrame),
-    ReceiveTrade(TradeInfo),
-    UserFills(TradeFillInfo),
-    UpdateMargin(f64),
-    UpdateIndicatorData(Vec<IndicatorData>),
-    Toggle,
-    Resume,
-    Pause,
-    Close,
+    UpdateLeverage(usize),                   //UI
+    UpdateStrategy(Strategy),                //UI
+    EditIndicators(Vec<Entry>),              //UI
+    ReceiveTrade(TradeInfo),                 //Exec
+    UserEvent(ExecEvent),                    //Bot
+    UpdateMargin(f64),                       //UI or Exec
+    UpdateIndicatorData(Vec<IndicatorData>), //Engine
+    Resume,                                  //UI/Bot
+    Pause,                                   //UI/Bot
+    Close,                                   //UI/Bot
 }
 
 struct MarketSenders {
     bot_tx: UnboundedSender<MarketUpdate>,
     engine_tx: UnboundedSender<EngineCommand>,
-    exec_tx: FlumeSender<TradeCommand>,
+    exec_tx: FlumeSender<ExecCommand>,
 }
 
 struct MarketReceivers {
