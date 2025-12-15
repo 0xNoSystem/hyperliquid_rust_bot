@@ -106,20 +106,19 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                         {hoveredCandle && mouseOnChart && (
                             <CandleInfo candle={hoveredCandle} />
                         )}
-
-                                            </div>
-                                            {setting && 
-                             (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-50">
+                    </div>
+                    {setting && (
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
                             <ChartSettings
                                 initialColors={candleColor}
                                 onApply={setCandleColor}
-                                onReset={() => setCandleColor("#cf7b15", "#c4c3c2" )}
+                                onReset={() =>
+                                    setCandleColor("#cf7b15", "#c4c3c2")
+                                }
                                 onClose={() => setSetting(false)}
                             />
-                            </div>
-                        )}
-
+                        </div>
+                    )}
                 </div>
 
                 {/* RIGHT PRICE SCALE */}
@@ -142,13 +141,12 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                     className="flex items-center justify-center bg-black text-center"
                     style={{ width: rightWidth }}
                 >
-                    <Settings 
+                    <Settings
                         className="h-5 w-5 text-gray-300"
                         onClick={() => setSetting((prev) => !prev)}
                     />
                 </div>
             </div>
-            
         </div>
     );
 };

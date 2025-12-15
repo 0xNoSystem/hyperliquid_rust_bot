@@ -5,7 +5,7 @@ use hyperliquid_rust_sdk::{
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{get_time_now, roundf};
+use crate::{OpenPosInfo, get_time_now, roundf};
 
 #[derive(Clone, Copy, Debug)]
 pub enum ExecCommand {
@@ -236,7 +236,7 @@ pub struct RestingOrderLocal {
     pub tpsl: Option<TriggerKind>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenPositionLocal {
     pub open_time: u64,
@@ -324,6 +324,14 @@ impl OpenPositionLocal {
                 fill_type: fill.fill_type,
             },
         })
+    }
+
+    pub fn sse(&self) -> OpenPosInfo {
+        OpenPosInfo {
+            side: self.side,
+            size: self.size,
+            entry_px: self.entry_px,
+        }
     }
 }
 

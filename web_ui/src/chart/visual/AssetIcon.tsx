@@ -6,7 +6,11 @@ type AssetIconProps = {
     className?: string;
 };
 
-export default function AssetIcon({ symbol, size = 24, className }: AssetIconProps) {
+export default function AssetIcon({
+    symbol,
+    size = 24,
+    className,
+}: AssetIconProps) {
     const sym = symbol.toLowerCase();
     const url = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${sym}.png`;
 
@@ -50,4 +54,3 @@ export default function AssetIcon({ symbol, size = 24, className }: AssetIconPro
         />
     );
 }
-

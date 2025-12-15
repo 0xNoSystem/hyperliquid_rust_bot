@@ -21,7 +21,7 @@ export default function Settings() {
     };
 
     return (
-        <div className="relative min-h-screen overflow-hidden bg-[#07090B] px-6 py-10 text-white pb-50">
+        <div className="relative min-h-screen overflow-hidden bg-[#07090B] px-6 py-10 pb-50 text-white">
             <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -64,8 +64,8 @@ export default function Settings() {
                         valid for
                     </li>
                     <li>
-                        Copy the generated <strong>Private API Key</strong> (shown
-                        once only in a red box) and{" "}
+                        Copy the generated <strong>Private API Key</strong>{" "}
+                        (shown once only in a red box) and{" "}
                         <strong>Agent Key(optional)</strong>. Store them
                         securely.
                     </li>

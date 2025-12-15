@@ -1,6 +1,11 @@
 import React, { useRef, useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { TIMEFRAME_CAMELCASE, fromTimeFrame, TF_TO_MS, sanitizeAsset } from "../types";
+import {
+    TIMEFRAME_CAMELCASE,
+    fromTimeFrame,
+    TF_TO_MS,
+    sanitizeAsset,
+} from "../types";
 import type { TimeFrame } from "../types";
 import ChartContainer from "../chart/ChartContainer";
 import { getTimeframeCache } from "../chart/candleCache";
@@ -561,24 +566,33 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         )}
                         <div className="ml-auto">
                             <select
-                            value={routeAsset}
-                            onChange={(e) => nav(`/backtest/${sanitizeAsset(e.target.value)}`)}
-                            required
-                            className="rounded border border-orange-500 bg-black/80 px-3 py-1 text-sm font-semibold text-orange-400 transition"
-                        >
-                            {universe.map((u) => (
-                                <option key={u.name} value={sanitizeAsset(u.name)}>
-                                    {sanitizeAsset(u.name)}
-                                </option>
-                            ))}
-                        </select>
-
+                                value={routeAsset}
+                                onChange={(e) =>
+                                    nav(
+                                        `/backtest/${sanitizeAsset(e.target.value)}`
+                                    )
+                                }
+                                required
+                                className="rounded border border-orange-500 bg-black/80 px-3 py-1 text-sm font-semibold text-orange-400 transition"
+                            >
+                                {universe.map((u) => (
+                                    <option
+                                        key={u.name}
+                                        value={sanitizeAsset(u.name)}
+                                    >
+                                        {sanitizeAsset(u.name)}
+                                    </option>
+                                ))}
+                            </select>
                         </div>
                     </div>
 
                     {/* Asset Title */}
                     <h2 className="rounded-t-lg bg-black/80 p-2 text-center text-2xl font-semibold">
-                        <AssetIcon symbol={sanitizeAsset(routeAsset)} className="inline-block mr-2 mb-1" />
+                        <AssetIcon
+                            symbol={sanitizeAsset(routeAsset)}
+                            className="mr-2 mb-1 inline-block"
+                        />
                         {routeAsset}
                     </h2>
 
@@ -617,13 +631,13 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         />
                     </div>
                     {/* CONSOLE*/}
-                <div className="mt-20 p-2 text-xl font-semibold tracking-wide">
-                    <h2 className="p-2 text-2xl text-center font-semibold">Result</h2>
+                    <div className="mt-20 p-2 text-xl font-semibold tracking-wide">
+                        <h2 className="p-2 text-center text-2xl font-semibold">
+                            Result
+                        </h2>
+                    </div>
                 </div>
-
-                </div>
-
-                            </div>
+            </div>
         </div>
     );
 }

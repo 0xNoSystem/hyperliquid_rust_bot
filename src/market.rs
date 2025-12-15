@@ -12,7 +12,8 @@ use crate::signal::{
 use crate::strategy::Strategy;
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, UpdateFrontend};
 use crate::{ExecCommand, ExecControl, ExecEvent, Executor, load_candles, parse_candle};
-use crate::{MAX_HISTORY, MarketInfo, MarketTradeInfo, Wallet};
+use crate::{MAX_HISTORY, MarketInfo, Wallet};
+
 use crate::{OpenPositionLocal, TimeFrame, TradeInfo, TradeParams};
 
 use tokio::sync::mpsc::{
@@ -174,6 +175,7 @@ impl Market {
             pnl: 0.0,
             is_paused: false,
             indicators: self.signal_engine.get_indicators_data(),
+            position: None,
         };
         let _ = self.senders.bot_tx.send(MarketUpdate::InitMarket(info));
 
@@ -201,10 +203,12 @@ impl Market {
 
                 let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
                 if price.close != curr && tick.is_multiple_of(2) {
-                    let _ = bot_price_update.send(MarketUpdate::PriceUpdate((
-                        asset_name.clone().to_string(),
-                        price.close,
-                    )));
+                    let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
+                        UpdateFrontend::MarketInfoEdit((
+                            asset_name.clone().to_string(),
+                            EditMarketInfo::Price(price.close),
+                        )),
+                    ));
                     curr = price.close;
                 };
                 tick += 1;
@@ -228,6 +232,7 @@ impl Market {
                     if let Ok(lev) = upd {
                         let _ = engine_update_tx
                             .send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
+
                         let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                             UpdateFrontend::MarketInfoEdit((
                                 asset.name.clone(),
@@ -249,7 +254,7 @@ impl Market {
                                 &self.info_client,
                                 asset.name.as_str(),
                                 entry.id.1,
-                                3000,
+                                5000,
                             )
                             .await?;
                             map.insert(entry.id.1, tf_data);
@@ -264,6 +269,18 @@ impl Market {
                     });
                 }
 
+                MarketCommand::UpdateOpenPosition(pos) => {
+                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                        UpdateFrontend::MarketInfoEdit((
+                            asset.name.clone(),
+                            EditMarketInfo::OpenPosition(pos),
+                        )),
+                    ));
+                    let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(
+                        ExecParam::OpenPosition(pos.map(|p| p.sse())),
+                    ));
+                }
+
                 MarketCommand::ReceiveTrade(trade_info) => {
                     self.pnl += trade_info.pnl;
                     self.margin += trade_info.pnl;
@@ -271,10 +288,13 @@ impl Market {
                     let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(
                         ExecParam::Margin(self.margin),
                     ));
-                    let _ = bot_update_tx.send(MarketUpdate::TradeUpdate(MarketTradeInfo {
-                        asset: asset.name.clone(),
-                        info: trade_info,
-                    }));
+                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                        UpdateFrontend::MarketInfoEdit((
+                            asset.name.clone(),
+                            EditMarketInfo::Trade(trade_info),
+                        )),
+                    ));
+
                     let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((
                         asset.name.clone(),
                         self.margin,
@@ -291,7 +311,7 @@ impl Market {
                         ExecParam::Margin(self.margin),
                     ));
                     let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((
-                        asset.name.to_string(),
+                        asset.name.clone(),
                         self.margin,
                     )));
                 }
@@ -299,7 +319,7 @@ impl Market {
                 MarketCommand::UpdateIndicatorData(data) => {
                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                         UpdateFrontend::UpdateIndicatorValues {
-                            asset: asset.name.to_string(),
+                            asset: asset.name.clone(),
                             data,
                         },
                     ));
@@ -338,11 +358,11 @@ impl Market {
                                         self.pnl += trade_info.pnl;
                                         self.margin += trade_info.pnl;
                                         self.trade_history.push(trade_info);
-                                        let _ = bot_update_tx.send(MarketUpdate::TradeUpdate(
-                                            MarketTradeInfo {
-                                                asset: asset.name.to_string(),
-                                                info: trade_info,
-                                            },
+                                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                            UpdateFrontend::MarketInfoEdit((
+                                                asset.name.clone(),
+                                                EditMarketInfo::Trade(trade_info),
+                                            )),
                                         ));
                                         break;
                                     }
@@ -376,10 +396,11 @@ impl Market {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MarketCommand {
-    UpdateLeverage(usize),                   //UI
-    UpdateStrategy(Strategy),                //UI
-    EditIndicators(Vec<Entry>),              //UI
-    ReceiveTrade(TradeInfo),                 //Exec
+    UpdateLeverage(usize),      //UI
+    UpdateStrategy(Strategy),   //UI
+    EditIndicators(Vec<Entry>), //UI
+    ReceiveTrade(TradeInfo),    //Exec
+    UpdateOpenPosition(Option<OpenPositionLocal>),
     UserEvent(ExecEvent),                    //Bot
     UpdateMargin(f64),                       //UI or Exec
     UpdateIndicatorData(Vec<IndicatorData>), //Engine
@@ -402,8 +423,6 @@ struct MarketReceivers {
 #[derive(Debug, Clone)]
 pub enum MarketUpdate {
     InitMarket(MarketInfo),
-    PriceUpdate(AssetPrice),
-    TradeUpdate(MarketTradeInfo),
     MarginUpdate(AssetMargin),
     RelayToFrontend(UpdateFrontend),
 }

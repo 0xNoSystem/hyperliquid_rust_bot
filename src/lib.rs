@@ -22,7 +22,7 @@ pub use frontend::*;
 pub use helper::*;
 pub use margin::{AssetMargin, MarginAllocation};
 pub use market::{AssetPrice, Market, MarketCommand, MarketUpdate};
-pub use signal::{EditType, Entry, IndexId, IndicatorKind, SignalEngine};
+pub use signal::{EditType, Entry, IndexId, IndicatorKind, OpenPosInfo, SignalEngine};
 pub use trade_setup::*;
 pub use wallet::Wallet;
 

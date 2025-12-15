@@ -1,4 +1,7 @@
-use crate::{AssetMargin, AssetPrice, IndexId, MarginAllocation, TradeInfo, TradeParams, Value};
+use crate::{
+    AssetMargin, AssetPrice, IndexId, MarginAllocation, OpenPositionLocal, TradeInfo, TradeParams,
+    Value,
+};
 use hyperliquid_rust_sdk::AssetMeta;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +25,7 @@ pub struct MarketInfo {
     pub pnl: f64,
     pub is_paused: bool,
     pub indicators: Vec<IndicatorData>,
+    pub position: Option<OpenPositionLocal>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -31,19 +35,14 @@ pub struct IndicatorData {
     pub value: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MarketTradeInfo {
-    pub asset: String,
-    pub info: TradeInfo,
-}
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Copy, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EditMarketInfo {
     Lev(usize),
-    Strategy,
-    Indicator(Vec<IndexId>),
+    Trade(TradeInfo),
+    OpenPosition(Option<OpenPositionLocal>),
+    Price(f64),
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -51,8 +50,6 @@ pub enum EditMarketInfo {
 pub enum UpdateFrontend {
     PreconfirmMarket(String),
     ConfirmMarket(MarketInfo),
-    UpdatePrice(AssetPrice),
-    NewTradeInfo(MarketTradeInfo),
     UpdateTotalMargin(f64),
     UpdateMarketMargin(AssetMargin),
     UpdateIndicatorValues {

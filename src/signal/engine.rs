@@ -13,7 +13,7 @@ use crate::{EngineOrder, ExecCommand, IndicatorData, MarketCommand};
 use flume::{Sender, bounded};
 use tokio::sync::mpsc::{Sender as tokioSender, UnboundedReceiver, unbounded_channel};
 
-use super::types::{EditType, Entry, ExecParam, ExecParams, IndexId, TimeFrameData, Tracker};
+use super::types::*;
 
 type TrackersMap = HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>>;
 
@@ -250,6 +250,10 @@ impl SignalEngine {
                         }
                         Lev(l) => {
                             self.exec_params.lev = l;
+                        }
+
+                        OpenPosition(pos) => {
+                            self.exec_params.open_pos = pos;
                         }
                     }
                 }

@@ -8,7 +8,7 @@ import { useWebSocketContext } from "../context/WebSocketContext";
 import TradingViewWidget from "./TradingViewWidget";
 import { BackgroundFX } from "./BackgroundFX";
 import { motion, AnimatePresence } from "framer-motion";
-import {formatUTC} from "../chart/utils";
+import { formatUTC } from "../chart/utils";
 
 import {
     decompose,
@@ -18,6 +18,7 @@ import {
     get_value,
     into,
     sanitizeAsset,
+    computeUPnL,
 } from "../types";
 import type {
     IndicatorKind,
@@ -113,7 +114,7 @@ export default function MarketDetail() {
 
     const handleConfirmToggle = (asset: string, isPaused: boolean) => {
         if (isPaused) {
-            requestToggleMarket(asset).catch((err) =>
+            requestToggleMarket(asset, false).catch((err) =>
                 console.error("Toggle failed", err)
             );
         } else {
@@ -122,7 +123,7 @@ export default function MarketDetail() {
     };
 
     const handleTogglePause = (asset: string) => {
-        requestToggleMarket(asset)
+        requestToggleMarket(asset, true)
             .catch((err) => console.error("Toggle failed", err))
             .finally(() => setMarketToToggle(null));
     };
@@ -246,14 +247,14 @@ export default function MarketDetail() {
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
-        <div className="relative min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white z-1">
+        <div className="relative z-1 min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white">
             <div className="mt-10 mb-1 flex items-center justify-around">
                 <div className="relative right-[3vw] flex items-center gap-3">
-                <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>
-                    <div className="text-md relative right-20 w-fit rounded border border-orange-500/40 px-3 py-1 font-semibold text-orange-400">
-                        {"BACKTEST (BETA)"}
-                    </div>
-                </Link>
+                    <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>
+                        <div className="text-md relative right-20 w-fit rounded border border-orange-500/40 px-3 py-1 font-semibold text-orange-400">
+                            {"BACKTEST (BETA)"}
+                        </div>
+                    </Link>
 
                     <button
                         onClick={() =>
@@ -413,15 +414,15 @@ export default function MarketDetail() {
                                     </div>
                                 </div>
                                 <div className="flex items-end justify-between">
-                                <button
-                                    onClick={onSaveMargin}
-                                    className={BtnOK}
-                                >
-                                    Apply
-                                </button>
-                                <span className="">
-                                    Margin: {market.margin.toFixed(2)} $
-                                </span>
+                                    <button
+                                        onClick={onSaveMargin}
+                                        className={BtnOK}
+                                    >
+                                        Apply
+                                    </button>
+                                    <span className="">
+                                        Margin: {market.margin.toFixed(2)} $
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -563,7 +564,7 @@ export default function MarketDetail() {
                                             <th className="py-2 pr-4 text-right">
                                                 PnL
                                             </th>
-                                            
+
                                             <th className="py-2 pr-4 text-right">
                                                 Size
                                             </th>
@@ -574,7 +575,6 @@ export default function MarketDetail() {
                                             <th className="py-2 pr-4 text-right">
                                                 Funding
                                             </th>
-                                            
 
                                             <th className="py-2 text-right">
                                                 Open Time - Close Time
@@ -594,10 +594,14 @@ export default function MarketDetail() {
                                                         {t.side}
                                                     </td>
                                                     <td className="py-2 pr-4 text-right">
-                                                        {formatPrice(t.open.price)}
+                                                        {formatPrice(
+                                                            t.open.price
+                                                        )}
                                                     </td>
                                                     <td className="py-2 pr-4 text-right">
-                                                        {formatPrice(t.close.price)}
+                                                        {formatPrice(
+                                                            t.close.price
+                                                        )}
                                                     </td>
                                                     <td
                                                         className={`py-2 pr-4 text-right ${t.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}
@@ -605,7 +609,10 @@ export default function MarketDetail() {
                                                         {num(t.pnl, 2)}$
                                                     </td>
                                                     <td className="py-2 pr-4 text-right">
-                                                        {num(t.size, meta.szDecimals)}
+                                                        {num(
+                                                            t.size,
+                                                            meta.szDecimals
+                                                        )}
                                                     </td>
 
                                                     <td className="py-2 pr-4 text-right">
@@ -616,7 +623,11 @@ export default function MarketDetail() {
                                                     </td>
 
                                                     <td className="py-2 text-right">
-                                                        {formatUTC(t.open.time)} - {formatUTC(t.close.time)}
+                                                        {formatUTC(t.open.time)}{" "}
+                                                        -{" "}
+                                                        {formatUTC(
+                                                            t.close.time
+                                                        )}
                                                     </td>
                                                 </tr>
                                             )
@@ -630,6 +641,84 @@ export default function MarketDetail() {
 
                 {/* RIGHT — Indicator builder + Pending batch */}
                 <aside className="space-y-4">
+                    <div className={Pane}>
+                        <p className="border-b border-orange-600/40 py-1 text-center">
+                            OPEN POSITION
+                        </p>
+                        <div className="py-2 px-3">
+                            {market.position == null ? (
+                                <p className="text-center">No open position</p>
+                            ) : (
+                                <table className="min-w-full text-[11px]">
+                                    <thead className="text-white/60">
+                                        <tr>
+                                            <th className="py-2 pr-2 text-left">
+                                                Side
+                                            </th>
+                                            <th className="py-2 pr-2 text-right">
+                                                Entry
+                                            </th>
+                                            <th className="py-2 pr-2 text-right">
+                                                Size
+                                            </th>
+                                            
+                                            <th className="py-2 pr-2 text-right">
+                                                Funding
+                                            </th>
+                                            <th className="py-2 text-right">
+                                                UPNL
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr className="border-t border-white/10">
+                                            <td
+                                                className={`py-2 pr-4 font-semibold uppercase ${
+                                                    market.position.side ===
+                                                    "long"
+                                                        ? "text-green-500"
+                                                        : "text-red-500"
+                                                }`}
+                                            >
+                                                {market.position.side}
+                                            </td>
+
+                                            <td className="py-2 pr-2 text-right">
+                                                {formatPrice(
+                                                    market.position.entryPx
+                                                )}
+                                            </td>
+
+                                            <td className="py-2 pr-2 text-right">
+                                                {num(
+                                                    market.position.size,
+                                                    meta.szDecimals
+                                                )}
+                                            </td>
+
+                                            <td className="py-2 pr-2 text-right">
+                                                {num(
+                                                    market.position.funding,
+                                                    2
+                                                )}
+                                                $
+                                            </td>
+
+                                            <td
+                                                className="py-2 text-right text-orange-400"
+                                            >
+                                                {num(
+                                                    computeUPnL(market.position, market.price),
+                                                    2
+                                                )}
+                                                $
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </div>
                     <section className={Pane}>
                         <div className={Head}>Add Indicator</div>
                         <div className={`${Body} grid grid-cols-2 gap-3`}>

@@ -8,7 +8,7 @@ type Props = {
 
 function TradingViewWidget({ symbol, interval = "D", theme = "dark" }: Props) {
     const container = useRef<HTMLDivElement | null>(null);
-    if (symbol[0] == "k"){
+    if (symbol[0] == "k") {
         symbol = symbol.slice(1);
     }
 

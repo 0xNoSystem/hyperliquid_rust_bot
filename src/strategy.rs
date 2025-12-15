@@ -139,11 +139,21 @@ impl CustomStrategy {
     }
 
     pub fn generate_test_trade(&self, price: f64, params: ExecParams) -> Option<EngineOrder> {
+
+        let margin = if let Some(pos) = params.open_pos{
+            params.margin - ((pos.entry_px * pos.size) / params.lev as f64)
+        }else{
+            params.margin
+        };
+
         let px_tick = MAX_DECIMALS - params.sz_decimals - 1;
         let duration = 30;
         let is_long = true;
 
-        let max_size = (params.margin * params.lev as f64) / price;
+        let max_size = (margin * params.lev as f64) / price;
+        if max_size * price < 10.0{
+            return None;
+        }
 
         let trigger = TriggerOrder {
             kind: TriggerKind::Sl,

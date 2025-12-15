@@ -197,30 +197,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                                   trades: [],
                                   params: DEFAULT_PLACEHOLDER_PARAMS,
                                   isPaused: false,
+                                  position: null,
                               },
                           ]
-                );
-                return;
-            }
-
-            if ("updatePrice" in payload) {
-                const [asset, price] = payload.updatePrice as assetPrice;
-                setMarkets((prev) =>
-                    prev.map((m) =>
-                        m.asset === asset ? { ...m, prev: m.price, price } : m
-                    )
-                );
-                return;
-            }
-
-            if ("newTradeInfo" in payload) {
-                const { asset, info } = payload.newTradeInfo as MarketTradeInfo;
-                setMarkets((prev) =>
-                    prev.map((m) => {
-                        if (m.asset !== asset) return m;
-                        const trades = [...(m.trades ?? []), info];
-                        return { ...m, trades, pnl: (m.pnl ?? 0) + info.pnl };
-                    })
                 );
                 return;
             }
@@ -228,15 +207,37 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             if ("marketInfoEdit" in payload) {
                 const [asset, edit] = payload.marketInfoEdit as [
                     string,
-                    editMarketInfo,
+                    EditMarketInfo,
                 ];
-                if (edit.lev) {
-                    setMarkets((prev) =>
-                        prev.map((m) =>
-                            m.asset === asset ? { ...m, lev: edit.lev } : m
-                        )
-                    );
-                }
+
+                setMarkets((prev) =>
+                    prev.map((m) => {
+                        if (m.asset !== asset) return m;
+
+                        if ("lev" in edit) {
+                            return { ...m, lev: edit.lev };
+                        }
+
+                        if ("price" in edit) {
+                            return { ...m, price: edit.price };
+                        }
+
+                        if ("openPosition" in edit) {
+                            return { ...m, position: edit.openPosition };
+                        }
+
+                        if ("trade" in edit) {
+                            const trades = [...(m.trades ?? []), edit.trade];
+                            return {
+                                ...m,
+                                trades,
+                                pnl: (m.pnl ?? 0) + edit.trade.pnl,
+                            };
+                        }
+
+                        return m;
+                    })
+                );
                 return;
             }
 
@@ -358,7 +359,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const requestToggleMarket = useCallback(
         async (asset: string, pause: boolean) => {
-            await sendCommand(pause ? { pauseMarket: asset } : {resumeMarket: asset});
+            await sendCommand(
+                pause ? { pauseMarket: asset } : { resumeMarket: asset }
+            );
             setMarkets((p) =>
                 p.map((m) =>
                     m.asset === asset ? { ...m, isPaused: !m.isPaused } : m

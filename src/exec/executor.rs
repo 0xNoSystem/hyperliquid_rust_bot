@@ -59,7 +59,7 @@ impl Executor {
     {
         let mut guard = self.open_position.lock().await;
         let r = f(&mut guard);
-        dbg!(&guard);
+        self.update_market(SendUpdate::Position(*guard)).await;
         r
     }
 
@@ -226,11 +226,13 @@ impl Executor {
     }
 
     #[inline]
-    async fn send_to_market(&self, trade_info: TradeInfo) {
-        let _ = self
-            .market_tx
-            .send(MarketCommand::ReceiveTrade(trade_info))
-            .await;
+    async fn update_market(&self, update: SendUpdate) {
+        use SendUpdate::*;
+        let cmd = match update {
+            Trade(trade) => MarketCommand::ReceiveTrade(trade),
+            Position(pos) => MarketCommand::UpdateOpenPosition(pos),
+        };
+        let _ = self.market_tx.send(cmd).await;
     }
 
     async fn kill(&mut self) {
@@ -321,7 +323,7 @@ impl Executor {
                             }
                             PositionOp::Close => {
                                 if let Some(trade_info) = self.apply_fill(fill).await {
-                                    self.send_to_market(trade_info).await;
+                                    self.update_market(SendUpdate::Trade(trade_info)).await;
                                 }
                             }
                         },
@@ -338,4 +340,10 @@ impl Executor {
             }
         }
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum SendUpdate {
+    Trade(TradeInfo),
+    Position(Option<OpenPositionLocal>),
 }

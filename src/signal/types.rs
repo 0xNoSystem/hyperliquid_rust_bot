@@ -10,10 +10,7 @@ use kwant::indicators::{
     Adx, Atr, Ema, EmaCross, Indicator, Price, Rsi, Sma, SmaRsi, StochasticRsi, Value,
 };
 
-use crate::IndicatorData;
-use crate::MAX_HISTORY;
-use crate::helper::get_time_now;
-use crate::trade_setup::TimeFrame;
+use crate::{IndicatorData, MAX_HISTORY, Side, TimeFrame, get_time_now};
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +19,14 @@ pub struct ExecParams {
     pub margin: f64,
     pub lev: usize,
     pub sz_decimals: u32,
+    pub open_pos: Option<OpenPosInfo>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct OpenPosInfo {
+    pub side: Side,
+    pub size: f64,
+    pub entry_px: f64,
 }
 
 impl ExecParams {
@@ -30,6 +35,7 @@ impl ExecParams {
             margin,
             lev,
             sz_decimals,
+            open_pos: None,
         }
     }
 }
@@ -37,6 +43,7 @@ impl ExecParams {
 pub enum ExecParam {
     Margin(f64),
     Lev(usize),
+    OpenPosition(Option<OpenPosInfo>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]

@@ -37,6 +37,7 @@ export interface MarketInfo {
     isPaused: boolean;
     indicators: indicatorData[];
     trades: TradeInfo[];
+    position?: OpenPositionLocal;
 }
 
 export interface indicatorData {
@@ -227,38 +228,36 @@ export type assetMargin = [string, number];
 
 export type editMarketInfo =
     | { lev: number }
-    | { strategy: Strategy }
-    | { margin: number };
+    | { price: number }
+    | { openPosition: OpenPositionLocal }
+    | { trade: TradeInfo };
 
 export type Side = "long" | "short";
 
-export type PositionOp =
-  | "openLong"
-  | "openShort"
-  | "close";
+export type PositionOp = "openLong" | "openShort" | "close";
 
 export type FillType =
-  | "market"
-  | "limit"
-  | "liquidation"
-  | { trigger: TriggerKind };
+    | "market"
+    | "limit"
+    | "liquidation"
+    | { trigger: TriggerKind };
 
 export type TriggerKind = "tp" | "sl";
 
 export interface FillInfo {
-  time: number;        // unix ms
-  price: number;
-  fillType: FillType;
+    time: number; // unix ms
+    price: number;
+    fillType: FillType;
 }
 
 export interface TradeInfo {
-  side: Side;
-  size: number;
-  pnl: number;
-  fees: number;
-  funding: number;
-  open: FillInfo;
-  close: FillInfo;
+    side: Side;
+    size: number;
+    pnl: number;
+    fees: number;
+    funding: number;
+    open: FillInfo;
+    close: FillInfo;
 }
 
 export interface MarketTradeInfo {
@@ -267,14 +266,14 @@ export interface MarketTradeInfo {
 }
 
 export interface OpenPositionLocal {
-  openTime: number;     // unix ms
-  size: number;
-  entryPx: number;
-  side: Side;
-  fees: number;
-  funding: number;
-  realisedPnl: number;
-  fillType: FillType;
+    openTime: number; // unix ms
+    size: number;
+    entryPx: number;
+    side: Side;
+    fees: number;
+    funding: number;
+    realisedPnl: number;
+    fillType: FillType;
 }
 
 export const indicatorLabels: Record<string, string> = {
@@ -321,12 +320,22 @@ export const TF_TO_MS: Record<TimeFrame, number> = {
     month: 30 * 24 * 60 * 60_000,
 };
 
-
 export const sanitizeAsset = (asset: string) => {
-    if (asset[0] == "k"){
+    if (asset[0] == "k") {
         return asset.slice(1);
     }
     return asset;
 };
 
+export function computeUPnL(
+    position: OpenPositionLocal,
+    marketPrice: number
+): number {
+    const direction = position.side === "long" ? 1 : -1;
 
+    return (
+        (marketPrice - position.entryPx) *
+        direction *
+        position.size
+    );
+}

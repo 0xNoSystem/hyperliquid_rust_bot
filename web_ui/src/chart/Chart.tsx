@@ -29,7 +29,7 @@ type CandleCanvasProps = {
     width: number;
     height: number;
     candles: CandleData[];
-    candleColor: {up: string, down: string};
+    candleColor: { up: string; down: string };
     startTime: number;
     endTime: number;
     minPrice: number;
@@ -838,7 +838,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     return (
         <div
             ref={containerRef}
-            className="relative max-h-[70vh] h-[60vh] flex-1 cursor-crosshair"
+            className="relative h-[60vh] max-h-[70vh] flex-1 cursor-crosshair"
             style={{ touchAction: "none", overscrollBehavior: "contain" }}
             onWheel={onWheel}
             onMouseDown={onMouseDown}
