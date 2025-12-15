@@ -13,8 +13,8 @@ use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 
 use hyperliquid_rust_sdk::{
-    BaseUrl, ClientCancelRequest, ClientLimit, ClientOrder, ClientOrderRequest, ClientTrigger,
-    Error, ExchangeClient, ExchangeDataStatus, MarketOrderParams, AssetMeta,
+    AssetMeta, BaseUrl, ClientCancelRequest, ClientOrderRequest, Error, ExchangeClient,
+    ExchangeDataStatus, MarketOrderParams,
 };
 
 use super::*;
@@ -132,8 +132,7 @@ impl Executor {
             if retries > 5 {
                 return Err(Error::Custom(format!(
                     "Failed to cancle resting order for {} market, please cancel manually on https://app.hyperliquid.xyz/trade/{}",
-                    &asset,
-                    &asset,
+                    &asset, &asset,
                 )));
             }
             sleep(Duration::from_millis(100)).await;
@@ -204,7 +203,7 @@ impl Executor {
             PositionOp::Close => {
                 if let Some(open_pos) = pos {
                     let trade = open_pos.apply_close_fill(&fill, self.asset.sz_decimals);
-                    if trade.is_some(){
+                    if trade.is_some() {
                         *pos = None;
                     }
                     trade
@@ -306,20 +305,16 @@ impl Executor {
 
                 Event(event) => {
                     match event {
-                        ExecEvent::Fill(fill) => {
-                            let oid = fill.oid;
-
-                            match fill.intent {
-                                PositionOp::OpenLong | PositionOp::OpenShort => {
-                                    let _ = self.apply_fill(fill).await;
-                                }
-                                PositionOp::Close => {
-                                    if let Some(trade_info) = self.apply_fill(fill).await {
-                                        self.send_to_market(trade_info).await;
-                                    }
+                        ExecEvent::Fill(fill) => match fill.intent {
+                            PositionOp::OpenLong | PositionOp::OpenShort => {
+                                let _ = self.apply_fill(fill).await;
+                            }
+                            PositionOp::Close => {
+                                if let Some(trade_info) = self.apply_fill(fill).await {
+                                    self.send_to_market(trade_info).await;
                                 }
                             }
-                        }
+                        },
                         ExecEvent::Funding(funding) => {
                             self.with_position(|pos|{
                                 if let Some(open_pos) = pos{

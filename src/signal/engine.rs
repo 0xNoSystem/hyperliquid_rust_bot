@@ -8,7 +8,7 @@ use kwant::indicators::{Price, Value};
 
 use crate::strategy::Strategy;
 use crate::trade_setup::{TimeFrame, TradeParams};
-use crate::{ExecCommand, IndicatorData, MarketCommand, EngineOrder};
+use crate::{EngineOrder, ExecCommand, IndicatorData, MarketCommand};
 
 use flume::{Sender, bounded};
 use tokio::sync::mpsc::{Sender as tokioSender, UnboundedReceiver, unbounded_channel};
@@ -196,8 +196,10 @@ impl SignalEngine {
                         {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
-                        
-                        if let Some(trade) = self.get_test_trade(price.close, values) && tick.is_multiple_of(100){
+
+                        if let Some(trade) = self.get_test_trade(price.close, values)
+                            && tick.is_multiple_of(100)
+                        {
                             let _ = self.trade_tx.try_send(ExecCommand::Order(trade));
                         }
                     }

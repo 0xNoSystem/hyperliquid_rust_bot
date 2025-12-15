@@ -2,7 +2,10 @@
 #![allow(unused_assignments)]
 
 use crate::signal::ExecParams;
-use crate::{ClientOrderLocal,Limit, ExecCommand,PositionOp, Tif, TriggerKind, TriggerOrder, Value, roundf, EngineOrder, MAX_DECIMALS};
+use crate::{
+    ClientOrderLocal, EngineOrder, Limit, MAX_DECIMALS, PositionOp, Tif, TriggerKind, TriggerOrder,
+    Value, roundf,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize, Serialize)]
@@ -148,13 +151,11 @@ impl CustomStrategy {
         };
         let price = roundf!(price * 0.98, px_tick);
         let limit = Some(Limit::new_limit(price, Tif::Gtc));
-        Some(
-            EngineOrder{
-                action: PositionOp::OpenLong,
-                size: roundf!(max_size * 0.9, params.sz_decimals),
-                limit: None,
-            }
-        )
+        Some(EngineOrder {
+            action: PositionOp::OpenLong,
+            size: roundf!(max_size * 0.9, params.sz_decimals),
+            limit: None,
+        })
     }
 
     pub fn generate_test_tpsl(&self, price: f64, params: ExecParams) -> Option<EngineOrder> {

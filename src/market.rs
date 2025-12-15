@@ -13,7 +13,7 @@ use crate::strategy::Strategy;
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, UpdateFrontend};
 use crate::{ExecCommand, ExecControl, ExecEvent, Executor, load_candles, parse_candle};
 use crate::{MAX_HISTORY, MarketInfo, MarketTradeInfo, Wallet};
-use crate::{TimeFrame, TradeFillInfo, TradeInfo, TradeParams};
+use crate::{OpenPositionLocal, TimeFrame, TradeInfo, TradeParams};
 
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,

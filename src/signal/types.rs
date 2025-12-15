@@ -26,7 +26,11 @@ pub struct ExecParams {
 
 impl ExecParams {
     pub fn new(margin: f64, lev: usize, sz_decimals: u32) -> Self {
-        Self { margin, lev, sz_decimals }
+        Self {
+            margin,
+            lev,
+            sz_decimals,
+        }
     }
 }
 

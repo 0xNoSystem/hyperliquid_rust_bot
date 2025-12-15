@@ -63,13 +63,12 @@ pub struct Limit {
     pub order_type: ClientOrderLocal,
 }
 
-
 impl Limit {
-    pub fn new_limit(limit_px: f64, tif: Tif) -> Self{
-        Limit{
+    pub fn new_limit(limit_px: f64, tif: Tif) -> Self {
+        Limit {
             limit_px,
             order_type: ClientOrderLocal::ClientLimit(tif),
-        } 
+        }
     }
     pub fn is_tpsl(&self) -> Option<TriggerKind> {
         match self.order_type {
@@ -209,11 +208,6 @@ pub struct FillInfo {
     pub fill_type: FillType,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct FundingUpdate {
-    funding: f64,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TradeInfo {
@@ -282,7 +276,11 @@ impl OpenPositionLocal {
         self.fees += fill.fee;
     }
 
-    pub fn apply_close_fill(&mut self, fill: &TradeFillInfo, sz_decimals: u32) -> Option<TradeInfo> {
+    pub fn apply_close_fill(
+        &mut self,
+        fill: &TradeFillInfo,
+        sz_decimals: u32,
+    ) -> Option<TradeInfo> {
         let close_px = fill.price;
         let close_sz = fill.sz;
 
