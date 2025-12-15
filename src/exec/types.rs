@@ -281,12 +281,11 @@ impl OpenPositionLocal {
         fill: &TradeFillInfo,
         sz_decimals: u32,
     ) -> Option<TradeInfo> {
-        let close_px = fill.price;
         let close_sz = fill.sz;
 
         let price_diff = match self.side {
-            Side::Long => close_px - self.entry_px,
-            Side::Short => self.entry_px - close_px,
+            Side::Long => fill.price - self.entry_px,
+            Side::Short => self.entry_px - fill.price,
         };
 
         let partial_pnl = price_diff * close_sz;
@@ -296,9 +295,17 @@ impl OpenPositionLocal {
         self.size -= close_sz;
         self.fees += fill.fee;
 
+        // still partially open
         if roundf!(self.size, sz_decimals) > 0.0 {
             return None;
         }
+
+        //derive VWAP close price
+        let gross_pnl = self.realised_pnl + self.fees;
+        let avg_close_px = match self.side {
+            Side::Long => self.entry_px + gross_pnl / close_sz,
+            Side::Short => self.entry_px - gross_pnl / close_sz,
+        };
 
         Some(TradeInfo {
             side: self.side,
@@ -313,7 +320,7 @@ impl OpenPositionLocal {
             },
             close: FillInfo {
                 time: get_time_now(),
-                price: close_px,
+                price: avg_close_px,
                 fill_type: fill.fill_type,
             },
         })

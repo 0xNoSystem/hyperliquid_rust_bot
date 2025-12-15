@@ -174,35 +174,16 @@ impl Tracker {
         ((now / tf_ms) + 1) * tf_ms
     }
 
-    pub async fn load<I: IntoIterator<Item = Price>>(&mut self, price_data: I) {
+    pub fn load<I: IntoIterator<Item = Price>>(&mut self, price_data: I) {
         let buffer: Vec<Price> = price_data.into_iter().collect();
-        let safe_buff: Arc<[Price]> = buffer.clone().into();
+        let slice = buffer.as_slice();
 
-        let mut handles: Vec<tokio::task::JoinHandle<(IndicatorKind, Handler)>> = Vec::new();
-        let temp_handlers = std::mem::take(&mut self.indicators);
-
-        for (kind, mut handler) in temp_handlers {
-            let buff = safe_buff.clone();
-
-            let handle = tokio::spawn(async move {
-                handler.load(&*buff);
-                (kind, handler)
-            });
-
-            handles.push(handle);
+        for handler in self.indicators.values_mut() {
+            handler.load(slice);
         }
 
-        let new_indicators: HashMap<IndicatorKind, Handler, BuildHasherDefault<FxHasher>> =
-            futures::future::join_all(handles)
-                .await
-                .into_iter()
-                .map(Result::unwrap) // unwrap JoinHandle
-                .collect();
-
-        self.indicators = new_indicators;
         self.price_data.extend(buffer);
     }
-
     pub fn add_indicator(&mut self, kind: IndicatorKind, load: bool) {
         let mut handler = Handler::new(kind);
         if load {

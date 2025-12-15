@@ -147,7 +147,7 @@ impl SignalEngine {
 
     pub async fn load<I: IntoIterator<Item = Price>>(&mut self, tf: TimeFrame, price_data: I) {
         if let Some(tracker) = self.trackers.get_mut(&tf) {
-            tracker.load(price_data).await;
+            tracker.load(price_data);
         }
     }
 

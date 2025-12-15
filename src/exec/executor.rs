@@ -58,7 +58,9 @@ impl Executor {
         F: FnOnce(&mut Option<OpenPositionLocal>) -> R,
     {
         let mut guard = self.open_position.lock().await;
-        f(&mut guard)
+        let r = f(&mut guard);
+        dbg!(&guard);
+        r
     }
 
     async fn open_trade(
@@ -104,14 +106,14 @@ impl Executor {
     async fn cancel_all_resting(&mut self) -> Result<(), Error> {
         let asset = self.asset.name.clone();
         let mut failed_cancels: HashSet<u64> = HashSet::new();
-        for oid in self.resting_orders.keys() {
+        for (oid, _) in self.resting_orders.drain() {
             let cancel = ClientCancelRequest {
                 asset: asset.clone(),
-                oid: *oid,
+                oid,
             };
             if let Err(e) = self.exchange_client.cancel(cancel, None).await {
                 warn!("Failed to cancel oid {}: {:?}", oid, e);
-                failed_cancels.insert(*oid);
+                failed_cancels.insert(oid);
             }
         }
         let mut retries = 0;
@@ -190,29 +192,37 @@ impl Executor {
             self.resting_orders.remove(&fill.oid);
         }
 
-        self.with_position(|pos| match fill.intent {
-            PositionOp::OpenLong | PositionOp::OpenShort => {
-                if let Some(open_pos) = pos {
-                    open_pos.apply_open_fill(&fill);
-                } else {
-                    *pos = Some(OpenPositionLocal::new(fill));
-                }
-                None
-            }
-
-            PositionOp::Close => {
-                if let Some(open_pos) = pos {
-                    let trade = open_pos.apply_close_fill(&fill, self.asset.sz_decimals);
-                    if trade.is_some() {
-                        *pos = None;
+        let trade_info = self
+            .with_position(|pos| match fill.intent {
+                PositionOp::OpenLong | PositionOp::OpenShort => {
+                    if let Some(open_pos) = pos {
+                        open_pos.apply_open_fill(&fill);
+                    } else {
+                        *pos = Some(OpenPositionLocal::new(fill));
                     }
-                    trade
-                } else {
                     None
                 }
-            }
-        })
-        .await
+
+                PositionOp::Close => {
+                    if let Some(open_pos) = pos {
+                        let trade = open_pos.apply_close_fill(&fill, self.asset.sz_decimals);
+                        if trade.is_some() {
+                            *pos = None;
+                        }
+                        trade
+                    } else {
+                        None
+                    }
+                }
+            })
+            .await;
+
+        //Clean up resting orders in case of user closing a position manually on HL's interface
+        if trade_info.is_some() && !clean_up {
+            let _ = self.cancel_all_resting().await;
+        }
+
+        trade_info
     }
 
     #[inline]
