@@ -86,9 +86,6 @@ export default function Settings() {
                     generated the Key).
                 </p>
             </div>
-            <div className="pointer-events-none absolute inset-0 opacity-[0.08] [background:radial-gradient(60%_60%_at_0%_0%,rgba(56,189,248,0.5),transparent_60%),radial-gradient(50%_50%_at_100%_0%,rgba(232,121,249,0.5),transparent_60%),radial-gradient(60%_60%_at_50%_100%,rgba(52,211,153,0.4),transparent_60%)]" />
-            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(transparent_23px,rgba(255,255,255,0.06)_24px),linear-gradient(90deg,transparent_23px,rgba(255,255,255,0.06)_24px)] bg-[size:26px_26px] opacity-[0.06]" />
-
             <div className="relative mx-auto max-w-2xl rounded-md border border-white/10 bg-[#0B0E12]/80 p-6">
                 <h2 className="mb-4 text-xl font-semibold">API Key Settings</h2>
                 <p className="mb-6 text-sm text-white/60">
@@ -172,8 +169,6 @@ export default function Settings() {
                     </motion.div>
                 )}
             </AnimatePresence>
-
-            <style>{`@keyframes scan{0%{transform:translateX(0)}100%{transform:translateX(-25%)}}`}</style>
         </div>
     );
 }

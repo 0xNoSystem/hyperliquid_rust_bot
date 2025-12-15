@@ -645,7 +645,7 @@ export default function MarketDetail() {
                         <p className="border-b border-orange-600/40 py-1 text-center">
                             OPEN POSITION
                         </p>
-                        <div className="py-2 px-3">
+                        <div className="px-3 py-2">
                             {market.position == null ? (
                                 <p className="text-center">No open position</p>
                             ) : (
@@ -661,7 +661,7 @@ export default function MarketDetail() {
                                             <th className="py-2 pr-2 text-right">
                                                 Size
                                             </th>
-                                            
+
                                             <th className="py-2 pr-2 text-right">
                                                 Funding
                                             </th>
@@ -704,11 +704,12 @@ export default function MarketDetail() {
                                                 $
                                             </td>
 
-                                            <td
-                                                className="py-2 text-right text-orange-400"
-                                            >
+                                            <td className="py-2 text-right text-orange-400">
                                                 {num(
-                                                    computeUPnL(market.position, market.price),
+                                                    computeUPnL(
+                                                        market.position,
+                                                        market.price
+                                                    ),
                                                     2
                                                 )}
                                                 $

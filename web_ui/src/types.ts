@@ -333,9 +333,5 @@ export function computeUPnL(
 ): number {
     const direction = position.side === "long" ? 1 : -1;
 
-    return (
-        (marketPrice - position.entryPx) *
-        direction *
-        position.size
-    );
+    return (marketPrice - position.entryPx) * direction * position.size;
 }
