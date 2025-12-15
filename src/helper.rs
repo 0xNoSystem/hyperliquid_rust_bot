@@ -146,12 +146,7 @@ pub fn parse_candle(candle: CandleData) -> Result<Price, Error> {
         .map_err(|e| Error::GenericParse(format!("Failed to parse high: {}", e)))?;
     let l = candle
         .low
-        .parse::<f64>()
-        .map_err(|e| Error::GenericParse(format!("Failed to parse low: {}", e)))?;
-    let o = candle
-        .open
-        .parse::<f64>()
-        .map_err(|e| Error::GenericParse(format!("Failed to parse open: {}", e)))?;
+        .parse::<f64>() .map_err(|e| Error::GenericParse(format!("Failed to parse low: {}", e)))?; let o = candle .open .parse::<f64>() .map_err(|e| Error::GenericParse(format!("Failed to parse open: {}", e)))?;
     let c = candle
         .close
         .parse::<f64>()
@@ -173,6 +168,17 @@ macro_rules! roundf {
 }
 
 pub fn round_ndp(value: f64, dp: u32) -> f64 {
-    let factor = 10f64.powi(dp as i32);
-    (value * factor).round() / factor
+    match dp {
+        0 => format!("{:.0}", value).parse().unwrap(),
+        1 => format!("{:.1}", value).parse().unwrap(),
+        2 => format!("{:.2}", value).parse().unwrap(),
+        3 => format!("{:.3}", value).parse().unwrap(),
+        4 => format!("{:.4}", value).parse().unwrap(),
+        5 => format!("{:.5}", value).parse().unwrap(),
+        6 => format!("{:.6}", value).parse().unwrap(),
+        7 => format!("{:.7}", value).parse().unwrap(),
+        8 => format!("{:.8}", value).parse().unwrap(),
+        _ => unreachable!("dp must be in 0..=6"),
+    }
 }
+

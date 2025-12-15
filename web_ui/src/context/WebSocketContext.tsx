@@ -357,8 +357,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     );
 
     const requestToggleMarket = useCallback(
-        async (asset: string) => {
-            await sendCommand({ toggleMarket: asset });
+        async (asset: string, pause: boolean) => {
+            await sendCommand(pause ? { pauseMarket: asset } : {resumeMarket: asset});
             setMarkets((p) =>
                 p.map((m) =>
                     m.asset === asset ? { ...m, isPaused: !m.isPaused } : m

@@ -2,7 +2,7 @@
 #![allow(unused_assignments)]
 
 use crate::signal::ExecParams;
-use crate::{ClientOrderLocal, ExecCommand, Tif, TriggerKind, TriggerOrder, Value, roundf};
+use crate::{ClientOrderLocal,Limit, ExecCommand,PositionOp, Tif, TriggerKind, TriggerOrder, Value, roundf, EngineOrder, MAX_DECIMALS};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Copy, PartialEq, Deserialize, Serialize)]
@@ -135,7 +135,8 @@ impl CustomStrategy {
         self.follow_trend = follow_trend;
     }
 
-    pub fn generate_test_trade(&self, price: f64, params: ExecParams) -> Option<ExecCommand> {
+    pub fn generate_test_trade(&self, price: f64, params: ExecParams) -> Option<EngineOrder> {
+        let px_tick = MAX_DECIMALS - params.sz_decimals - 1;
         let duration = 30;
         let is_long = true;
 
@@ -145,11 +146,18 @@ impl CustomStrategy {
             kind: TriggerKind::Sl,
             is_market: false,
         };
-
-        None
+        let price = roundf!(price * 0.98, px_tick);
+        let limit = Some(Limit::new_limit(price, Tif::Gtc));
+        Some(
+            EngineOrder{
+                action: PositionOp::OpenLong,
+                size: roundf!(max_size * 0.9, params.sz_decimals),
+                limit: None,
+            }
+        )
     }
 
-    pub fn generate_test_tpsl(&self, price: f64, params: ExecParams) -> Option<ExecCommand> {
+    pub fn generate_test_tpsl(&self, price: f64, params: ExecParams) -> Option<EngineOrder> {
         let max_size = (params.margin * params.lev as f64) / price;
 
         let trigger = TriggerOrder {
@@ -165,7 +173,7 @@ impl CustomStrategy {
         data: Vec<Value>,
         price: f64,
         params: ExecParams,
-    ) -> Option<ExecCommand> {
+    ) -> Option<EngineOrder> {
         // Extract indicator values from the data
         let mut rsi_value = None;
         let mut srsi_value = None;
@@ -206,7 +214,7 @@ impl CustomStrategy {
         srsi: f64,
         stoch_rsi: (f64, f64), // (K, D)
         max_size: f64,
-    ) -> Option<ExecCommand> {
+    ) -> Option<EngineOrder> {
         let (k, d) = stoch_rsi;
         let duration = 420;
 

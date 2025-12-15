@@ -203,7 +203,11 @@ impl Executor {
 
             PositionOp::Close => {
                 if let Some(open_pos) = pos {
-                    open_pos.apply_close_fill(&fill, self.asset.sz_decimals)
+                    let trade = open_pos.apply_close_fill(&fill, self.asset.sz_decimals);
+                    if trade.is_some(){
+                        *pos = None;
+                    }
+                    trade
                 } else {
                     None
                 }
@@ -255,6 +259,7 @@ impl Executor {
                     if self.is_paused {
                         continue;
                     }
+                    dbg!(&order);
                     let order_params: Option<(Side, f64)> = match order.action {
                         PositionOp::OpenLong => Some((Side::Long, order.size)),
                         PositionOp::OpenShort => Some((Side::Short, order.size)),

@@ -16,7 +16,7 @@ pub mod strategy;
 pub use assets::MARKETS;
 //pub use backtest::BackTester;
 pub use bot::{Bot, BotEvent, BotToMarket};
-pub use consts::MAX_HISTORY;
+pub use consts::*;
 pub use exec::*;
 pub use frontend::*;
 pub use helper::*;

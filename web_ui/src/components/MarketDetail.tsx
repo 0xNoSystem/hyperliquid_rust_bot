@@ -563,6 +563,10 @@ export default function MarketDetail() {
                                             <th className="py-2 pr-4 text-right">
                                                 PnL
                                             </th>
+                                            
+                                            <th className="py-2 pr-4 text-right">
+                                                Size
+                                            </th>
                                             <th className="py-2 pr-4 text-right">
                                                 Fee
                                             </th>
@@ -570,6 +574,7 @@ export default function MarketDetail() {
                                             <th className="py-2 pr-4 text-right">
                                                 Funding
                                             </th>
+                                            
 
                                             <th className="py-2 text-right">
                                                 Open Time - Close Time
@@ -584,17 +589,15 @@ export default function MarketDetail() {
                                                     className="border-t border-white/10"
                                                 >
                                                     <td
-                                                        className={`py-2 pr-4 font-semibold uppercase ${t.isLong ? "text-green-500" : "text-red-500"}`}
+                                                        className={`py-2 pr-4 font-semibold uppercase ${t.side == "long" ? "text-green-500" : "text-red-500"}`}
                                                     >
-                                                        {t.isLong
-                                                            ? "Long"
-                                                            : "Short"}
+                                                        {t.side}
                                                     </td>
                                                     <td className="py-2 pr-4 text-right">
-                                                        {formatPrice(t.openPx)}
+                                                        {formatPrice(t.open.price)}
                                                     </td>
                                                     <td className="py-2 pr-4 text-right">
-                                                        {formatPrice(t.closePx)}
+                                                        {formatPrice(t.close.price)}
                                                     </td>
                                                     <td
                                                         className={`py-2 pr-4 text-right ${t.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}
@@ -602,14 +605,18 @@ export default function MarketDetail() {
                                                         {num(t.pnl, 2)}$
                                                     </td>
                                                     <td className="py-2 pr-4 text-right">
+                                                        {num(t.size, meta.szDecimals)}
+                                                    </td>
+
+                                                    <td className="py-2 pr-4 text-right">
                                                         {num(t.fees, 2)}$
                                                     </td>
-                                                    <td className="py-2 text-center">
+                                                    <td className="py-2 text-right">
                                                         {t.funding}
                                                     </td>
 
                                                     <td className="py-2 text-right">
-                                                        {formatUTC(t.openTime)} - {formatUTC(t.closeTime)}
+                                                        {formatUTC(t.open.time)} - {formatUTC(t.close.time)}
                                                     </td>
                                                 </tr>
                                             )

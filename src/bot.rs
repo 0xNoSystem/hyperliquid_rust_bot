@@ -397,6 +397,7 @@ impl Bot {
                                 match TradeFillInfo::try_from(fills) {
                                     Ok(fill) => {
                                         let cmd = MarketCommand::UserEvent(ExecEvent::Fill(fill));
+                                        let _ = sleep(Duration::from_millis(1000));
                                         self.send_cmd(coin.clone(), cmd).await;
                                     }
                                     Err(e) => {

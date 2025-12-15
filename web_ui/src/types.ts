@@ -230,16 +230,35 @@ export type editMarketInfo =
     | { strategy: Strategy }
     | { margin: number };
 
+export type Side = "long" | "short";
+
+export type PositionOp =
+  | "openLong"
+  | "openShort"
+  | "close";
+
+export type FillType =
+  | "market"
+  | "limit"
+  | "liquidation"
+  | { trigger: TriggerKind };
+
+export type TriggerKind = "tp" | "sl";
+
+export interface FillInfo {
+  time: number;        // unix ms
+  price: number;
+  fillType: FillType;
+}
+
 export interface TradeInfo {
-    openPx: number;
-    closePx: number;
-    size: number;
-    pnl: number;
-    fees: number;
-    funding: number;
-    isLong: number;
-    openTime: number;
-    closeTime: number;
+  side: Side;
+  size: number;
+  pnl: number;
+  fees: number;
+  funding: number;
+  open: FillInfo;
+  close: FillInfo;
 }
 
 export interface MarketTradeInfo {
@@ -248,14 +267,14 @@ export interface MarketTradeInfo {
 }
 
 export interface OpenPositionLocal {
-    asset: string;
-    openTime: number;
-    size: number;
-    entryPx: number;
-    isLong: boolean;
-    fees: number;
-    funding: number;
-    realisedPnl: number;
+  openTime: number;     // unix ms
+  size: number;
+  entryPx: number;
+  side: Side;
+  fees: number;
+  funding: number;
+  realisedPnl: number;
+  fillType: FillType;
 }
 
 export const indicatorLabels: Record<string, string> = {

@@ -45,7 +45,7 @@ export default function MarketsPage() {
 
     const handleConfirmToggle = (asset: string, isPaused: boolean) => {
         if (isPaused) {
-            requestToggleMarket(asset).catch((err) =>
+            requestToggleMarket(asset, false).catch((err) =>
                 console.error("Toggle failed", err)
             );
         } else {
@@ -54,7 +54,7 @@ export default function MarketsPage() {
     };
 
     const handleTogglePause = (asset: string) => {
-        requestToggleMarket(asset)
+        requestToggleMarket(asset, true)
             .catch((err) => console.error("Toggle failed", err))
             .finally(() => setMarketToToggle(null));
     };

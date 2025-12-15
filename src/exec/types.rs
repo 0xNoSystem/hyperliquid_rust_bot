@@ -63,7 +63,14 @@ pub struct Limit {
     pub order_type: ClientOrderLocal,
 }
 
+
 impl Limit {
+    pub fn new_limit(limit_px: f64, tif: Tif) -> Self{
+        Limit{
+            limit_px,
+            order_type: ClientOrderLocal::ClientLimit(tif),
+        } 
+    }
     pub fn is_tpsl(&self) -> Option<TriggerKind> {
         match self.order_type {
             ClientOrderLocal::ClientLimit(_) => None,

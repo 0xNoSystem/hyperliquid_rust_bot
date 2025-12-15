@@ -26,6 +26,7 @@ alloy = { version = "1.0", default-features = false, features = [
   "signer-local",
 ] }
 reqwest = "0.12.24"
+rust_decimal = "1.39.0"
 
 
 

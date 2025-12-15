@@ -8,7 +8,7 @@ use kwant::indicators::{Price, Value};
 
 use crate::strategy::Strategy;
 use crate::trade_setup::{TimeFrame, TradeParams};
-use crate::{ExecCommand, IndicatorData, MarketCommand};
+use crate::{ExecCommand, IndicatorData, MarketCommand, EngineOrder};
 
 use flume::{Sender, bounded};
 use tokio::sync::mpsc::{Sender as tokioSender, UnboundedReceiver, unbounded_channel};
@@ -75,7 +75,6 @@ impl SignalEngine {
         if let Some(tracker) = &mut self.trackers.get_mut(&id.1) {
             tracker.add_indicator(id.0, true);
         } else {
-            println!("CREATING A NEW TRACKER");
             let mut new_tracker = Tracker::new(id.1);
             new_tracker.add_indicator(id.0, false);
             self.trackers.insert(id.1, Box::new(new_tracker));
@@ -152,21 +151,21 @@ impl SignalEngine {
         }
     }
 
-    fn get_signal(&self, price: f64, values: Vec<Value>) -> Option<ExecCommand> {
+    fn get_signal(&self, price: f64, values: Vec<Value>) -> Option<EngineOrder> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_signal(values, price, self.exec_params),
         }
     }
 
     #[allow(unused)]
-    fn get_test_trade(&self, price: f64) -> Option<ExecCommand> {
+    fn get_test_trade(&self, price: f64, values: Vec<Value>) -> Option<EngineOrder> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_test_trade(price, self.exec_params),
         }
     }
 
     #[allow(unused)]
-    fn get_test_tpsl(&self, price: f64) -> Option<ExecCommand> {
+    fn get_test_tpsl(&self, price: f64) -> Option<EngineOrder> {
         match self.strategy {
             Strategy::Custom(brr) => brr.generate_test_tpsl(price, self.exec_params),
         }
@@ -197,12 +196,13 @@ impl SignalEngine {
                         {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
-
-                        if let Some(trade) = self.get_signal(price.close, values) {
-                            let _ = self.trade_tx.try_send(trade);
+                        
+                        if let Some(trade) = self.get_test_trade(price.close, values) && tick.is_multiple_of(100){
+                            let _ = self.trade_tx.try_send(ExecCommand::Order(trade));
                         }
                     }
                     tick += 1;
+                    println!("______TICK_____ => {}", tick);
                 }
 
                 EngineCommand::UpdateStrategy(new_strat) => {

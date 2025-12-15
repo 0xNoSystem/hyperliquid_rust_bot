@@ -48,6 +48,7 @@ impl Market {
         trade_params: TradeParams,
         config: Option<Vec<IndexId>>,
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
+        info!("{:?}", &asset);
         let info_client = InfoClient::new(None, Some(wallet.url)).await?;
         let exchange_client =
             ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
