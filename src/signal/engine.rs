@@ -197,14 +197,13 @@ impl SignalEngine {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
 
-                        if let Some(trade) = self.get_test_trade(price.close, values)
-                            && tick.is_multiple_of(100)
+                        if let Some(trade) = self.get_signal(price.close, values)
                         {
                             let _ = self.trade_tx.try_send(ExecCommand::Order(trade));
                         }
                     }
                     tick += 1;
-                    println!("______TICK_____ => {}", tick);
+                    //println!("______TICK_____ => {}", tick);
                 }
 
                 EngineCommand::UpdateStrategy(new_strat) => {
