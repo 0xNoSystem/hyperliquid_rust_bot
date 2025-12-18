@@ -201,6 +201,9 @@ export default function MarketsPage() {
                                 >
                                     <MarketCard
                                         market={m}
+                                        assetMeta={universe.find(
+                                            (u) => u.name === m.asset
+                                        )}
                                         onTogglePause={() =>
                                             handleConfirmToggle(
                                                 m.asset,

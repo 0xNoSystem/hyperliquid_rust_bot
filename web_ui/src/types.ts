@@ -55,18 +55,18 @@ export type Value =
     | { adxValue: number }
     | { atrValue: number };
 
-export function get_value(v?: Value): string {
+export function get_value(v?: Value, decimals: number): string {
     if (!v) return "No value";
     if ("rsiValue" in v) return `${v.rsiValue.toFixed(2)}`;
     if ("stochRsiValue" in v)
         return `K=${v.stochRsiValue.k.toFixed(2)}, D=${v.stochRsiValue.d.toFixed(2)}`;
-    if ("emaValue" in v) return `${formatPrice(v.emaValue)}`;
+    if ("emaValue" in v) return `${v.emaValue.toFixed(decimals)}`;
     if ("emaCrossValue" in v)
-        return `short=${formatPrice(v.emaCrossValue.short)}, long=${formatPrice(v.emaCrossValue.long)}, trend=${v.emaCrossValue.trend ? "↑" : "↓"}`;
-    if ("smaValue" in v) return `${formatPrice(v.smaValue)}`;
+        return `short=${v.emaCrossValue.short.toFixed(decimals)}, long=${v.emaCrossValue.long.toFixed(decimals)}, trend=${v.emaCrossValue.trend ? "↑" : "↓"}`;
+    if ("smaValue" in v) return `${v.smaValue.toFixed(decimals)}`;
     if ("smaRsiValue" in v) return `${v.smaRsiValue.toFixed(2)}`;
     if ("adxValue" in v) return `${v.adxValue.toFixed(2)}`;
-    if ("atrValue" in v) return `${formatPrice(v.atrValue)}`;
+    if ("atrValue" in v) return `${v.atrValue.toFixed(decimals)}`;
     return "Unknown";
 }
 
@@ -325,10 +325,12 @@ export function computeUPnL(
     return (marketPrice - position.entryPx) * direction * position.size;
 }
 
-
-
 export const formatPrice = (n: number) => {
     if (n > 1 && n < 2) return n.toFixed(4);
     if (n < 1) return n.toFixed(6);
     return n.toFixed(2);
 };
+
+export function num(n: number, d = 2) {
+    return Number.isFinite(n) ? n.toFixed(d) : "—";
+}

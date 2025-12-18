@@ -115,7 +115,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                 lev,
                 strategy,
                 tradeTime: 100,
-            }as TradeParams,
+            } as TradeParams,
             config: validConfig,
         };
 
@@ -259,21 +259,28 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             }}
                         />
                     </div>
-                                    </div>
+                </div>
                 <fieldset className="border-t border-white pt-4">
                     <legend className="text-lg text-white">Strategy</legend>
                     <div>
-                    <label className="block text-sm text-white">Strategy</label>
-                    <select
-                        value={strategy}
-                        onChange={(e) => setStrategy(e.target.value as Strategy)}
-                        className={selectClass}
-                    >
-                        {strategyOptions.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                        ))}
-                    </select>
-                </div>                </fieldset>
+                        <label className="block text-sm text-white">
+                            Strategy
+                        </label>
+                        <select
+                            value={strategy}
+                            onChange={(e) =>
+                                setStrategy(e.target.value as Strategy)
+                            }
+                            className={selectClass}
+                        >
+                            {strategyOptions.map((s) => (
+                                <option key={s} value={s}>
+                                    {s}
+                                </option>
+                            ))}
+                        </select>
+                    </div>{" "}
+                </fieldset>
                 <fieldset className="relative mt-6 border-t border-white pt-6">
                     <legend className="text-lg text-white">Indicators</legend>
                     <div className="flex flex-col gap-2">

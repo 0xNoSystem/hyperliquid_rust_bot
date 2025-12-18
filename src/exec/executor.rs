@@ -147,13 +147,15 @@ impl Executor {
         guard.is_some() || !self.resting_orders.is_empty()
     }
 
-    fn into_hl_order(asset: &str, sz: f64, side: Side, limit: Option<Limit>) -> HlOrder<'_> {
+    fn into_hl_order(asset: &str, sz: f64, side: Side, limit: Option<Limit>, intent: PositionOp) -> HlOrder<'_> {
         let is_long = side == Side::Long;
+
         if let Some(limit) = limit {
+            let reduce_only = (intent == PositionOp::Close) || limit.is_tpsl().is_some();
             HlOrder::Limit(ClientOrderRequest {
                 asset: asset.to_string(),
                 is_buy: is_long,
-                reduce_only: limit.is_tpsl().is_some(),
+                reduce_only,
                 limit_px: limit.limit_px,
                 sz,
                 cloid: None,
@@ -250,7 +252,7 @@ impl Executor {
         if let Some((side, size)) = params {
             let asset = self.asset.name.clone();
             let op = PositionOp::Close;
-            let trade = Self::into_hl_order(&asset, size, side, None);
+            let trade = Self::into_hl_order(&asset, size, side, None, op);
             match self.open_trade(trade, op, None).await {
                 Ok(order_response) => {
                     let _ = self
@@ -290,7 +292,7 @@ impl Executor {
 
                     if let Some((side, size)) = order_params {
                         let asset = self.asset.name.clone();
-                        let trade = Self::into_hl_order(&asset, size, side, order.limit);
+                        let trade = Self::into_hl_order(&asset, size, side, order.limit, order.action);
                         let trigger = order.is_tpsl();
                         match self.open_trade(trade, order.action, trigger).await {
                             Ok(order_response) => {

@@ -33,7 +33,7 @@ pub struct RsiEmaStrategy {
     active_window_start: Option<u64>, //ms
     waiting_for_cross: bool,
     prev_fast_above: Option<bool>,
-    tpsl_set: bool,
+    limit_close_set: bool,
 }
 
 impl RsiEmaStrategy {
@@ -46,7 +46,7 @@ impl RsiEmaStrategy {
             active_window_start: None,
             waiting_for_cross: true,
             prev_fast_above: None,
-            tpsl_set: false,
+            limit_close_set: false,
         }
     }
 
@@ -81,10 +81,7 @@ impl Strat for RsiEmaStrategy {
         let open_pos = params.open_pos;
 
         let max_size = roundf!((margin * lev) / price, sz_decimals);
-        if max_size * price < MIN_ORDER_VALUE {
-            return None;
-        }
-
+        
         let rsi_1h_value = match snapshot.get(&self.rsi_1h)? {
             RsiValue(v) => *v,
             _ => return None,
@@ -102,14 +99,13 @@ impl Strat for RsiEmaStrategy {
         };
         let order = (|| {
             if let Some(open) = open_pos{
-            if !self.tpsl_set
+            if !self.limit_close_set
                 && (rsi_5m_value >= 50.0
                 || ((now - open.open_time > timedelta!(Min15, 1)) && rsi_1h_value < 35.0)
-                || (price >= fast)
                     )
             {
                 self.active_window_start = None;
-                self.tpsl_set = true;
+                self.limit_close_set = true;
                 return Some(EngineOrder {
                     action: PositionOp::Close,
                     size: roundf!(open.size, sz_decimals),
@@ -120,7 +116,7 @@ impl Strat for RsiEmaStrategy {
                 });
             }
             }else{
-                self.tpsl_set = false;
+                self.limit_close_set = false;
             }
             let start = self.active_window_start?;
 
@@ -135,6 +131,9 @@ impl Strat for RsiEmaStrategy {
             }
 
             if open_pos.is_none() {
+                if max_size * price < MIN_ORDER_VALUE {
+                    return None;
+                }
                 self.active_window_start = None;
                 return Some(EngineOrder {
                     action: PositionOp::OpenLong,

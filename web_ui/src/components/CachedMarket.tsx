@@ -51,9 +51,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                         );
                     })}
                 </div>
-                <span className="flex flex-col">
-                    {tradeParams.strategy}                     
-                </span>
+                <span className="flex flex-col">{tradeParams.strategy}</span>
             </div>
             <div className="flex">
                 <button

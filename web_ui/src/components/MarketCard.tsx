@@ -9,7 +9,8 @@ import {
     get_value,
     get_params,
     fromTimeFrame,
-    formatPrice,
+    num,
+    computeUPnL,
 } from "../types";
 import LoadingDots from "./Loading";
 import { Link } from "react-router-dom";
@@ -19,7 +20,6 @@ interface MarketCardProps {
     onTogglePause: (asset: string) => void;
     onRemove: (asset: string) => void;
 }
-
 
 const PnlBar: React.FC<{ pnl: number }> = ({ pnl }) => {
     const w = Math.min(100, Math.abs(pnl));
@@ -46,6 +46,7 @@ const PnlBar: React.FC<{ pnl: number }> = ({ pnl }) => {
 
 const MarketCard: React.FC<MarketCardProps> = ({
     market,
+    assetMeta,
     onTogglePause,
     onRemove,
 }) => {
@@ -60,11 +61,14 @@ const MarketCard: React.FC<MarketCardProps> = ({
         pnl,
         isPaused,
         indicators,
+        position,
     } = market;
     const { strategy } = params;
+    const szDecimals = assetMeta ? assetMeta.szDecimals : 3;
+    const pxDecimals = 6 - szDecimals;
+    const format = (n: number) => n.toFixed(pxDecimals);
 
-    const price_color =
-        prev > price ? "red" : prev < price ? "green" : "orange";
+    const price_color = "orange";
 
     const loading = state === "Loading";
 
@@ -154,7 +158,7 @@ const MarketCard: React.FC<MarketCardProps> = ({
                             Math.abs(price) < 1e-8 ? (
                                 <LoadingDots />
                             ) : (
-                                `$${formatPrice(price)}`
+                                `$${format(price)}`
                             )}
                         </span>
                     </div>
@@ -209,7 +213,9 @@ const MarketCard: React.FC<MarketCardProps> = ({
                                     — {fromTimeFrame(timeframe)}
                                 </span>
                                 <span className="text-center text-base font-bold">
-                                    {value ? get_value(value) : "N/A"}
+                                    {value
+                                        ? get_value(value, pxDecimals)
+                                        : "N/A"}
                                 </span>
                             </div>
                         );
@@ -218,24 +224,101 @@ const MarketCard: React.FC<MarketCardProps> = ({
             </div>
 
             {/* Strategy */}
-            <div className="mt-4 grid grid-cols-3 gap-3 border-t border-white/10 pt-3 text-xs">
+            <div className="mt-4 border-t border-white/10 pt-3 text-xs">
                 {loading ? (
                     <div className="col-span-3 flex justify-center">
                         <LoadingDots />
                     </div>
                 ) : (
                     <>
-                        <div>
+                    <div className= "rounded-xl border border-white/10 bg-[#0B0E12]/80 my-2">
+                    <p className="py-1 text-center">
+                        OPEN POSITION
+                    </p>
+
+                    <div className="px-3 py-2">
+                        {position == null ? (
+                            <p className="text-center">No open position</p>
+                        ) : (
+                            <table className="min-w-full text-[11px]">
+                                <thead className="text-white/60">
+                                    <tr>
+                                        <th className="py-2 pr-2 text-left">
+                                            Side
+                                        </th>
+
+                                        <th className="py-2 pr-2 text-right">
+                                            Entry
+                                        </th>
+
+                                        <th className="py-2 pr-2 text-right">
+                                            Size
+                                        </th>
+
+                                        <th className="py-2 pr-2 text-right">
+                                            Funding
+                                        </th>
+
+                                        <th className="py-2 text-right">
+                                            UPNL
+                                        </th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    <tr className="border-t border-white/10">
+                                        <td
+                                            className={`py-2 pr-4 font-semibold uppercase ${
+                                                position.side === "long"
+                                                    ? "text-green-500"
+                                                    : "text-red-500"
+                                            }`}
+                                        >
+                                            {position.side}
+                                        </td>
+
+                                        <td className="py-2 pr-2 text-right">
+                                            {format(position.entryPx)}
+                                        </td>
+
+                                        <td className="py-2 pr-2 text-right">
+                                            {num(
+                                                position.size, szDecimals,
+                                            )}
+                                        </td>
+
+                                        <td className="py-2 pr-2 text-right">
+                                            {num(
+                                                position.funding,2
+                                            )}
+                                            $
+                                        </td>
+
+                                        <td className="py-2 text-right text-orange-400">
+                                            {num(
+                                                computeUPnL(
+                                                    position,
+                                                    price
+                                                ), 2
+                                            )}
+                                            $
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                </div>
+
+                        <div className="text-center">
                             <div className="text-[12px] text-white/50 uppercase">
                                 Strategy
                             </div>
-                            <p className="font-bold text-[14px]">
-                            {strategy}
-                            </p>
+                            <p className="text-[14px] font-bold">{strategy}</p>
                         </div>
                     </>
                 )}
-            </div>
+                            </div>
         </motion.div>
     );
 };

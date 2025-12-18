@@ -19,6 +19,7 @@ import {
     into,
     sanitizeAsset,
     computeUPnL,
+    num,
 } from "../types";
 import type {
     IndicatorKind,
@@ -84,9 +85,7 @@ function px(n: number) {
     if (n < 1) return n.toFixed(6);
     return n.toFixed(2);
 }
-function num(n: number, d = 2) {
-    return Number.isFinite(n) ? n.toFixed(d) : "—";
-}
+
 function PnlTicker({ pnl }: { pnl: number | null }) {
     if (pnl == null)
         return <span className="font-mono text-white/60">PnL —</span>;
@@ -429,8 +428,12 @@ export default function MarketDetail() {
 
                         {/* Strategy snapshot */}
                         <div className="space-y-1 rounded-lg border border-white/10 bg-black/20 p-3 text-[12px]">
-                            <h3 className="text-center text-[18px]">Strategy</h3>
-                            <p className="text-center text-[14px] py-3">{market.params.strategy}</p>
+                            <h3 className="text-center text-[18px]">
+                                Strategy
+                            </h3>
+                            <p className="py-3 text-center text-[14px]">
+                                {market.params.strategy}
+                            </p>
                         </div>
                     </div>
                 </aside>

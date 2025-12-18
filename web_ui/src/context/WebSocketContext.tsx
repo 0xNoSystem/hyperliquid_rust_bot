@@ -20,6 +20,7 @@ import { market_add_info } from "../types";
 
 const CACHED_MARKETS_KEY = "cachedMarkets.v1";
 const MARKET_INFO_KEY = "markets.v1";
+const UNIVERSE_KEY = "universe.v1";
 
 interface WebSocketContextValue {
     markets: MarketInfo[];
@@ -115,6 +116,14 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             const raw = localStorage.getItem(CACHED_MARKETS_KEY);
             if (raw) setCachedMarkets(JSON.parse(raw));
         } catch {}
+
+        try{
+            const raw = localStorage.getItem(MARKET_INFO_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw) as assetMeta[];
+                setUniverse(parsed);
+            }
+        }catch{}
     }, []);
 
     useEffect(() => {
@@ -125,6 +134,12 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     useEffect(() => {
         localStorage.setItem(CACHED_MARKETS_KEY, JSON.stringify(cachedMarkets));
     }, [cachedMarkets]);
+
+    useEffect(() => {
+        localStorage.setItem(UNIVERSE_KEY, JSON.stringify(universe));
+    }, [universe]);
+
+ 
 
     useEffect(() => {
         const onStorage = (e: StorageEvent) => {
@@ -148,6 +163,20 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 try {
                     setCachedMarkets(JSON.parse(e.newValue));
                 } catch {}
+            }
+            if (e.key === UNIVERSE_KEY) {
+                if (!e.newValue) {
+                    setUniverse([]);
+                    return;
+                }
+            try{
+            const raw = localStorage.getItem(MARKET_INFO_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw) as assetMeta[];
+                setUniverse(parsed);
+            }
+        }catch{}
+
             }
         };
         window.addEventListener("storage", onStorage);
