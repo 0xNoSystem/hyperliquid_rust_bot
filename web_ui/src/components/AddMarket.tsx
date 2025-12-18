@@ -8,10 +8,7 @@ import {
 } from "../types";
 import type {
     TimeFrame,
-    Risk,
-    Style,
-    Stance,
-    CustomStrategy,
+    Strategy,
     TradeParams,
     AddMarketInfo,
     IndexId,
@@ -19,9 +16,7 @@ import type {
     AddMarketProps,
 } from "../types";
 
-const riskOptions: Risk[] = ["Low", "Normal", "High"];
-const styleOptions: Style[] = ["Scalp", "Swing"];
-const stanceOptions: Stance[] = ["Bull", "Bear", "Neutral"];
+const strategyOptions: Strategy[] = ["rsiEmaScalp"];
 const indicatorKinds: IndicatorKind[] = [
     "rsi",
     "smaOnRsi",
@@ -45,14 +40,8 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     const [asset, setAsset] = useState("");
     const [marginType, setMarginType] = useState<"alloc" | "amount">("alloc");
     const [marginValue, setMarginValue] = useState(0.1);
-    const [tfSymbol, setTfSymbol] =
-        useState<keyof typeof TIMEFRAME_CAMELCASE>("1m");
     const [lev, setLev] = useState(1);
-    const [tradeTime, setTradeTime] = useState(0);
-    const [risk, setRisk] = useState<Risk>("Low");
-    const [style, setStyle] = useState<Style>("Scalp");
-    const [stance, setStance] = useState<Stance>("Bull");
-    const [followTrend, setFollowTrend] = useState(false);
+    const [strategy, setStrategy] = useState<Strategy>("rsiEmaScalp");
 
     const [showConfig, setShowConfig] = useState(false);
     const [config, setConfig] = useState<IndexId[]>([]);
@@ -122,13 +111,11 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                     ? { alloc: marginValue / 100 }
                     : { amount: marginValue },
             tradeParams: {
-                timeFrame: into(tfSymbol as string) as TimeFrame,
+                timeFrame: "min1",
                 lev,
-                strategy: {
-                    custom: { risk, style, stance, followTrend },
-                } as CustomStrategy,
-                tradeTime,
-            } as TradeParams,
+                strategy,
+                tradeTime: 100,
+            }as TradeParams,
             config: validConfig,
         };
 
@@ -239,23 +226,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             />
                         )}
                     </div>
-                    <div>
-                        <label className="block text-sm text-white">
-                            Time Frame
-                        </label>
-                        <select
-                            value={tfSymbol}
-                            onChange={(e) => setTfSymbol(e.target.value as any)}
-                            className={selectClass}
-                        >
-                            {Object.keys(TIMEFRAME_CAMELCASE).map((t) => (
-                                <option key={t} value={t}>
-                                    {t}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
+                    <div className="col-span-2">
                         <label className="block text-center text-sm text-white">
                             Leverage: {lev} (MAX:{" "}
                             {assets.find((u) => u.name === asset)?.maxLeverage})
@@ -288,89 +259,21 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             }}
                         />
                     </div>
-                    <div>
-                        <label className="block text-sm text-white">
-                            Trade Time (sec)
-                        </label>
-                        <input
-                            type="number"
-                            value={tradeTime}
-                            onChange={(e) => setTradeTime(+e.target.value)}
-                            min={0}
-                            className={inputClass}
-                        />
-                    </div>
-                </div>
+                                    </div>
                 <fieldset className="border-t border-white pt-4">
                     <legend className="text-lg text-white">Strategy</legend>
-                    <div className="mt-2 grid grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm text-white">
-                                Risk
-                            </label>
-                            <select
-                                value={risk}
-                                onChange={(e) => setRisk(e.target.value as any)}
-                                className={selectClass}
-                            >
-                                {riskOptions.map((r) => (
-                                    <option key={r} value={r}>
-                                        {r}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm text-white">
-                                Style
-                            </label>
-                            <select
-                                value={style}
-                                onChange={(e) =>
-                                    setStyle(e.target.value as any)
-                                }
-                                className={selectClass}
-                            >
-                                {styleOptions.map((s) => (
-                                    <option key={s} value={s}>
-                                        {s}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm text-white">
-                                Stance
-                            </label>
-                            <select
-                                value={stance}
-                                onChange={(e) =>
-                                    setStance(e.target.value as any)
-                                }
-                                className={selectClass}
-                            >
-                                {stanceOptions.map((s) => (
-                                    <option key={s} value={s}>
-                                        {s}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="col-span-3 mt-2 flex items-center">
-                            <input
-                                type="checkbox"
-                                checked={followTrend}
-                                onChange={(e) =>
-                                    setFollowTrend(e.target.checked)
-                                }
-                                className="h-4 w-4 cursor-pointer text-white"
-                            />
-                            <label className="ml-2 cursor-pointer text-sm text-white">
-                                Follow Trend
-                            </label>
-                        </div>
-                    </div>
-                </fieldset>
+                    <div>
+                    <label className="block text-sm text-white">Strategy</label>
+                    <select
+                        value={strategy}
+                        onChange={(e) => setStrategy(e.target.value as Strategy)}
+                        className={selectClass}
+                    >
+                        {strategyOptions.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                        ))}
+                    </select>
+                </div>                </fieldset>
                 <fieldset className="relative mt-6 border-t border-white pt-6">
                     <legend className="text-lg text-white">Indicators</legend>
                     <div className="flex flex-col gap-2">

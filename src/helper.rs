@@ -10,7 +10,6 @@ use alloy::primitives::Address;
 pub async fn subscribe_candles(
     info_client: &mut InfoClient,
     coin: &str,
-    tf: &str,
 ) -> Result<(u32, UnboundedReceiver<Message>), Error> {
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
 
@@ -18,7 +17,7 @@ pub async fn subscribe_candles(
         .subscribe(
             Subscription::Candle {
                 coin: coin.to_string(),
-                interval: tf.to_string(),
+                interval: "1m".to_string(),
             },
             sender,
         )
@@ -83,6 +82,8 @@ async fn candles_snapshot(
             low: l,
             open: o,
             close: c,
+            open_time: candle.time_open,
+            close_time: candle.time_close,
         });
     }
     Ok(res)
@@ -162,6 +163,8 @@ pub fn parse_candle(candle: CandleData) -> Result<Price, Error> {
         low: l,
         open: o,
         close: c,
+        open_time: candle.time_open,
+        close_time: candle.time_close,
     })
 }
 
@@ -185,4 +188,18 @@ pub fn round_ndp(value: f64, dp: u32) -> f64 {
         8 => format!("{:.8}", value).parse().unwrap(),
         _ => unreachable!("dp must be in 0..=6"),
     }
+}
+
+#[macro_export]
+macro_rules! timedelta {
+    ($tf:path, $count:expr) => {
+        $crate::helper::_time_delta($tf, $count)
+    };
+}
+
+pub fn _time_delta(tf: TimeFrame, count: u64) -> u64 {
+    tf.to_millis()
+        .checked_mul(count)
+        .expect("time delta overflow")
+        * count
 }

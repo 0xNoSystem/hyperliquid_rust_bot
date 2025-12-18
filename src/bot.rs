@@ -119,12 +119,7 @@ impl Bot {
             get_asset(&self.info_client, asset_str).await?
         };
 
-        let (sub_id, receiver) = subscribe_candles(
-            &mut self.info_client,
-            asset_str,
-            trade_params.time_frame.as_str(),
-        )
-        .await?;
+        let (sub_id, receiver) = subscribe_candles(&mut self.info_client, asset_str).await?;
 
         let (market, market_tx) = Market::new(
             self.wallet.clone(),

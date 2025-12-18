@@ -2,7 +2,7 @@ use hyperliquid_rust_sdk::{Error, ExchangeClient, ExchangeResponseStatus};
 use log::info;
 use std::fmt;
 
-use crate::strategy::{CustomStrategy, Strategy};
+use crate::strategy::Strategy;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -37,17 +37,6 @@ impl TradeParams {
                 Ok(lev)
             }
             ExchangeResponseStatus::Err(e) => Err(Error::Custom(e)),
-        }
-    }
-}
-
-impl Default for TradeParams {
-    fn default() -> Self {
-        Self {
-            strategy: Strategy::Custom(CustomStrategy::default()),
-            lev: 20,
-            trade_time: 300,
-            time_frame: TimeFrame::Min5,
         }
     }
 }

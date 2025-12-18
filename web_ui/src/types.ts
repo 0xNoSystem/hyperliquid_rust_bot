@@ -60,13 +60,13 @@ export function get_value(v?: Value): string {
     if ("rsiValue" in v) return `${v.rsiValue.toFixed(2)}`;
     if ("stochRsiValue" in v)
         return `K=${v.stochRsiValue.k.toFixed(2)}, D=${v.stochRsiValue.d.toFixed(2)}`;
-    if ("emaValue" in v) return `${v.emaValue.toFixed(2)}`;
+    if ("emaValue" in v) return `${formatPrice(v.emaValue)}`;
     if ("emaCrossValue" in v)
-        return `short=${v.emaCrossValue.short.toFixed(2)}, long=${v.emaCrossValue.long.toFixed(2)}, trend=${v.emaCrossValue.trend ? "↑" : "↓"}`;
-    if ("smaValue" in v) return `${v.smaValue.toFixed(2)}`;
+        return `short=${formatPrice(v.emaCrossValue.short)}, long=${formatPrice(v.emaCrossValue.long)}, trend=${v.emaCrossValue.trend ? "↑" : "↓"}`;
+    if ("smaValue" in v) return `${formatPrice(v.smaValue)}`;
     if ("smaRsiValue" in v) return `${v.smaRsiValue.toFixed(2)}`;
     if ("adxValue" in v) return `${v.adxValue.toFixed(2)}`;
-    if ("atrValue" in v) return `${v.atrValue.toFixed(2)}`;
+    if ("atrValue" in v) return `${formatPrice(v.atrValue)}`;
     return "Unknown";
 }
 
@@ -164,18 +164,7 @@ export function into(tf: string): TimeFrame {
     return TIMEFRAME_CAMELCASE[tf];
 }
 
-export type Risk = "Low" | "Normal" | "High";
-export type Style = "Scalp" | "Swing";
-export type Stance = "Bull" | "Bear" | "Neutral";
-
-export interface CustomStrategy {
-    risk: Risk;
-    style: Style;
-    stance: Stance;
-    followTrend: boolean;
-}
-
-export type Strategy = { custom: CustomStrategy };
+export type Strategy = "rsiEmaScalp";
 
 export interface TradeParams {
     timeFrame: TimeFrame;
@@ -335,3 +324,11 @@ export function computeUPnL(
 
     return (marketPrice - position.entryPx) * direction * position.size;
 }
+
+
+
+export const formatPrice = (n: number) => {
+    if (n > 1 && n < 2) return n.toFixed(4);
+    if (n < 1) return n.toFixed(6);
+    return n.toFixed(2);
+};

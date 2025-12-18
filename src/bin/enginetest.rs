@@ -6,7 +6,9 @@
 use std::{env, fs, str::FromStr};
 
 use dotenv::dotenv;
-use hyperliquid_rust_bot::strategy::{CustomStrategy, Risk, Stance, Strategy, Style};
+use hyperliquid_rust_bot::strategy::{
+    CustomStrategy, Risk, RsiEmaStrategy, Stance, Strat, Strategy, Style,
+};
 use hyperliquid_rust_bot::{
     AddMarketInfo, AssetMargin, BaseUrl, Bot, BotEvent, BotToMarket, EditType, Entry, IndexId,
     IndicatorKind, MARKETS, MarginAllocation, MarketCommand, TimeFrame, TradeParams,
@@ -20,7 +22,6 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     time::{Duration, sleep},
 };
-
 const COIN: &str = "BTC";
 const URL: BaseUrl = BaseUrl::Mainnet;
 
@@ -34,17 +35,17 @@ async fn main() -> Result<(), Error> {
         BaseUrl::Localhost => dotenv::from_filename(".env.test").ok(),
     };
     let wallet = load_wallet(BaseUrl::Mainnet).await?;
-    let strat = Strategy::Custom(CustomStrategy::default());
+    let strat = Strategy::RsiEma(RsiEmaStrategy::init());
 
     let trade_params = TradeParams {
         strategy: strat,
         lev: 20,
         trade_time: 300,
-        time_frame: TimeFrame::from_str("5m").unwrap_or(TimeFrame::Min1),
+        time_frame: TimeFrame::from_str("1m").unwrap_or(TimeFrame::Min1),
     };
 
     let config = Vec::from([
-        (IndicatorKind::Rsi(12), TimeFrame::Min1),
+        (IndicatorKind::Rsi(12), TimeFrame::Hour1),
         (
             IndicatorKind::SmaOnRsi {
                 periods: 14,
@@ -61,11 +62,8 @@ async fn main() -> Result<(), Error> {
             TimeFrame::Hour4,
         ),
         (
-            IndicatorKind::EmaCross {
-                short: 21,
-                long: 200,
-            },
-            TimeFrame::Day1,
+            IndicatorKind::EmaCross { short: 9, long: 21 },
+            TimeFrame::Min15,
         ),
         (
             IndicatorKind::Adx {
@@ -93,70 +91,13 @@ async fn main() -> Result<(), Error> {
             trade_params: trade_params.clone(),
             config: Some(config),
         };
-        let market_add2 = AddMarketInfo {
-            asset: "SOL".to_string(),
-            margin_alloc: MarginAllocation::Alloc(0.1),
-            trade_params: TradeParams::default(),
-            config: None,
-        };
-        let market_add3 = AddMarketInfo {
-            asset: "xrp ".to_string(),
-            margin_alloc: MarginAllocation::Amount(50.0),
-            trade_params: trade_params,
-            config: None,
-        };
-        let cmd = BotToMarket {
-            asset: "BTC".to_string(),
-            cmd: MarketCommand::UpdateLeverage(40),
-        };
-
-        let cmd2 = BotToMarket {
-            asset: "SOL".to_string(),
-            cmd: MarketCommand::EditIndicators(Vec::from([Entry {
-                id: (Ema(33), TimeFrame::Hour4),
-                edit: EditType::Add,
-            }])),
-        };
-
-        let cmd3 = BotToMarket {
-            asset: "XRP".to_string(),
-            cmd: MarketCommand::EditIndicators(Vec::from([
-                Entry {
-                    id: (Ema(33), TimeFrame::Hour4),
-                    edit: EditType::Toggle,
-                },
-                Entry {
-                    id: (Rsi(12), TimeFrame::Min1),
-                    edit: EditType::Add,
-                },
-            ])),
-        };
 
         let _ = sleep(Duration::from_secs(5)).await;
         let _ = sender.send(BotEvent::AddMarket(market_add.clone()));
-        let _ = sleep(Duration::from_secs(5)).await;
-        let _ = sender.send(BotEvent::AddMarket(market_add2));
-        let _ = sender.send(BotEvent::AddMarket(market_add3));
-        //let _ = sleep(Duration::from_secs(20)).await;
-        //sender.send(BotEvent::RemoveMarket("BTC".to_string()));
-        let _ = sleep(Duration::from_secs(5)).await;
-        let _ = sender.send(BotEvent::MarketComm(cmd));
-        let _ = sender.send(BotEvent::MarketComm(cmd2));
-        let _ = sleep(Duration::from_secs(5)).await;
-        let _ = sender.send(BotEvent::MarketComm(cmd3));
-        let _ = sleep(Duration::from_secs(10)).await;
-
-        let _ = sender.send(BotEvent::PauseAll);
-        let _ = sleep(Duration::from_secs(10)).await;
-        let _ = sender.send(BotEvent::ResumeAll);
-        let _ = sleep(Duration::from_secs(10)).await;
-        let _ = sender.send(BotEvent::CloseAll);
-        let _ = sleep(Duration::from_secs(10)).await;
-        let _ = sender.send(BotEvent::AddMarket(market_add));
     });
 
     while let Some(update) = app_rv.recv().await {
-        info!("FRONT END RECEIVED {:?}", update);
+        //info!("FRONT END RECEIVED {:?}", update);
     }
 
     /*   tokio::spawn(async move{

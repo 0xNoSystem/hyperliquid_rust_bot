@@ -429,32 +429,8 @@ export default function MarketDetail() {
 
                         {/* Strategy snapshot */}
                         <div className="space-y-1 rounded-lg border border-white/10 bg-black/20 p-3 text-[12px]">
-                            <div className="flex items-center justify-between">
-                                <span className="text-white/60">Style</span>{" "}
-                                <span className="text-white/90">
-                                    {market.params.strategy.custom.style}
-                                </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <span className="text-white/60">Stance</span>
-                                <span className="text-white/90">
-                                    {market.params.strategy.custom.stance}
-                                </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <span className="text-white/60">Risk</span>
-                                <span className="text-white/90">
-                                    {market.params.strategy.custom.risk}
-                                </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <span className="text-white/60">Follow</span>
-                                <span className="text-white/90">
-                                    {market.params.strategy.custom.followTrend
-                                        ? "Yes"
-                                        : "No"}
-                                </span>
-                            </div>
+                            <h3 className="text-center text-[18px]">Strategy</h3>
+                            <p className="text-center text-[14px] py-3">{market.params.strategy}</p>
                         </div>
                     </div>
                 </aside>

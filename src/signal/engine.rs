@@ -1,14 +1,14 @@
 use rustc_hash::FxHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 
 use log::info;
 
 use kwant::indicators::{Price, Value};
 
-use crate::strategy::Strategy;
+use crate::strategy::{RsiEmaStrategy, Strat, Strategy};
 use crate::trade_setup::{TimeFrame, TradeParams};
-use crate::{EngineOrder, ExecCommand, IndicatorData, MarketCommand};
+use crate::{EngineOrder, ExecCommand, IndicatorData, MarketCommand, get_time_now};
 
 use flume::{Sender, bounded};
 use tokio::sync::mpsc::{Sender as tokioSender, UnboundedReceiver, unbounded_channel};
@@ -22,10 +22,11 @@ pub struct SignalEngine {
     trade_tx: Sender<ExecCommand>,
     data_tx: Option<tokioSender<MarketCommand>>,
     trackers: TrackersMap,
-    strategy: Strategy,
+    strategy: Box<dyn Strat>,
     exec_params: ExecParams,
 }
 
+unsafe impl Send for SignalEngine {}
 impl SignalEngine {
     pub async fn new(
         config: Option<Vec<IndexId>>,
@@ -35,32 +36,35 @@ impl SignalEngine {
         trade_tx: Sender<ExecCommand>,
         exec_params: ExecParams,
     ) -> Self {
-        let mut trackers: TrackersMap = HashMap::default();
-        trackers.insert(
-            trade_params.time_frame,
-            Box::new(Tracker::new(trade_params.time_frame)),
-        );
-
-        if let Some(list) = config
-            && !list.is_empty()
-        {
-            for id in list {
-                if let Some(tracker) = &mut trackers.get_mut(&id.1) {
-                    tracker.add_indicator(id.0, false);
-                } else {
-                    let mut new_tracker = Tracker::new(id.1);
-                    new_tracker.add_indicator(id.0, false);
-                    trackers.insert(id.1, Box::new(new_tracker));
-                }
-            }
+        let strategy = match trade_params.strategy {
+            Strategy::RsiEmaScalp => RsiEmaStrategy::init(),
         };
+        let required_indicators = strategy.required_indicators();
+        let mut indicators: HashSet<IndexId> = if let Some(list) = config {
+            list.into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        indicators.extend(required_indicators);
+
+        let mut trackers: TrackersMap = HashMap::default();
+
+        for id in indicators {
+            if let Some(tracker) = &mut trackers.get_mut(&id.1) {
+                tracker.add_indicator(id.0, false);
+            } else {
+                let mut new_tracker = Tracker::new(id.1);
+                new_tracker.add_indicator(id.0, false);
+                trackers.insert(id.1, Box::new(new_tracker));
+            }
+        }
 
         SignalEngine {
             engine_rv,
             trade_tx,
             data_tx,
             trackers,
-            strategy: trade_params.strategy,
+            strategy: Box::new(strategy),
             exec_params: exec_params,
         }
     }
@@ -105,8 +109,8 @@ impl SignalEngine {
         active
     }
 
-    pub fn get_active_values(&self) -> Vec<Value> {
-        let mut values = Vec::new();
+    pub fn get_active_values(&self) -> ValuesMap {
+        let mut values: ValuesMap = HashMap::default();
         for tracker in self.trackers.values() {
             values.extend(tracker.get_active_values());
         }
@@ -136,39 +140,15 @@ impl SignalEngine {
         }
     }
 
-    pub fn change_strategy(&mut self, strategy: Strategy) {
-        self.strategy = strategy;
-        info!("Strategy changed to: {:?}", self.strategy);
-    }
-
-    pub fn get_strategy(&self) -> &Strategy {
-        &self.strategy
-    }
-
     pub async fn load<I: IntoIterator<Item = Price>>(&mut self, tf: TimeFrame, price_data: I) {
         if let Some(tracker) = self.trackers.get_mut(&tf) {
             tracker.load(price_data);
         }
     }
 
-    fn get_signal(&self, price: f64, values: Vec<Value>) -> Option<EngineOrder> {
-        match self.strategy {
-            Strategy::Custom(brr) => brr.generate_signal(values, price, self.exec_params),
-        }
-    }
-
-    #[allow(unused)]
-    fn get_test_trade(&self, price: f64, values: Vec<Value>) -> Option<EngineOrder> {
-        match self.strategy {
-            Strategy::Custom(brr) => brr.generate_test_trade(price, self.exec_params),
-        }
-    }
-
-    #[allow(unused)]
-    fn get_test_tpsl(&self, price: f64) -> Option<EngineOrder> {
-        match self.strategy {
-            Strategy::Custom(brr) => brr.generate_test_tpsl(price, self.exec_params),
-        }
+    fn get_signal(&mut self, price: f64, values: ValuesMap) -> Option<EngineOrder> {
+        self.strategy
+            .on_tick(values, price, &self.exec_params, get_time_now())
     }
 
     fn digest(&mut self, price: Price) {
@@ -188,7 +168,8 @@ impl SignalEngine {
                     self.digest(price);
 
                     let ind = self.get_indicators_data();
-                    let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
+                    //let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
+                    let values = self.get_active_values();
 
                     if !ind.is_empty() {
                         if tick.is_multiple_of(2)
@@ -197,8 +178,7 @@ impl SignalEngine {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
 
-                        if let Some(trade) = self.get_signal(price.close, values)
-                        {
+                        if let Some(trade) = self.get_signal(price.close, values) {
                             let _ = self.trade_tx.try_send(ExecCommand::Order(trade));
                         }
                     }
@@ -207,7 +187,7 @@ impl SignalEngine {
                 }
 
                 EngineCommand::UpdateStrategy(new_strat) => {
-                    self.change_strategy(new_strat);
+                    //self.change_strategy(new_strat);
                 }
 
                 EngineCommand::EditIndicators {
@@ -276,6 +256,10 @@ impl SignalEngine {
         strategy: Strategy,
         config: Option<Vec<IndexId>>,
     ) -> Self {
+        let strategy = match strategy {
+            Strategy::RsiEmaScalp => RsiEmaStrategy::init(),
+        };
+
         let mut trackers: TrackersMap = HashMap::default();
 
         if let Some(list) = config
@@ -301,7 +285,7 @@ impl SignalEngine {
             trade_tx: dummy_tx,
             data_tx: None,
             trackers,
-            strategy,
+            strategy: Box::new(strategy),
             exec_params: trade_params,
         }
     }

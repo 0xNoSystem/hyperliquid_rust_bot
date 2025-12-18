@@ -52,22 +52,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                     })}
                 </div>
                 <span className="flex flex-col">
-                    <span>
-                        <strong className="ml-4">Risk:</strong>{" "}
-                        {tradeParams.strategy.custom.risk}
-                    </span>
-                    <span>
-                        <strong className="ml-4">Stance:</strong>{" "}
-                        {tradeParams.strategy.custom.stance}
-                    </span>
-                    <span>
-                        <strong className="ml-4">Style:</strong>{" "}
-                        {tradeParams.strategy.custom.style}
-                    </span>
-                    <span>
-                        <strong className="ml-4">Trend Follow:</strong>{" "}
-                        {tradeParams.strategy.custom.followTrend ? "Yes" : "No"}
-                    </span>
+                    {tradeParams.strategy}                     
                 </span>
             </div>
             <div className="flex">

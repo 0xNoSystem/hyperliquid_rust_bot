@@ -1,6 +1,6 @@
 use crate::Error;
 use crate::signal::{IndexId, SignalEngine};
-use crate::strategy::{CustomStrategy, Strategy};
+use crate::strategy::{Strategy};
 use crate::trade_setup::TimeFrame;
 use reqwest::Client;
 use serde::Deserialize;

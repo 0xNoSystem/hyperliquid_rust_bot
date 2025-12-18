@@ -9,6 +9,7 @@ import {
     get_value,
     get_params,
     fromTimeFrame,
+    formatPrice,
 } from "../types";
 import LoadingDots from "./Loading";
 import { Link } from "react-router-dom";
@@ -19,11 +20,6 @@ interface MarketCardProps {
     onRemove: (asset: string) => void;
 }
 
-const formatPrice = (n: number) => {
-    if (n > 1 && n < 2) return n.toFixed(4);
-    if (n < 1) return n.toFixed(6);
-    return n.toFixed(2);
-};
 
 const PnlBar: React.FC<{ pnl: number }> = ({ pnl }) => {
     const w = Math.min(100, Math.abs(pnl));
@@ -66,7 +62,6 @@ const MarketCard: React.FC<MarketCardProps> = ({
         indicators,
     } = market;
     const { strategy } = params;
-    const { risk, style, stance } = strategy.custom;
 
     const price_color =
         prev > price ? "red" : prev < price ? "green" : "orange";
@@ -231,26 +226,12 @@ const MarketCard: React.FC<MarketCardProps> = ({
                 ) : (
                     <>
                         <div>
-                            <div className="text-[10px] text-white/50 uppercase">
+                            <div className="text-[12px] text-white/50 uppercase">
                                 Strategy
                             </div>
-                            <div className="truncate text-white/90">
-                                {style} / {stance}
-                            </div>
-                        </div>
-                        <div>
-                            <div className="text-[10px] text-white/50 uppercase">
-                                Risk
-                            </div>
-                            <div className="text-white/90">{risk}</div>
-                        </div>
-                        <div className="text-right">
-                            <div className="text-[10px] text-white/50 uppercase">
-                                Trend Following
-                            </div>
-                            <div className="text-white/90">
-                                {strategy.custom.followTrend ? "Yes" : "No"}
-                            </div>
+                            <p className="font-bold text-[14px]">
+                            {strategy}
+                            </p>
                         </div>
                     </>
                 )}

@@ -331,6 +331,7 @@ impl OpenPositionLocal {
             side: self.side,
             size: self.size,
             entry_px: self.entry_px,
+            open_time: self.open_time,
         }
     }
 }

@@ -35,7 +35,6 @@ pub struct IndicatorData {
     pub value: Option<Value>,
 }
 
-
 #[derive(Copy, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EditMarketInfo {

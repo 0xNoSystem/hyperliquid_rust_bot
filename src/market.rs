@@ -55,8 +55,9 @@ impl Market {
             ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
 
         //Look up needed tfs for loading
-        let mut active_tfs: HashSet<TimeFrame> = HashSet::new();
-        active_tfs.insert(trade_params.time_frame);
+        let strat_indicators = trade_params.strategy.indicators();
+        let mut active_tfs: HashSet<TimeFrame> =
+            strat_indicators.into_iter().map(|id| id.1).collect();
         if let Some(ref cfg) = config {
             for ind_id in cfg {
                 active_tfs.insert(ind_id.1);
@@ -229,25 +230,31 @@ impl Market {
                         .trade_params
                         .update_lev(lev, &self.exchange_client, asset.name.as_str(), false)
                         .await;
-                    if let Ok(lev) = upd {
-                        let _ = engine_update_tx
-                            .send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
-
-                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                            UpdateFrontend::MarketInfoEdit((
-                                asset.name.clone(),
-                                EditMarketInfo::Lev(lev),
-                            )),
-                        ));
-                    };
+                    match upd {
+                        Ok(lev) => {
+                            let _ = engine_update_tx
+                                .send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
+                            let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                UpdateFrontend::MarketInfoEdit((
+                                    asset.name.clone(),
+                                    EditMarketInfo::Lev(lev),
+                                )),
+                            ));
+                        }
+                        Err(e) => {
+                            let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                UpdateFrontend::UserError(e.to_string()),
+                            ));
+                        }
+                    }
                 }
 
                 MarketCommand::UpdateStrategy(strat) => {
-                    let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(strat));
+                    //let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(strat));
                 }
 
                 MarketCommand::EditIndicators(entry_vec) => {
-                    let mut map: TimeFrameData = HashMap::new();
+                    let mut map: TimeFrameData = HashMap::default();
                     for &entry in &entry_vec {
                         if entry.edit == EditType::Add && !self.active_tfs.contains(&entry.id.1) {
                             let tf_data = load_candles(

@@ -342,7 +342,7 @@ impl Executor {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 enum SendUpdate {
     Trade(TradeInfo),
     Position(Option<OpenPositionLocal>),

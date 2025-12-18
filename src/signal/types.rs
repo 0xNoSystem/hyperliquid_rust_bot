@@ -11,6 +11,7 @@ use kwant::indicators::{
 };
 
 use crate::{IndicatorData, MAX_HISTORY, Side, TimeFrame, get_time_now};
+use log::warn;
 
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,7 @@ pub struct OpenPosInfo {
     pub side: Side,
     pub size: f64,
     pub entry_px: f64,
+    pub open_time: u64,
 }
 
 impl ExecParams {
@@ -36,6 +38,14 @@ impl ExecParams {
             lev,
             sz_decimals,
             open_pos: None,
+        }
+    }
+
+    pub fn free_margin(&self) -> f64 {
+        if let Some(open) = self.open_pos {
+            self.margin - ((open.entry_px * open.size)/self.lev as f64)
+        } else {
+            self.margin
         }
     }
 }
@@ -76,6 +86,7 @@ pub enum IndicatorKind {
 pub struct Handler {
     pub indicator: Box<dyn Indicator>,
     pub is_active: bool,
+    pub closed: bool,
 }
 
 impl Handler {
@@ -83,6 +94,7 @@ impl Handler {
         Handler {
             indicator: match_kind(indicator),
             is_active: true,
+            closed: false,
         }
     }
 
@@ -94,8 +106,10 @@ impl Handler {
     pub fn update(&mut self, price: Price, after_close: bool) {
         if !after_close {
             self.indicator.update_before_close(price);
+            self.closed = false
         } else {
             self.indicator.update_after_close(price);
+            self.closed = true;
         }
     }
     pub fn get_value(&self) -> Option<Value> {
@@ -143,7 +157,8 @@ pub struct Tracker {
     pub price_data: History,
     pub indicators: HashMap<IndicatorKind, Handler, BuildHasherDefault<FxHasher>>,
     tf: TimeFrame,
-    next_close: u64,
+    prev_close: Option<u64>,
+    next_close: Option<u64>,
 }
 
 impl Tracker {
@@ -152,15 +167,28 @@ impl Tracker {
             price_data: Box::new(ArrayDeque::new()),
             indicators: HashMap::default(),
             tf,
-            next_close: Self::calc_next_close(tf),
+            prev_close: None,
+            next_close: None,
         }
     }
-
     pub fn digest(&mut self, price: Price) {
-        let time = get_time_now();
+        let ts = price.close_time;
+        let tf_ms = self.tf.to_millis();
 
-        if time >= self.next_close {
-            self.next_close = Self::calc_next_close(self.tf);
+        let mut next = match self.next_close {
+            Some(n) => n,
+            None => {
+                self.update_indicators(price, false);
+                self.next_close = Some(ts);
+                return;
+            }
+        };
+        if ts >= next {
+            while ts >= next {
+                self.prev_close = Some(next);
+                next += tf_ms;
+            }
+            self.next_close = Some(next);
             self.price_data.push_back(price);
             self.update_indicators(price, true);
         } else {
@@ -174,20 +202,22 @@ impl Tracker {
         }
     }
 
-    fn calc_next_close(tf: TimeFrame) -> u64 {
-        let now = get_time_now();
-
-        let tf_ms = tf.to_millis();
-        ((now / tf_ms) + 1) * tf_ms
-    }
-
     pub fn load<I: IntoIterator<Item = Price>>(&mut self, price_data: I) {
         let buffer: Vec<Price> = price_data.into_iter().collect();
+        if buffer.len() == 0 {
+            warn!("LOAD BUFFER IS EMPTY!!!");
+            return;
+        }
+        let last = buffer.last().unwrap();
         let slice = buffer.as_slice();
 
         for handler in self.indicators.values_mut() {
             handler.load(slice);
         }
+
+        let tf_ms = self.tf.to_millis();
+        self.prev_close = Some((last.close_time / tf_ms) * tf_ms);
+        self.next_close = Some(self.prev_close.unwrap() + tf_ms);
 
         self.price_data.extend(buffer);
     }
@@ -209,11 +239,11 @@ impl Tracker {
         }
     }
 
-    pub fn get_active_values(&self) -> Vec<Value> {
-        let mut values = Vec::new();
-        for handler in self.indicators.values() {
+    pub fn get_active_values(&self) -> ValuesMap {
+        let mut values: ValuesMap = HashMap::default();
+        for (kind, handler) in self.indicators.iter() {
             if let Some(val) = handler.get_value() {
-                values.push(val);
+                values.insert((*kind, self.tf), val);
             }
         }
         values
@@ -221,7 +251,7 @@ impl Tracker {
 
     pub fn get_indicators_data(&self) -> Vec<IndicatorData> {
         let mut values = Vec::new();
-        for (kind, handler) in &self.indicators {
+        for (kind, handler) in self.indicators.iter() {
             values.push(IndicatorData {
                 id: (*kind, self.tf),
                 value: handler.get_value(),
@@ -238,7 +268,7 @@ impl Tracker {
     }
 }
 
-pub type TimeFrameData = HashMap<TimeFrame, Vec<Price>>;
+pub type TimeFrameData = HashMap<TimeFrame, Vec<Price>, BuildHasherDefault<FxHasher>>;
 
 #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -253,4 +283,12 @@ pub enum EditType {
     Toggle,
     Add,
     Remove,
+}
+
+pub type ValuesMap = HashMap<IndexId, Value, BuildHasherDefault<FxHasher>>;
+
+pub struct TimedValue {
+    pub value: Value,
+    pub on_close: bool,
+    pub ts: u64,
 }
