@@ -16,6 +16,7 @@ import type {
     assetMeta,
     assetPrice,
 } from "../types";
+import {API_URL, WS_ENDPOINT} from "../consts";
 import { market_add_info } from "../types";
 
 const CACHED_MARKETS_KEY = "cachedMarkets.v1";
@@ -79,7 +80,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     /** ------------ util functions (stable) ------------ **/
     const sendCommand = useCallback(async (body: unknown) => {
-        const res = await fetch("http://localhost:8090/command", {
+        const res = await fetch(`${API_URL}/command`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -327,7 +328,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             if (!activeRef.current) return;
             console.log("WS connect");
 
-            const ws = new WebSocket("ws://localhost:8090/ws");
+            const ws = new WebSocket(WS_ENDPOINT);
             wsRef.current = ws;
 
             const onOpen = () => {

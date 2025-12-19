@@ -6,6 +6,7 @@ import MarketCard from "./MarketCard";
 import { AddMarket } from "./AddMarket";
 import { CachedMarket } from "./CachedMarket";
 import { useWebSocketContext } from "../context/WebSocketContext";
+import { ErrorBanner } from "./ErrorBanner";
 import { BackgroundFX } from "../components/BackgroundFX";
 import LoadingDots from "./Loading";
 
@@ -221,27 +222,8 @@ export default function MarketsPage() {
                 </main>
             </div>
             {/* Error toast */}
-            <AnimatePresence>
-                {errorMsg && (
-                    <motion.div
-                        initial={{ y: -16, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        exit={{ y: -16, opacity: 0 }}
-                        className="fixed top-6 left-1/2 z-50 -translate-x-1/2"
-                    >
-                        <div className="flex items-center gap-2 rounded-md border border-red-500/40 bg-[#2A1010] px-3 py-2 text-red-100 shadow">
-                            <AlertCircle className="h-4 w-4" />
-                            <span className="text-sm">{errorMsg}</span>
-                            <button
-                                onClick={dismissError}
-                                className="ml-2 rounded-md px-2 py-1 hover:bg-white/10"
-                            >
-                                <X className="h-4 w-4" />
-                            </button>
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+            <ErrorBanner message={errorMsg} onDismiss={dismissError} />            
+
             {/* Add Market modal */}
             {showAdd && (
                 <div className="fixed inset-0 z-50">

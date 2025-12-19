@@ -12,6 +12,7 @@ import {
     num,
     computeUPnL,
 } from "../types";
+import {MAX_DECIMALS} from "../consts";
 import LoadingDots from "./Loading";
 import { Link } from "react-router-dom";
 
@@ -65,7 +66,7 @@ const MarketCard: React.FC<MarketCardProps> = ({
     } = market;
     const { strategy } = params;
     const szDecimals = assetMeta ? assetMeta.szDecimals : 3;
-    const pxDecimals = 6 - szDecimals;
+    const pxDecimals = MAX_DECIMALS - szDecimals;
     const format = (n: number) => n.toFixed(pxDecimals);
 
     const price_color = "orange";

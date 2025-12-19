@@ -261,7 +261,7 @@ impl Bot {
 
     pub async fn start(mut self, app_tx: UnboundedSender<UpdateFrontend>) -> Result<(), Error> {
         use BotEvent::*;
-        use MarketUpdate::*;
+        use MarketUpdate as M;
         use UpdateFrontend::*;
 
         self.app_tx = Some(app_tx.clone());
@@ -310,12 +310,12 @@ impl Bot {
         tokio::spawn(async move {
             while let Some(market_update) = update_rv.recv().await {
                 match market_update {
-                    InitMarket(info) => {
+                    M::InitMarket(info) => {
                         let mut session_guard = session_adder.lock().await;
                         session_guard.insert(info.asset.clone(), info.clone());
                         let _ = app_tx.send(ConfirmMarket(info));
                     }
-                    MarginUpdate(asset_margin) => {
+                    M::MarginUpdate(asset_margin) => {
                         let result = {
                             let mut book = margin_market_edit.lock().await;
                             book.update_asset(asset_margin.clone()).await
@@ -330,7 +330,7 @@ impl Bot {
                             }
                         }
                     }
-                    RelayToFrontend(cmd) => {
+                    M::RelayToFrontend(cmd) => {
                         let _ = app_tx.send(cmd);
                     }
                 }

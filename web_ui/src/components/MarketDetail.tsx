@@ -9,6 +9,8 @@ import TradingViewWidget from "./TradingViewWidget";
 import { BackgroundFX } from "./BackgroundFX";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatUTC } from "../chart/utils";
+import {MAX_DECIMALS} from "../consts";
+import { ErrorBanner } from "./ErrorBanner";
 
 import {
     decompose,
@@ -107,7 +109,7 @@ const kindKeys = Object.keys(indicatorParamLabels) as Array<
 
 export default function MarketDetail() {
     const { asset: routeAsset } = useParams<{ asset: string }>();
-    const { markets, universe, sendCommand, requestToggleMarket, totalMargin } =
+    const { markets, universe, sendCommand, requestToggleMarket, totalMargin, errorMsg, dismissError } =
         useWebSocketContext();
     const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
 
@@ -135,6 +137,8 @@ export default function MarketDetail() {
         () => universe.find((u) => u.name === market?.asset),
         [universe, market]
     );
+
+    const pxDecimals = MAX_DECIMALS - meta.szDecimals;
 
     /* ----- local state ----- */
     const [lev, setLev] = useState<number>(market ? market.lev : 1);
@@ -246,7 +250,8 @@ export default function MarketDetail() {
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
-        <div className="relative z-1 min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white">
+        <div className="relative z-40 min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white">
+            <ErrorBanner message={errorMsg} onDismiss={dismissError} />
             <div className="mt-10 mb-1 flex items-center justify-around">
                 <div className="relative right-[3vw] flex items-center gap-3">
                     <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>
@@ -292,7 +297,7 @@ export default function MarketDetail() {
                             <div className="mt-1 text-2xl">
                                 {market.price == null
                                     ? "—"
-                                    : `$${px(market.price)}`}
+                                    : `$${num(market.price, pxDecimals)}`}
                             </div>
                         </div>
 
@@ -375,8 +380,15 @@ export default function MarketDetail() {
 
                         {/* Margin */}
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        {(market.margin * market.lev < 10) &&
+                        (<>
+                            <img src="   https://cdn-icons-png.flaticon.com/512/14022/14022507.png " width="12" height="12" alt="" title="" class="img-small"/>    
+                            <p className="text-[12px] text-orange-500">MAX ORDER VALUE is lower than 10$, no orders can be passed</p>
+                           </> 
+                        )
+                        }
                             <div
-                                className="cursor-pointer text-[10px] text-white/50 uppercase"
+                                className="cursor-pointer text-[12px] text-white/50 uppercase"
                                 onClick={() =>
                                     setMargin(totalMargin + market.margin)
                                 }
@@ -511,7 +523,7 @@ export default function MarketDetail() {
                                         <span
                                             className={`text-center text-xl font-bold text-${indicatorColors[kindKey]}-200`}
                                         >
-                                            {value ? get_value(value) : "N/A"}
+                                            {value ? get_value(value,pxDecimals) : "N/A"}
                                         </span>
                                     </div>
                                 );
