@@ -7,7 +7,7 @@ use hyperliquid_rust_sdk::{
 };
 use log::{info, warn};
 use std::collections::HashMap;
-use tokio::time::{Duration, interval, sleep};
+use tokio::time::{Duration, interval};
 
 use crate::helper::*;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -359,14 +359,7 @@ impl Bot {
 
                         UserData::Fills(fills_vec) =>{
 
-                        let mut fills_map: HashMap<
-                            String,
-                            HashMap<
-                                u64,
-                                Vec<HLTradeInfo>,
-                                BuildHasherDefault<FxHasher>
-                            >,
-                            BuildHasherDefault<FxHasher>> = HashMap::default();
+                        let mut fills_map: FillsMap = HashMap::default();
 
                         for trade in fills_vec.into_iter(){
                             let coin = trade.coin.clone();
@@ -478,6 +471,12 @@ impl Bot {
         }
     }
 }
+
+type FillsMap = HashMap<
+    String,
+    HashMap<u64, Vec<HLTradeInfo>, BuildHasherDefault<FxHasher>>,
+    BuildHasherDefault<FxHasher>,
+>;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

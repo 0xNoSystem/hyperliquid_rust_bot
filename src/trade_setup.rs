@@ -2,7 +2,7 @@ use hyperliquid_rust_sdk::{Error, ExchangeClient, ExchangeResponseStatus};
 use log::info;
 use std::fmt;
 
-use crate::strategy::Strategy;
+use crate::Strategy;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

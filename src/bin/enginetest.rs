@@ -6,12 +6,10 @@
 use std::{env, fs, str::FromStr};
 
 use dotenv::dotenv;
-use hyperliquid_rust_bot::strategy::{
-    CustomStrategy, Risk, RsiEmaStrategy, Stance, Strat, Strategy, Style,
-};
+
 use hyperliquid_rust_bot::{
     AddMarketInfo, AssetMargin, BaseUrl, Bot, BotEvent, BotToMarket, EditType, Entry, IndexId,
-    IndicatorKind, MARKETS, MarginAllocation, MarketCommand, TimeFrame, TradeParams,
+    IndicatorKind, MARKETS, MarginAllocation, MarketCommand, Strategy, TimeFrame, TradeParams,
     UpdateFrontend, Wallet,
 };
 use hyperliquid_rust_sdk::Error;
@@ -35,7 +33,7 @@ async fn main() -> Result<(), Error> {
         BaseUrl::Localhost => dotenv::from_filename(".env.test").ok(),
     };
     let wallet = load_wallet(BaseUrl::Mainnet).await?;
-    let strat = Strategy::RsiEma(RsiEmaStrategy::init());
+    let strat = Strategy::RsiEmaScalp;
 
     let trade_params = TradeParams {
         strategy: strat,

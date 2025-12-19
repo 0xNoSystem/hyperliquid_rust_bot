@@ -142,12 +142,13 @@ impl Executor {
         Ok(())
     }
 
-    async fn is_active(&self) -> bool {
-        let guard = self.open_position.lock().await;
-        guard.is_some() || !self.resting_orders.is_empty()
-    }
-
-    fn into_hl_order(asset: &str, sz: f64, side: Side, limit: Option<Limit>, intent: PositionOp) -> HlOrder<'_> {
+    fn into_hl_order(
+        asset: &str,
+        sz: f64,
+        side: Side,
+        limit: Option<Limit>,
+        intent: PositionOp,
+    ) -> HlOrder<'_> {
         let is_long = side == Side::Long;
 
         if let Some(limit) = limit {
@@ -259,7 +260,7 @@ impl Executor {
                         .resting_orders
                         .insert(order_response.oid, order_response);
                 }
-                Err(e) => warn!("{}", e.to_string()),
+                Err(e) => warn!("{}", e),
             }
         }
     }
@@ -292,14 +293,15 @@ impl Executor {
 
                     if let Some((side, size)) = order_params {
                         let asset = self.asset.name.clone();
-                        let trade = Self::into_hl_order(&asset, size, side, order.limit, order.action);
+                        let trade =
+                            Self::into_hl_order(&asset, size, side, order.limit, order.action);
                         let trigger = order.is_tpsl();
                         match self.open_trade(trade, order.action, trigger).await {
                             Ok(order_response) => {
                                 self.resting_orders
                                     .insert(order_response.oid, order_response);
                             }
-                            Err(e) => warn!("{}", e.to_string()),
+                            Err(e) => warn!("{}", e),
                         }
                     }
                 }

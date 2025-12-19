@@ -4,6 +4,7 @@ mod consts;
 mod frontend;
 mod helper;
 mod market;
+mod strategy;
 mod trade_setup;
 mod wallet;
 
@@ -11,9 +12,9 @@ pub mod bot;
 mod exec;
 pub mod margin;
 pub mod signal;
-pub mod strategy;
 
 pub use assets::MARKETS;
+pub use strategy::*;
 //pub use backtest::BackTester;
 pub use bot::{Bot, BotEvent, BotToMarket};
 pub use consts::*;

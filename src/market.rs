@@ -9,10 +9,9 @@ use hyperliquid_rust_sdk::{AssetMeta, Error, ExchangeClient, InfoClient, Message
 use crate::signal::{
     EditType, EngineCommand, Entry, ExecParam, ExecParams, IndexId, SignalEngine, TimeFrameData,
 };
-use crate::strategy::Strategy;
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, UpdateFrontend};
 use crate::{ExecCommand, ExecControl, ExecEvent, Executor, load_candles, parse_candle};
-use crate::{MAX_HISTORY, MarketInfo, Wallet};
+use crate::{MAX_HISTORY, MarketInfo, Strategy, Wallet};
 
 use crate::{OpenPositionLocal, TimeFrame, TradeInfo, TradeParams};
 
@@ -66,7 +65,7 @@ impl Market {
 
         //setup channels
         let (market_tx, market_rv) = channel::<MarketCommand>(7);
-        let (exec_tx, exec_rv) = bounded::<ExecCommand>(5);
+        let (exec_tx, exec_rv) = bounded::<ExecCommand>(2);
         let (engine_tx, engine_rv) = unbounded_channel::<EngineCommand>();
 
         let senders = MarketSenders {

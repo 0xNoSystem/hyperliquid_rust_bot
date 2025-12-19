@@ -81,41 +81,39 @@ impl Strat for RsiEmaStrategy {
         let open_pos = params.open_pos;
 
         let max_size = roundf!((margin * lev) / price, sz_decimals);
-        
+
         let rsi_1h_value = match snapshot.get(&self.rsi_1h)?.value {
             RsiValue(v) => v,
             _ => return None,
         };
 
-        
         let rsi_5m_value = match snapshot.get(&self.rsi_5m)?.value {
             RsiValue(v) => v,
             _ => return None,
         };
 
-        let (fast, _slow, uptrend) = match snapshot.get(&self.ema_cross_15m)?.value{
+        let (fast, _slow, uptrend) = match snapshot.get(&self.ema_cross_15m)?.value {
             EmaCrossValue { short, long, trend } => (short, long, trend),
             _ => return None,
         };
         let order = (|| {
-            if let Some(open) = open_pos{
-            if !self.limit_close_set
-                && (rsi_5m_value >= 50.0
-                || ((now - open.open_time > timedelta!(Min15, 1)) && rsi_1h_value < 35.0)
-                    )
-            {
-                self.active_window_start = None;
-                self.limit_close_set = true;
-                return Some(EngineOrder {
-                    action: PositionOp::Close,
-                    size: roundf!(open.size, sz_decimals),
-                    limit: Some(Limit {
-                        limit_px: roundf!(price * 1.003, px_decimals),
-                        order_type: ClientOrderLocal::ClientLimit(Tif::Gtc),
-                    }),
-                });
-            }
-            }else{
+            if let Some(open) = open_pos {
+                if !self.limit_close_set
+                    && (rsi_5m_value >= 50.0
+                        || ((now - open.open_time > timedelta!(Min15, 1)) && rsi_1h_value < 35.0))
+                {
+                    self.active_window_start = None;
+                    self.limit_close_set = true;
+                    return Some(EngineOrder {
+                        action: PositionOp::Close,
+                        size: roundf!(open.size, sz_decimals),
+                        limit: Some(Limit {
+                            limit_px: roundf!(price * 1.003, px_decimals),
+                            order_type: ClientOrderLocal::ClientLimit(Tif::Gtc),
+                        }),
+                    });
+                }
+            } else {
                 self.limit_close_set = false;
             }
             let start = self.active_window_start?;
@@ -143,7 +141,7 @@ impl Strat for RsiEmaStrategy {
             }
 
             let open = open_pos?;
-                        None
+            None
         })();
 
         if self.active_window_start.is_none() && open_pos.is_none() {

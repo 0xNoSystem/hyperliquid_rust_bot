@@ -43,7 +43,7 @@ impl ExecParams {
 
     pub fn free_margin(&self) -> f64 {
         if let Some(open) = self.open_pos {
-            self.margin - ((open.entry_px * open.size)/self.lev as f64)
+            self.margin - ((open.entry_px * open.size) / self.lev as f64)
         } else {
             self.margin
         }
@@ -82,19 +82,16 @@ pub enum IndicatorKind {
     Sma(u32),
 }
 
-type IndicatorBuffer = Box<ArrayDeque<ArchivedValue, MAX_HISTORY, Wrapping>>;
-#[derive(Debug,Copy, Clone, Serialize, Deserialize)]
-pub struct ArchivedValue{
+type IndicatorBuffer = Box<ArrayDeque<ArchivedValue, { MAX_HISTORY }, Wrapping>>;
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct ArchivedValue {
     pub time: u64,
     pub value: Value,
 }
-impl ArchivedValue{
+impl ArchivedValue {
     #[inline]
-    fn new(time: u64, value: Value) -> Self{
-        Self{
-            time,
-            value,
-        }
+    fn new(time: u64, value: Value) -> Self {
+        Self { time, value }
     }
 }
 
@@ -121,9 +118,9 @@ impl Handler {
         self.is_active = !self.is_active;
         self.is_active
     }
-    
+
     #[inline]
-    pub fn update_before_close(&mut self, price: Price){
+    pub fn update_before_close(&mut self, price: Price) {
         self.indicator.update_before_close(price);
         self.closed = false
     }
@@ -131,7 +128,7 @@ impl Handler {
     pub fn update_after_close(&mut self, price: Price, prev_close: u64) {
         self.indicator.update_after_close(price);
         self.closed = true;
-        if let Some(v) = self.indicator.get_last(){
+        if let Some(v) = self.indicator.get_last() {
             self.history.push_back(ArchivedValue::new(prev_close, v));
         }
     }
@@ -146,7 +143,7 @@ impl Handler {
         self.load_slice(data_vec.as_slice());
     }
 
-    pub fn load_slice(&mut self, price_data: &[Price]){
+    pub fn load_slice(&mut self, price_data: &[Price]) {
         self.indicator.load(price_data);
     }
 
@@ -154,7 +151,6 @@ impl Handler {
         self.indicator.reset();
     }
 }
-
 
 pub type IndexId = (IndicatorKind, TimeFrame);
 
@@ -178,7 +174,7 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
     }
 }
 
-type History = Box<ArrayDeque<Price, MAX_HISTORY, Wrapping>>;
+type History = Box<ArrayDeque<Price, { MAX_HISTORY }, Wrapping>>;
 #[derive(Debug)]
 pub struct Tracker {
     pub price_data: History,
@@ -223,7 +219,6 @@ impl Tracker {
         }
     }
 
-
     fn update_indicators_after_close(&mut self, price: Price, prev_close: u64) {
         for handler in &mut self.indicators.values_mut() {
             handler.update_after_close(price, prev_close);
@@ -239,7 +234,7 @@ impl Tracker {
 
     pub fn load<I: IntoIterator<Item = Price>>(&mut self, price_data: I) {
         let buffer: Vec<Price> = price_data.into_iter().collect();
-        if buffer.len() == 0 {
+        if buffer.is_empty() {
             warn!("LOAD BUFFER IS EMPTY!!!");
             return;
         }
@@ -278,7 +273,7 @@ impl Tracker {
         let mut values: ValuesMap = HashMap::default();
         for (kind, handler) in self.indicators.iter() {
             if let Some(value) = handler.get_value() {
-                let tv = TimedValue{
+                let tv = TimedValue {
                     value,
                     on_close: handler.closed,
                     ts: self.prev_close.unwrap_or(0),
