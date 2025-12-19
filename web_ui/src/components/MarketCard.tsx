@@ -205,7 +205,7 @@ const MarketCard: React.FC<MarketCardProps> = ({
 
                         return (
                             <div
-                                className={`flex cursor-pointer flex-col rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] ${indicatorColors[kindKey]}`}
+                                className={`flex cursor-pointer flex-col rounded-md border border-white/10 px-2.5 py-1 text-[11px] ${indicatorColors[kindKey]}`}
                                 title={get_params(kind)}
                             >
                                 <span key={i}>

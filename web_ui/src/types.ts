@@ -277,14 +277,14 @@ export const indicatorLabels: Record<string, string> = {
 };
 
 export const indicatorColors: Record<string, string> = {
-    rsi: "bg-green-800 text-green-200",
-    smaOnRsi: "bg-indigo-800 text-indigo-200",
-    stochRsi: "bg-purple-800 text-purple-200",
-    adx: "bg-yellow-800 text-yellow-200",
-    atr: "bg-red-800 text-red-200",
-    ema: "bg-blue-800 text-blue-200",
-    emaCross: "bg-pink-800 text-pink-200",
-    sma: "bg-gray-800 text-gray-200",
+    rsi: "bg-green-800/30 text-green-200",
+    smaOnRsi: "bg-indigo-800/30 text-indigo-200",
+    stochRsi: "bg-purple-800/30 text-purple-200",
+    adx: "bg-yellow-800/30 text-yellow-200",
+    atr: "bg-red-800/30 text-red-200",
+    ema: "bg-blue-500/30 text-white",
+    emaCross: "bg-orange-800/30 text-white",
+    sma: "bg-gray-800/30 text-gray-200",
 };
 
 export interface assetMeta {

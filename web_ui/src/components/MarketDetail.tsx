@@ -138,7 +138,7 @@ export default function MarketDetail() {
         [universe, market]
     );
 
-    const pxDecimals = MAX_DECIMALS - meta.szDecimals;
+    const pxDecimals = meta ? MAX_DECIMALS - meta.szDecimals : 3;
 
     /* ----- local state ----- */
     const [lev, setLev] = useState<number>(market ? market.lev : 1);
@@ -496,10 +496,7 @@ export default function MarketDetail() {
                                     <div className="group flex flex-col items-center gap-2 rounded-lg border border-white/10 px-2.5 py-1 text-[11px]">
                                         <div
                                             key={`${kindKey}-${fromTimeFrame(timeframe)}-${i}`}
-                                            className={`group flex items-center gap-4 rounded-lg border border-white/10 px-2.5 py-1 text-[13px] bg-${
-                                                indicatorColors[kindKey] ||
-                                                "bg-white/10"
-                                            }-800 `}
+                                            className={`group flex items-center gap-4 rounded-lg border border-white/10 px-2.5 py-1 text-[13px] bg-${indicatorColors[kindKey] ||"bg-white/10"}-800 `}
                                             title={JSON.stringify(kind)}
                                         >
                                             <span className="font-medium">

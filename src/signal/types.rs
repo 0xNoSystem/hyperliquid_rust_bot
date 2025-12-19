@@ -82,11 +82,28 @@ pub enum IndicatorKind {
     Sma(u32),
 }
 
+type IndicatorBuffer = Box<ArrayDeque<ArchivedValue, MAX_HISTORY, Wrapping>>;
+#[derive(Debug,Copy, Clone, Serialize, Deserialize)]
+pub struct ArchivedValue{
+    pub time: u64,
+    pub value: Value,
+}
+impl ArchivedValue{
+    #[inline]
+    fn new(time: u64, value: Value) -> Self{
+        Self{
+            time,
+            value,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Handler {
     pub indicator: Box<dyn Indicator>,
     pub is_active: bool,
     pub closed: bool,
+    pub history: IndicatorBuffer,
 }
 
 impl Handler {
@@ -95,30 +112,42 @@ impl Handler {
             indicator: match_kind(indicator),
             is_active: true,
             closed: false,
+            history: Box::new(ArrayDeque::default()),
         }
     }
 
+    #[inline]
     fn toggle(&mut self) -> bool {
         self.is_active = !self.is_active;
         self.is_active
     }
+    
+    #[inline]
+    pub fn update_before_close(&mut self, price: Price){
+        self.indicator.update_before_close(price);
+        self.closed = false
+    }
 
-    pub fn update(&mut self, price: Price, after_close: bool) {
-        if !after_close {
-            self.indicator.update_before_close(price);
-            self.closed = false
-        } else {
-            self.indicator.update_after_close(price);
-            self.closed = true;
+    pub fn update_after_close(&mut self, price: Price, prev_close: u64) {
+        self.indicator.update_after_close(price);
+        self.closed = true;
+        if let Some(v) = self.indicator.get_last(){
+            self.history.push_back(ArchivedValue::new(prev_close, v));
         }
     }
+
+    #[inline]
     pub fn get_value(&self) -> Option<Value> {
         self.indicator.get_last()
     }
 
     pub fn load<'a, I: IntoIterator<Item = &'a Price>>(&mut self, price_data: I) {
         let data_vec: Vec<Price> = price_data.into_iter().copied().collect();
-        self.indicator.load(&data_vec);
+        self.load_slice(data_vec.as_slice());
+    }
+
+    pub fn load_slice(&mut self, price_data: &[Price]){
+        self.indicator.load(price_data);
     }
 
     pub fn reset(&mut self) {
@@ -126,7 +155,6 @@ impl Handler {
     }
 }
 
-unsafe impl Send for Handler {}
 
 pub type IndexId = (IndicatorKind, TimeFrame);
 
@@ -151,7 +179,6 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
 }
 
 type History = Box<ArrayDeque<Price, MAX_HISTORY, Wrapping>>;
-
 #[derive(Debug)]
 pub struct Tracker {
     pub price_data: History,
@@ -164,7 +191,7 @@ pub struct Tracker {
 impl Tracker {
     pub fn new(tf: TimeFrame) -> Self {
         Tracker {
-            price_data: Box::new(ArrayDeque::new()),
+            price_data: Box::new(ArrayDeque::default()),
             indicators: HashMap::default(),
             tf,
             prev_close: None,
@@ -178,7 +205,7 @@ impl Tracker {
         let mut next = match self.next_close {
             Some(n) => n,
             None => {
-                self.update_indicators(price, false);
+                self.update_indicators_before_close(price);
                 self.next_close = Some(ts);
                 return;
             }
@@ -190,15 +217,23 @@ impl Tracker {
             }
             self.next_close = Some(next);
             self.price_data.push_back(price);
-            self.update_indicators(price, true);
+            self.update_indicators_after_close(price, self.prev_close.unwrap());
         } else {
-            self.update_indicators(price, false);
+            self.update_indicators_before_close(price);
         }
     }
 
-    fn update_indicators(&mut self, price: Price, after_close: bool) {
+
+    fn update_indicators_after_close(&mut self, price: Price, prev_close: u64) {
         for handler in &mut self.indicators.values_mut() {
-            handler.update(price, after_close);
+            handler.update_after_close(price, prev_close);
+        }
+    }
+
+    #[inline]
+    fn update_indicators_before_close(&mut self, price: Price) {
+        for handler in &mut self.indicators.values_mut() {
+            handler.update_before_close(price);
         }
     }
 
@@ -212,7 +247,7 @@ impl Tracker {
         let slice = buffer.as_slice();
 
         for handler in self.indicators.values_mut() {
-            handler.load(slice);
+            handler.load_slice(slice);
         }
 
         let tf_ms = self.tf.to_millis();
@@ -242,8 +277,13 @@ impl Tracker {
     pub fn get_active_values(&self) -> ValuesMap {
         let mut values: ValuesMap = HashMap::default();
         for (kind, handler) in self.indicators.iter() {
-            if let Some(val) = handler.get_value() {
-                values.insert((*kind, self.tf), val);
+            if let Some(value) = handler.get_value() {
+                let tv = TimedValue{
+                    value,
+                    on_close: handler.closed,
+                    ts: self.prev_close.unwrap_or(0),
+                };
+                values.insert((*kind, self.tf), tv);
             }
         }
         values
@@ -285,8 +325,9 @@ pub enum EditType {
     Remove,
 }
 
-pub type ValuesMap = HashMap<IndexId, Value, BuildHasherDefault<FxHasher>>;
+pub type ValuesMap = HashMap<IndexId, TimedValue, BuildHasherDefault<FxHasher>>;
 
+#[derive(Debug, Copy, Clone)]
 pub struct TimedValue {
     pub value: Value,
     pub on_close: bool,

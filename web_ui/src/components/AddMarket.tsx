@@ -138,7 +138,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
         "px-5 py-2 border border-white bg-gray-600 text-white rounded hover:bg-gray-500 cursor-pointer";
 
     return (
-        <div className="fixed inset-0 z-50 flex scale-[0.88] transform items-center justify-center backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex scale-[0.92] transform items-center justify-center backdrop-blur-sm">
             <form
                 onSubmit={handleSubmit}
                 className="relative w-full max-w-lg scale-90 space-y-6 rounded-2xl bg-gray-600 p-8 shadow-2xl"

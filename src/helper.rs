@@ -70,12 +70,10 @@ async fn candles_snapshot(
             .parse::<f64>()
             .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
 
-        /*
-        let v = candle
+        let vlm = candle
             .vlm
             .parse::<f64>()
             .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
-        */
 
         res.push(Price {
             high: h,
@@ -84,6 +82,7 @@ async fn candles_snapshot(
             close: c,
             open_time: candle.time_open,
             close_time: candle.time_close,
+            vlm,
         });
     }
     Ok(res)
@@ -157,6 +156,10 @@ pub fn parse_candle(candle: CandleData) -> Result<Price, Error> {
         .close
         .parse::<f64>()
         .map_err(|e| Error::GenericParse(format!("Failed to parse close: {}", e)))?;
+    let vlm = candle
+        .volume
+        .parse::<f64>()
+        .map_err(|e| Error::GenericParse(format!("Failed to parse vlm: {}", e)))?;
 
     Ok(Price {
         high: h,
@@ -165,6 +168,7 @@ pub fn parse_candle(candle: CandleData) -> Result<Price, Error> {
         close: c,
         open_time: candle.time_open,
         close_time: candle.time_close,
+        vlm,
     })
 }
 

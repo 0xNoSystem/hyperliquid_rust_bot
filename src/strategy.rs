@@ -82,19 +82,19 @@ impl Strat for RsiEmaStrategy {
 
         let max_size = roundf!((margin * lev) / price, sz_decimals);
         
-        let rsi_1h_value = match snapshot.get(&self.rsi_1h)? {
-            RsiValue(v) => *v,
+        let rsi_1h_value = match snapshot.get(&self.rsi_1h)?.value {
+            RsiValue(v) => v,
             _ => return None,
         };
 
         
-        let rsi_5m_value = match snapshot.get(&self.rsi_5m)? {
-            RsiValue(v) => *v,
+        let rsi_5m_value = match snapshot.get(&self.rsi_5m)?.value {
+            RsiValue(v) => v,
             _ => return None,
         };
 
-        let (fast, _slow, uptrend) = match snapshot.get(&self.ema_cross_15m)? {
-            EmaCrossValue { short, long, trend } => (*short, *long, *trend),
+        let (fast, _slow, uptrend) = match snapshot.get(&self.ema_cross_15m)?.value{
+            EmaCrossValue { short, long, trend } => (short, long, trend),
             _ => return None,
         };
         let order = (|| {
