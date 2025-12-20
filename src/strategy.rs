@@ -1,11 +1,11 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
-use crate::strats::*;
 use crate::signal::{ExecParams, ValuesMap};
+use crate::strats::*;
 use crate::{
-    EngineOrder, IndexId, IndicatorKind, MAX_DECIMALS, MIN_ORDER_VALUE,
-    Tif, TimeFrame, Value, roundf, timedelta,
+    EngineOrder, IndexId, IndicatorKind, MAX_DECIMALS, MIN_ORDER_VALUE, Tif, TimeFrame, Value,
+    roundf, timedelta,
 };
 use TimeFrame::*;
 use Value::*;
@@ -26,12 +26,12 @@ impl Strategy {
             S::SrsiAdxScalp => SrsiAdxScalp::required_indicators_static(),
         }
     }
-    
-    pub fn init(&self) -> Box<dyn Strat>{
+
+    pub fn init(&self) -> Box<dyn Strat> {
         use Strategy as S;
         match self {
             S::RsiEmaScalp => Box::new(RsiEmaStrategy::init()),
-            S::SrsiAdxScalp =>Box::new(SrsiAdxScalp::init()),
+            S::SrsiAdxScalp => Box::new(SrsiAdxScalp::init()),
         }
     }
 }
@@ -47,7 +47,7 @@ pub trait Strat {
     fn required_indicators(&self) -> Vec<IndexId>;
 }
 
-pub trait NeedsIndicators{
+pub trait NeedsIndicators {
     // must match required_indicators_static
     fn required_indicators_static() -> Vec<IndexId>;
 }

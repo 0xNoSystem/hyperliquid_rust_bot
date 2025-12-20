@@ -80,7 +80,7 @@ impl Market {
         };
 
         let lev = trade_params.lev.min(asset.max_leverage);
-        let exec_params = ExecParams::new(margin, lev, asset.sz_decimals);
+        let exec_params = ExecParams::new(margin, lev);
 
         Ok((
             Market {

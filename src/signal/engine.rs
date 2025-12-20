@@ -4,7 +4,7 @@ use std::hash::BuildHasherDefault;
 
 use log::info;
 
-use kwant::indicators::{Price};
+use kwant::indicators::Price;
 
 use crate::strategy::{Strat, Strategy};
 use crate::trade_setup::{TimeFrame, TradeParams};
@@ -249,10 +249,7 @@ impl SignalEngine {
         //Update
     }
 
-    pub fn new_backtest(
-        trade_params: ExecParams,
-        strategy: Strategy,
-    ) -> Self {
+    pub fn new_backtest(trade_params: ExecParams, strategy: Strategy) -> Self {
         let strategy = strategy.init();
         let required_indicators = strategy.required_indicators();
 

@@ -26,11 +26,10 @@ impl RsiEmaStrategy {
             limit_close_set: false,
         }
     }
-
 }
 
-impl NeedsIndicators for RsiEmaStrategy{
-    fn required_indicators_static() -> Vec<IndexId>{
+impl NeedsIndicators for RsiEmaStrategy {
+    fn required_indicators_static() -> Vec<IndexId> {
         vec![
             (IndicatorKind::Rsi(8), TimeFrame::Min15),
             (
@@ -56,11 +55,9 @@ impl Strat for RsiEmaStrategy {
     ) -> Option<EngineOrder> {
         let margin = params.free_margin();
         let lev = params.lev as f64;
-        let sz_decimals = params.sz_decimals;
-        let px_decimals = MAX_DECIMALS - sz_decimals - 1;
         let open_pos = params.open_pos;
 
-        let max_size = roundf!((margin * lev) / price, sz_decimals);
+        let max_size = (margin * lev) / price;
 
         let rsi_1h_value = match snapshot.get(&self.rsi_1h)?.value {
             RsiValue(v) => v,
@@ -85,10 +82,10 @@ impl Strat for RsiEmaStrategy {
                     self.active_window_start = None;
                     self.limit_close_set = true;
                     return Some(EngineOrder::new_limit_close(
-                                    open.size, 
-                                    roundf!(price * 1.003, px_decimals),
-                                    None, 
-                                ));
+                        open.size,
+                        price * 1.003,
+                        None,
+                    ));
                 }
             } else {
                 self.limit_close_set = false;
@@ -110,8 +107,8 @@ impl Strat for RsiEmaStrategy {
                     return None;
                 }
                 self.active_window_start = None;
-                let size = roundf!(max_size * 0.9, sz_decimals);
-                return Some(EngineOrder::market_open_long(size))
+                let size = max_size * 0.9;
+                return Some(EngineOrder::market_open_long(size));
             }
             None
         })();
@@ -125,4 +122,3 @@ impl Strat for RsiEmaStrategy {
         order
     }
 }
-

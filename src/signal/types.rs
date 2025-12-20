@@ -9,7 +9,7 @@ use kwant::indicators::{
     Adx, Atr, Ema, EmaCross, Indicator, Price, Rsi, Sma, SmaRsi, StochasticRsi, Value,
 };
 
-use crate::{IndicatorData, MAX_HISTORY, Side, TimeFrame,};
+use crate::{IndicatorData, MAX_HISTORY, Side, TimeFrame};
 use log::warn;
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 pub struct ExecParams {
     pub margin: f64,
     pub lev: usize,
-    pub sz_decimals: u32,
     pub open_pos: Option<OpenPosInfo>,
 }
 
@@ -31,11 +30,10 @@ pub struct OpenPosInfo {
 }
 
 impl ExecParams {
-    pub fn new(margin: f64, lev: usize, sz_decimals: u32) -> Self {
+    pub fn new(margin: f64, lev: usize) -> Self {
         Self {
             margin,
             lev,
-            sz_decimals,
             open_pos: None,
         }
     }

@@ -18,7 +18,7 @@ use hyperliquid_rust_sdk::{
 };
 
 use super::*;
-use crate::{MarketCommand, roundf};
+use crate::{MarketCommand, roundf, MAX_DECIMALS};
 
 pub struct Executor {
     trade_rv: Receiver<ExecCommand>,
@@ -29,6 +29,7 @@ pub struct Executor {
     fees: (f64, f64), //Maker, Taker
     resting_orders: HashMap<u64, RestingOrderLocal, BuildHasherDefault<FxHasher>>,
     open_position: Arc<Mutex<Option<OpenPositionLocal>>>,
+    decimals: Decimals,
 }
 
 impl Executor {
@@ -41,6 +42,11 @@ impl Executor {
     ) -> Result<Executor, Error> {
         let exchange_client =
             Arc::new(ExchangeClient::new(None, wallet, Some(BaseUrl::Mainnet), None, None).await?);
+
+        let decimals = Decimals{
+            sz: asset.sz_decimals,
+            px: MAX_DECIMALS - asset.sz_decimals - 1,
+        };
         Ok(Executor {
             trade_rv,
             market_tx,
@@ -50,6 +56,7 @@ impl Executor {
             fees,
             resting_orders: HashMap::default(),
             open_position: Arc::new(Mutex::new(None)),
+            decimals,
         })
     }
 
@@ -148,19 +155,22 @@ impl Executor {
         side: Side,
         limit: Option<Limit>,
         intent: PositionOp,
+        decimals: Decimals,
     ) -> HlOrder<'_> {
         let is_long = side == Side::Long;
+        let sz = roundf!(sz, decimals.sz);
 
         if let Some(limit) = limit {
             let reduce_only = (intent == PositionOp::Close) || limit.is_tpsl().is_some();
+            let px = roundf!(limit.limit_px, decimals.px);
             HlOrder::Limit(ClientOrderRequest {
                 asset: asset.to_string(),
                 is_buy: is_long,
                 reduce_only,
-                limit_px: limit.limit_px,
+                limit_px: px,
                 sz,
                 cloid: None,
-                order_type: limit.order_type.convert(limit.limit_px),
+                order_type: limit.order_type.convert(px),
             })
         } else {
             HlOrder::Market(MarketOrderParams {
@@ -253,7 +263,7 @@ impl Executor {
         if let Some((side, size)) = params {
             let asset = self.asset.name.clone();
             let op = PositionOp::Close;
-            let trade = Self::into_hl_order(&asset, size, side, None, op);
+            let trade = Self::into_hl_order(&asset, size, side, None, op, self.decimals);
             match self.open_trade(trade, op, None).await {
                 Ok(order_response) => {
                     let _ = self
@@ -294,7 +304,7 @@ impl Executor {
                     if let Some((side, size)) = order_params {
                         let asset = self.asset.name.clone();
                         let trade =
-                            Self::into_hl_order(&asset, size, side, order.limit, order.action);
+                            Self::into_hl_order(&asset, size, side, order.limit, order.action, self.decimals);
                         let trigger = order.is_tpsl();
                         match self.open_trade(trade, order.action, trigger).await {
                             Ok(order_response) => {
@@ -350,4 +360,10 @@ impl Executor {
 enum SendUpdate {
     Trade(TradeInfo),
     Position(Option<OpenPositionLocal>),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Decimals{
+    sz: u32,
+    px: u32,
 }
