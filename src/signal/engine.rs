@@ -4,9 +4,9 @@ use std::hash::BuildHasherDefault;
 
 use log::info;
 
-use kwant::indicators::{Price, Value};
+use kwant::indicators::{Price};
 
-use crate::strategy::{RsiEmaStrategy, Strat, Strategy};
+use crate::strategy::{Strat, Strategy};
 use crate::trade_setup::{TimeFrame, TradeParams};
 use crate::{EngineOrder, ExecCommand, IndicatorData, MarketCommand, get_time_now};
 
@@ -36,9 +36,7 @@ impl SignalEngine {
         trade_tx: Sender<ExecCommand>,
         exec_params: ExecParams,
     ) -> Self {
-        let strategy = match trade_params.strategy {
-            Strategy::RsiEmaScalp => RsiEmaStrategy::init(),
-        };
+        let strategy = trade_params.strategy.init();
         let required_indicators = strategy.required_indicators();
         let mut indicators: HashSet<IndexId> = if let Some(list) = config {
             list.into_iter().collect()
@@ -64,8 +62,8 @@ impl SignalEngine {
             trade_tx,
             data_tx,
             trackers,
-            strategy: Box::new(strategy),
-            exec_params: exec_params,
+            strategy,
+            exec_params,
         }
     }
 
@@ -254,25 +252,19 @@ impl SignalEngine {
     pub fn new_backtest(
         trade_params: ExecParams,
         strategy: Strategy,
-        config: Option<Vec<IndexId>>,
     ) -> Self {
-        let strategy = match strategy {
-            Strategy::RsiEmaScalp => RsiEmaStrategy::init(),
-        };
+        let strategy = strategy.init();
+        let required_indicators = strategy.required_indicators();
 
         let mut trackers: TrackersMap = HashMap::default();
 
-        if let Some(list) = config
-            && !list.is_empty()
-        {
-            for id in list {
-                if let Some(tracker) = &mut trackers.get_mut(&id.1) {
-                    tracker.add_indicator(id.0, false);
-                } else {
-                    let mut new_tracker = Tracker::new(id.1);
-                    new_tracker.add_indicator(id.0, false);
-                    trackers.insert(id.1, Box::new(new_tracker));
-                }
+        for id in required_indicators {
+            if let Some(tracker) = &mut trackers.get_mut(&id.1) {
+                tracker.add_indicator(id.0, false);
+            } else {
+                let mut new_tracker = Tracker::new(id.1);
+                new_tracker.add_indicator(id.0, false);
+                trackers.insert(id.1, Box::new(new_tracker));
             }
         }
 
@@ -285,7 +277,7 @@ impl SignalEngine {
             trade_tx: dummy_tx,
             data_tx: None,
             trackers,
-            strategy: Box::new(strategy),
+            strategy,
             exec_params: trade_params,
         }
     }

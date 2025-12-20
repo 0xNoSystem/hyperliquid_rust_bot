@@ -7,6 +7,7 @@ mod market;
 mod strategy;
 mod trade_setup;
 mod wallet;
+mod strats;
 
 pub mod bot;
 mod exec;
@@ -23,7 +24,7 @@ pub use frontend::*;
 pub use helper::*;
 pub use margin::{AssetMargin, MarginAllocation};
 pub use market::{AssetPrice, Market, MarketCommand, MarketUpdate};
-pub use signal::{EditType, Entry, IndexId, IndicatorKind, OpenPosInfo, SignalEngine};
+pub use signal::{EditType, Entry, IndexId, IndicatorKind, OpenPosInfo, SignalEngine, ValuesMap, TimedValue, ExecParams};
 pub use trade_setup::*;
 pub use wallet::Wallet;
 

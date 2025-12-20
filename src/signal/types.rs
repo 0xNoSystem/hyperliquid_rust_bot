@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
@@ -10,7 +9,7 @@ use kwant::indicators::{
     Adx, Atr, Ema, EmaCross, Indicator, Price, Rsi, Sma, SmaRsi, StochasticRsi, Value,
 };
 
-use crate::{IndicatorData, MAX_HISTORY, Side, TimeFrame, get_time_now};
+use crate::{IndicatorData, MAX_HISTORY, Side, TimeFrame,};
 use log::warn;
 
 use serde::{Deserialize, Serialize};

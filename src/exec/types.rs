@@ -7,14 +7,14 @@ use std::fmt;
 
 use crate::{OpenPosInfo, get_time_now, roundf};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum ExecCommand {
     Order(EngineOrder),
     Control(ExecControl),
     Event(ExecEvent),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct EngineOrder {
     pub action: PositionOp,
     pub size: f64,
@@ -22,6 +22,73 @@ pub struct EngineOrder {
 }
 
 impl EngineOrder {
+    pub fn new_market(action: PositionOp, size: f64) -> Self{
+        EngineOrder{
+            action,
+            size,
+            limit: None,
+        }
+    }
+
+    pub fn market_open_long(size: f64) -> Self{
+        Self::new_market(PositionOp::OpenLong, size)
+    }
+
+    pub fn market_open_short(size: f64) -> Self{
+        Self::new_market(PositionOp::OpenShort, size)
+    }
+
+    pub fn market_close(size: f64) -> Self{
+        Self::new_market(PositionOp::Close, size) 
+    }
+    
+    //default limit order is a limit "Gtc" order non-trigger
+    fn new_limit(action: PositionOp,size: f64, limit_px: f64, order_type: Option<ClientOrderLocal>) -> Self{
+        let order_type = order_type.unwrap_or(ClientOrderLocal::ClientLimit(Tif::default()));
+
+        EngineOrder{
+            action,
+            size,
+            limit: Some(Limit::new(limit_px, order_type)),
+        }
+    }
+
+    pub fn new_limit_close(size: f64, limit_px: f64, tif: Option<Tif>) -> Self{
+        let order_type = ClientOrderLocal::ClientLimit(tif.unwrap_or_default());
+        
+        Self::new_limit(PositionOp::Close, size, limit_px, Some(order_type))
+    }
+
+    pub fn new_trigger_close(trigger_kind: TriggerKind, size: f64, trigger_px: f64) -> Self{
+        let is_market = trigger_kind != TriggerKind::Tp;
+        let order_type = ClientOrderLocal::ClientTrigger(TriggerOrder{kind: trigger_kind, is_market});
+
+        Self::new_limit(PositionOp::Close, size, trigger_px, Some(order_type))
+    }
+
+    pub fn new_limit_open(side: Side, size: f64, limit_px: f64, tif: Option<Tif>) -> Self{
+        let order_type = ClientOrderLocal::ClientLimit(tif.unwrap_or_default());
+        let action = if side == Side::Long{PositionOp::OpenLong}else{PositionOp::OpenShort};
+        
+        Self::new_limit(action, size, limit_px, Some(order_type))  
+    }
+
+    pub fn limit_open_long(size: f64, limit_px: f64, tif: Option<Tif>) -> Self{
+        Self::new_limit_open(Side::Long, size, limit_px, tif)
+    }
+    
+    pub fn limit_open_short(size: f64, limit_px: f64, tif: Option<Tif>) -> Self{
+        Self::new_limit_open(Side::Short, size, limit_px, tif)
+    }
+
+    pub fn new_tp(size: f64, trigger_px: f64) -> Self{
+        Self::new_trigger_close(TriggerKind::Tp, size, trigger_px)
+    }
+
+    pub fn new_sl(size: f64, trigger_px: f64) -> Self{
+        Self::new_trigger_close(TriggerKind::Sl, size, trigger_px)
+    }
+
     pub fn is_tpsl(&self) -> Option<TriggerKind> {
         self.limit.map(|l| l.is_tpsl())?
     }
@@ -64,10 +131,10 @@ pub struct Limit {
 }
 
 impl Limit {
-    pub fn new_limit(limit_px: f64, tif: Tif) -> Self {
+    pub fn new(limit_px: f64, order_type: ClientOrderLocal) -> Self {
         Limit {
             limit_px,
-            order_type: ClientOrderLocal::ClientLimit(tif),
+            order_type,
         }
     }
     pub fn is_tpsl(&self) -> Option<TriggerKind> {
@@ -126,11 +193,12 @@ pub struct TriggerOrder {
     pub is_market: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum Tif {
     Alo,
     Ioc,
+    #[default]
     Gtc,
 }
 

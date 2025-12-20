@@ -1,5 +1,5 @@
 use crate::{
-    AssetMargin, AssetPrice, IndexId, MarginAllocation, OpenPositionLocal, TradeInfo, TradeParams,
+    AssetMargin, IndexId, MarginAllocation, OpenPositionLocal, TradeInfo, TradeParams,
     Value,
 };
 use hyperliquid_rust_sdk::AssetMeta;
