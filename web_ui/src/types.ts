@@ -164,7 +164,7 @@ export function into(tf: string): TimeFrame {
     return TIMEFRAME_CAMELCASE[tf];
 }
 
-export type Strategy = "rsiEmaScalp";
+export type Strategy = "rsiEmaScalp" | "srsiAdxScalp";
 
 export interface TradeParams {
     timeFrame: TimeFrame;

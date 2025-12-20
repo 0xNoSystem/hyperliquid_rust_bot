@@ -66,7 +66,7 @@ Start everything with one command (backend + frontend):
 
 ## Notes
 
-- You can create your own strategy by looking at the Strategy trait in src/strategy.rs and reading other implemented strategies. Make sure you add it to the Strategy type in web_ui/src/types.ts (in pascalCase) and in src/components/AddMarke.tsx, i realise this is quite complicated, i'm working on making custom strategies easier to integrate. 
+- You can create your own strategy by looking at the Strategy trait in src/strategy.rs and reading other implemented strategies in src/strats. Make sure you add it to the Strategy type in web_ui/src/types.ts (in pascalCase) and in src/components/AddMarket.tsx, i realise this is quite complicated, i'm working on making custom strategies easier to integrate. 
 - Backtesting is in devolpment and purely uses Binance OHLCV; live trades execute on Hyperliquid.
 - Manual trades on the same account can interfere with the bot’s margin orchestration; a dedicated account is recommended.
 - Experimental software; use at your own risk.

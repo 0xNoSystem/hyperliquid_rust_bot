@@ -16,7 +16,7 @@ import type {
     AddMarketProps,
 } from "../types";
 
-const strategyOptions: Strategy[] = ["rsiEmaScalp"];
+const strategyOptions: Strategy[] = ["rsiEmaScalp",  "srsiAdxScalp"];
 const indicatorKinds: IndicatorKind[] = [
     "rsi",
     "smaOnRsi",
