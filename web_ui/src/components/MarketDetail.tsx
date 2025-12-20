@@ -16,6 +16,7 @@ import {
     decompose,
     indicatorLabels,
     indicatorParamLabels,
+    indicatorColors,
     fromTimeFrame,
     get_value,
     into,
@@ -32,16 +33,6 @@ import type {
 } from "../types";
 import { ArrowLeft, Plus, Minus, X } from "lucide-react";
 
-export const indicatorColors: Record<string, string> = {
-    rsi: "green",
-    smaOnRsi: "indigo",
-    stochRsi: "purple",
-    adx: "yellow",
-    atr: "red",
-    ema: "blue",
-    emaCross: "pink",
-    sma: "gray",
-};
 
 const formatPrice = (n: number) => {
     if (n > 1 && n < 2) return n.toFixed(4);
@@ -250,7 +241,7 @@ export default function MarketDetail() {
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
-        <div className="relative z-40 min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white">
+        <div className="relative z-40 min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white bg-gray-500/30">
             <ErrorBanner message={errorMsg} onDismiss={dismissError} />
             <div className="mt-10 mb-1 flex items-center justify-around">
                 <div className="relative right-[3vw] flex items-center gap-3">
@@ -496,7 +487,7 @@ export default function MarketDetail() {
                                     <div className="group flex flex-col items-center gap-2 rounded-lg border border-white/10 px-2.5 py-1 text-[11px]">
                                         <div
                                             key={`${kindKey}-${fromTimeFrame(timeframe)}-${i}`}
-                                            className={`group flex items-center gap-4 rounded-lg border border-white/10 px-2.5 py-1 text-[13px] bg-${indicatorColors[kindKey] ||"bg-white/10"}-800 `}
+                                            className={`group flex items-center gap-4 rounded-lg border border-white/10 px-2.5 py-1 text-[13px] ${indicatorColors[kindKey]}`}
                                             title={JSON.stringify(kind)}
                                         >
                                             <span className="font-medium">
@@ -518,7 +509,7 @@ export default function MarketDetail() {
                                             </button>
                                         </div>
                                         <span
-                                            className={`text-center text-xl font-bold text-${indicatorColors[kindKey]}-200`}
+                                            className={`text-center text-xl font-bold text-${indicatorColors[kindKey]}`}
                                         >
                                             {value ? get_value(value,pxDecimals) : "N/A"}
                                         </span>

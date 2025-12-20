@@ -239,7 +239,7 @@ const MarketCard: React.FC<MarketCardProps> = ({
 
                     <div className="px-3 py-2">
                         {position == null ? (
-                            <p className="text-center">No open position</p>
+                            <p className="text-center">---</p>
                         ) : (
                             <table className="min-w-full text-[11px]">
                                 <thead className="text-white/60">
