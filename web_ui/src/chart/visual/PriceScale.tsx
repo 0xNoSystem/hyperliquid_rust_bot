@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useMemo } from "react";
 import { useChartContext } from "../ChartContext";
 import {
     zoomPriceRange,
@@ -8,12 +8,27 @@ import {
     computePricePan,
 } from "../utils";
 
-const formatPrice = (n: number) => {
-    const abs = Math.abs(n);
-    if (abs > 1 && abs < 2) return n.toFixed(4);
-    if (abs < 1) return n.toFixed(6);
-    if (abs > 10000) return Number(n.toFixed(0)).toLocaleString("en-US");
-    return Number(n.toFixed(2)).toLocaleString("en-US");
+const MAX_DECIMALS = 10;
+
+const clampDecimals = (value: number) =>
+    Math.min(MAX_DECIMALS, Math.max(0, Math.round(value)));
+
+const formatFixedPrice = (value: number, decimals: number) => {
+    if (!Number.isFinite(value)) return "—";
+    const safeDecimals = clampDecimals(decimals);
+    return value.toLocaleString("en-US", {
+        minimumFractionDigits: safeDecimals,
+        maximumFractionDigits: safeDecimals,
+    });
+};
+
+const inferAssetDecimals = (price: number) => {
+    const abs = Math.abs(price);
+    if (!Number.isFinite(abs) || abs === 0) return 2;
+    if (abs >= 1) return 2;
+    const magnitude = Math.max(abs, 1e-12);
+    const leadingZeros = Math.max(0, -Math.floor(Math.log10(magnitude)));
+    return Math.max(6, leadingZeros + 2);
 };
 
 const niceStep = (rawStep: number) => {
@@ -28,22 +43,12 @@ const niceStep = (rawStep: number) => {
     return 10 * base;
 };
 
-const countDecimals = (value: number) => {
-    if (!Number.isFinite(value)) return 0;
-    let decimals = 0;
-    let v = value;
-    while (decimals < 8 && Math.abs(Math.round(v) - v) > 1e-8) {
-        v *= 10;
-        decimals += 1;
-    }
-    return decimals;
-};
-
 const PriceScale: React.FC = () => {
     const {
         height,
         minPrice,
         maxPrice,
+        candles,
         setPriceRange,
         setManualPriceRange,
         width,
@@ -54,6 +59,9 @@ const PriceScale: React.FC = () => {
 
     const svgRef = useRef<SVGSVGElement>(null);
     const dragModeRef = useRef<"zoom" | "pan">("zoom");
+    const assetDecimalsRef = useRef<{ asset: string; decimals: number } | null>(
+        null
+    );
     const touchState = useRef<{
         mode: "zoom" | "pinch";
         startY: number;
@@ -92,33 +100,48 @@ const PriceScale: React.FC = () => {
     const fontSize = Math.max(10, Math.min(16, height * 0.06));
     const plotPadding = Math.max(6, Math.round(fontSize / 2));
     const targetPx = 42;
+    const referencePrice = useMemo(() => {
+        if (candles.length > 0) {
+            const last = candles[candles.length - 1];
+            if (Number.isFinite(last.close)) return last.close;
+        }
+        const mid = (minPrice + maxPrice) / 2;
+        if (Number.isFinite(mid)) return mid;
+        if (Number.isFinite(minPrice)) return minPrice;
+        if (Number.isFinite(maxPrice)) return maxPrice;
+        return 0;
+    }, [candles, minPrice, maxPrice]);
+
+    const assetKey = candles[0]?.asset ?? "unknown";
+    const candidateDecimals = clampDecimals(inferAssetDecimals(referencePrice));
+    let assetDecimals = candidateDecimals;
+    const stored = assetDecimalsRef.current;
+    if (stored && stored.asset === assetKey) {
+        assetDecimals = stored.decimals;
+    } else if (candles.length > 0 && assetKey !== "unknown") {
+        assetDecimalsRef.current = {
+            asset: assetKey,
+            decimals: candidateDecimals,
+        };
+        assetDecimals = candidateDecimals;
+    }
+
     const rawStep =
         height > 0 ? range / Math.max(2, Math.floor(height / targetPx)) : 0;
-    const step = niceStep(rawStep);
-    const stepDecimals = step > 0 ? countDecimals(step) : 2;
+    const minStep = assetDecimals > 0 ? 10 ** -assetDecimals : 1;
+    const stepBase = rawStep > 0 ? Math.max(rawStep, minStep) : rawStep;
+    const step = niceStep(stepBase);
+
     const formatAxisPrice = (value: number) => {
         if (!Number.isFinite(value)) return "—";
-        if (step <= 0) return formatPrice(value);
+        if (step <= 0) return formatFixedPrice(value, assetDecimals);
         const rounded = Math.round(value / step) * step;
         const safeValue = Math.abs(rounded) < step / 2 ? 0 : rounded;
-        const decimals = Math.min(8, stepDecimals);
-        return safeValue.toLocaleString("en-US", {
-            minimumFractionDigits: decimals,
-            maximumFractionDigits: decimals,
-        });
+        return formatFixedPrice(safeValue, assetDecimals);
     };
     const formatCrosshairPrice = (value: number) => {
         if (!Number.isFinite(value)) return "—";
-        const abs = Math.abs(value);
-        let decimals = Math.max(2, Math.min(8, stepDecimals + 2));
-        if (abs < 1) decimals = Math.max(decimals, 6);
-        if (abs < 0.1) decimals = Math.max(decimals, 7);
-        if (abs < 0.01) decimals = Math.max(decimals, 8);
-        if (abs >= 10000) decimals = Math.min(decimals, 2);
-        return value.toLocaleString("en-US", {
-            minimumFractionDigits: decimals,
-            maximumFractionDigits: decimals,
-        });
+        return formatFixedPrice(value, assetDecimals);
     };
 
     const prices: { price: number; y: number; major: boolean }[] = [];
@@ -320,7 +343,7 @@ const PriceScale: React.FC = () => {
                             textAnchor="middle"
                             alignmentBaseline="middle"
                             fill="#aaa"
-                            fontSize={fontSize}
+                            fontSize={fontSize - 2}
                         >
                             {formatAxisPrice(p.price)}
                         </text>

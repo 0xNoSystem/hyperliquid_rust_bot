@@ -286,19 +286,13 @@ const TimeScale: React.FC = () => {
     const ref = useRef<SVGSVGElement>(null);
 
     const range = endTime - startTime;
-    const gridMinPx = 48;
     const labelMinPx = 110;
-    const minGridStepFromPx =
-        range > 0 && width > 0 ? (range * gridMinPx) / width : 0;
     const minLabelStepFromPx =
         range > 0 && width > 0 ? (range * labelMinPx) / width : 0;
-    const minGridStep = Math.max(minGridStepFromPx, candleDurationMs || 1);
     const minLabelStep = Math.max(minLabelStepFromPx, candleDurationMs || 1);
-    const gridStep = pickTimeStep(minGridStep);
     const labelStep = pickTimeStep(minLabelStep);
     const showDateOnFirst = range >= 24 * 60 * 60_000;
 
-    const gridTicks = buildTicks(gridStep, startTime, endTime, width);
     const labelTicks = buildTicks(labelStep, startTime, endTime, width);
 
     const getTickLabel = (t: number, prev: number | null, stepMs: number) => {
@@ -356,6 +350,16 @@ const TimeScale: React.FC = () => {
         }
         return formatUTC(t);
     };
+
+    const labelTicksWithInfo = labelTicks.map((tick, idx) => {
+        const prev = idx > 0 ? labelTicks[idx - 1].t : null;
+        const labelInfo = getTickLabel(tick.t, prev, labelStep);
+        return {
+            ...tick,
+            label: labelInfo.label,
+            major: labelInfo.major,
+        };
+    });
 
     const beginTouchDrag = (touch: TouchPoint) => {
         touchState.current = {
@@ -557,34 +561,39 @@ const TimeScale: React.FC = () => {
                 height={25}
                 style={{ overflow: "visible", overscrollBehavior: "none" }}
             >
-                {/* Tick Labels */}
-                {gridTicks.map((p, idx) => (
-                    <g key={`grid-${idx}`}>
-                        <line
-                            x1={p.x}
-                            y1={0}
-                            x2={p.x}
-                            y2={-height - 10}
-                            stroke="#444"
-                            strokeOpacity={0.35}
-                            strokeWidth={0.8}
-                        />
-                    </g>
-                ))}
-                {labelTicks.map((p, idx) => {
-                    const prev = idx > 0 ? labelTicks[idx - 1].t : null;
-                    const labelInfo = getTickLabel(p.t, prev, labelStep);
+                {/* Tick Lines + Labels */}
+                {labelTicksWithInfo.map((tick, idx) => {
+                    const isLast = idx === labelTicksWithInfo.length - 1;
+                    const hasLabel = tick.label !== undefined;
+                    const isMajor = Boolean(hasLabel && tick.major);
+                    const lineOpacity = isMajor ? 0.6 : 0.35;
+                    const lineWidth = isMajor ? 1 : 0.8;
+                    const hideLine = isLast && !hasLabel;
                     return (
-                        <text
-                            key={`label-${idx}`}
-                            x={p.x}
-                            y={20}
-                            textAnchor="middle"
-                            fill={labelInfo.major ? "#ddd" : "#aaa"}
-                            fontSize={fontSize}
-                        >
-                            {labelInfo.label}
-                        </text>
+                        <g key={`tick-${tick.t}`}>
+                            {!hideLine && (
+                                <line
+                                    x1={tick.x}
+                                    y1={0}
+                                    x2={tick.x}
+                                    y2={-height - 10}
+                                    stroke="#444"
+                                    strokeOpacity={lineOpacity}
+                                    strokeWidth={lineWidth}
+                                />
+                            )}
+                            {hasLabel && (
+                                <text
+                                    x={tick.x}
+                                    y={20}
+                                    textAnchor="middle"
+                                    fill={isMajor ? "#ddd" : "#aaa"}
+                                    fontSize={fontSize}
+                                >
+                                    {tick.label}
+                                </text>
+                            )}
+                        </g>
                     );
                 })}
 
