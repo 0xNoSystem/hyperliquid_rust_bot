@@ -27,6 +27,7 @@ pub struct Bot {
     markets: HashMap<String, Sender<MarketCommand>, BuildHasherDefault<FxHasher>>,
     candle_subs: HashMap<String, u32>,
     session: Arc<Mutex<HashMap<String, MarketInfo, BuildHasherDefault<FxHasher>>>>,
+    #[allow(unused)]
     fees: (f64, f64),
     _bot_tx: UnboundedSender<BotEvent>,
     bot_rv: UnboundedReceiver<BotEvent>,
@@ -127,7 +128,6 @@ impl Bot {
             receiver,
             meta,
             margin,
-            self.fees,
             trade_params,
             config,
         )

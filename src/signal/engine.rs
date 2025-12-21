@@ -184,7 +184,7 @@ impl SignalEngine {
                     //println!("______TICK_____ => {}", tick);
                 }
 
-                EngineCommand::UpdateStrategy(new_strat) => {
+                EngineCommand::UpdateStrategy(_new_strat) => {
                     //self.change_strategy(new_strat);
                 }
 

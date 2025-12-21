@@ -72,32 +72,34 @@ impl Wallet {
         let positions = state.asset_positions;
 
         let ass = std::sync::Arc::new(bot_assets.cloned().collect::<HashSet<String>>());
-        let open_orders_value_futures = open_orders.iter().filter_map(|o| {
-            Some({
-                let assets = ass.clone();
-                async move {
-                    if o.is_position_tpsl || o.reduce_only {
-                        return None;
-                    }
-                    if !assets.contains(&o.coin) {
-                        let lev = self
-                            .info_client
-                            .active_asset_data(user, o.coin.clone())
-                            .await
-                            .ok()?
-                            .leverage
-                            .value as f64;
-                        return Some(
-                            (o.sz.parse::<f64>().ok()? * o.limit_px.parse::<f64>().ok()?) / lev,
-                        );
-                    }
-                    None
+        let open_orders_value_futures = open_orders.iter().map(|o| {
+            let assets = ass.clone();
+            async move {
+                if o.is_position_tpsl || o.reduce_only {
+                    return None;
                 }
-            })
+                if !assets.contains(&o.coin) {
+                    let lev = self
+                        .info_client
+                        .active_asset_data(user, o.coin.clone())
+                        .await
+                        .ok()?
+                        .leverage
+                        .value as f64;
+                    return Some(
+                        (o.sz.parse::<f64>().ok()? * o.limit_px.parse::<f64>().ok()?) / lev,
+                    );
+                }
+                None
+            }
         });
 
-        let results = futures::future::join_all(open_orders_value_futures).await;
-        let discard_value: f64 = results.into_iter().flatten().sum();
+        let mut discard_value: f64 = 0.0;
+        for value_future in open_orders_value_futures {
+            if let Some(value) = value_future.await {
+                discard_value += value;
+            }
+        }
 
         let upnl: f64 = positions
             .iter()

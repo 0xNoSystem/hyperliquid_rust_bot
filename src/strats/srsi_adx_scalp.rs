@@ -98,7 +98,8 @@ impl Strat for SrsiAdxScalp {
                     return Some(EngineOrder::new_sl(open.size, trigger_px));
                 }
                 if rsi_1h_value > 60.0 && (rsi_1h_value - sma_rsi_1h_value < (rsi_1h_value * 0.1)) {
-                    let limit_px = calc_exit_px(open.side, TriggerKind::Tp, 0.003, open.entry_px, lev);
+                    let limit_px =
+                        calc_exit_px(open.side, TriggerKind::Tp, 0.003, open.entry_px, lev);
                     self.closing = true;
                     return Some(EngineOrder::new_limit_close(open.size, limit_px, None));
                 }

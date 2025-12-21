@@ -44,7 +44,6 @@ impl Market {
         price_rv: UnboundedReceiver<Message>,
         asset: AssetMeta,
         margin: f64,
-        fees: (f64, f64),
         trade_params: TradeParams,
         config: Option<Vec<IndexId>>,
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
@@ -100,14 +99,8 @@ impl Market {
                     exec_params,
                 )
                 .await,
-                executor: Executor::new(
-                    wallet.wallet.clone(),
-                    asset,
-                    fees,
-                    exec_rv,
-                    market_tx.clone(),
-                )
-                .await?,
+                executor: Executor::new(wallet.wallet.clone(), asset, exec_rv, market_tx.clone())
+                    .await?,
                 receivers,
                 senders,
                 active_tfs,

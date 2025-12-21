@@ -3,12 +3,7 @@
 
 use crate::signal::{ExecParams, ValuesMap};
 use crate::strats::*;
-use crate::{
-    EngineOrder, IndexId, IndicatorKind, MAX_DECIMALS, MIN_ORDER_VALUE, Tif, TimeFrame, Value,
-    roundf, timedelta,
-};
-use TimeFrame::*;
-use Value::*;
+use crate::{EngineOrder, IndexId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Copy, PartialEq, Serialize, Deserialize)]

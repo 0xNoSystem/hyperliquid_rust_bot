@@ -18,7 +18,7 @@ use hyperliquid_rust_sdk::{
 };
 
 use super::*;
-use crate::{MarketCommand, roundf, MAX_DECIMALS};
+use crate::{MAX_DECIMALS, MarketCommand, roundf};
 
 pub struct Executor {
     trade_rv: Receiver<ExecCommand>,
@@ -26,7 +26,6 @@ pub struct Executor {
     asset: AssetMeta,
     exchange_client: Arc<ExchangeClient>,
     is_paused: bool,
-    fees: (f64, f64), //Maker, Taker
     resting_orders: HashMap<u64, RestingOrderLocal, BuildHasherDefault<FxHasher>>,
     open_position: Arc<Mutex<Option<OpenPositionLocal>>>,
     decimals: Decimals,
@@ -36,14 +35,13 @@ impl Executor {
     pub async fn new(
         wallet: PrivateKeySigner,
         asset: AssetMeta,
-        fees: (f64, f64),
         trade_rv: Receiver<ExecCommand>,
         market_tx: Sender<MarketCommand>,
     ) -> Result<Executor, Error> {
         let exchange_client =
             Arc::new(ExchangeClient::new(None, wallet, Some(BaseUrl::Mainnet), None, None).await?);
 
-        let decimals = Decimals{
+        let decimals = Decimals {
             sz: asset.sz_decimals,
             px: MAX_DECIMALS - asset.sz_decimals - 1,
         };
@@ -53,7 +51,6 @@ impl Executor {
             asset,
             exchange_client,
             is_paused: false,
-            fees,
             resting_orders: HashMap::default(),
             open_position: Arc::new(Mutex::new(None)),
             decimals,
@@ -199,10 +196,8 @@ impl Executor {
             if roundf!(resting.sz, self.asset.sz_decimals) == 0.0 {
                 clean_up = true;
             }
-        }else{
-            if fill.intent != PositionOp::Close{
-                info!("Manual trade opened by the user, will be tracked");
-            }
+        } else if fill.intent != PositionOp::Close {
+            info!("Manual trade opened by the user, will be tracked");
         }
 
         if clean_up {
@@ -236,7 +231,9 @@ impl Executor {
 
         //Clean up resting orders in case of user closing a position manually on HL's interface
         if trade_info.is_some() && !clean_up {
-            info!("Trade has been closed manually on the exchange, canceling local resting orders...");
+            info!(
+                "Trade has been closed manually on the exchange, canceling local resting orders..."
+            );
             let _ = self.cancel_all_resting().await;
         }
 
@@ -308,8 +305,14 @@ impl Executor {
 
                     if let Some((side, size)) = order_params {
                         let asset = self.asset.name.clone();
-                        let trade =
-                            Self::into_hl_order(&asset, size, side, order.limit, order.action, self.decimals);
+                        let trade = Self::into_hl_order(
+                            &asset,
+                            size,
+                            side,
+                            order.limit,
+                            order.action,
+                            self.decimals,
+                        );
                         let trigger = order.is_tpsl();
                         match self.open_trade(trade, order.action, trigger).await {
                             Ok(order_response) => {
@@ -368,7 +371,7 @@ enum SendUpdate {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Decimals{
+struct Decimals {
     sz: u32,
     px: u32,
 }

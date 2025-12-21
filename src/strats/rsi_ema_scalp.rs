@@ -81,11 +81,7 @@ impl Strat for RsiEmaStrategy {
                 {
                     self.active_window_start = None;
                     self.limit_close_set = true;
-                    return Some(EngineOrder::new_limit_close(
-                        open.size,
-                        price * 1.003,
-                        None,
-                    ));
+                    return Some(EngineOrder::new_limit_close(open.size, price * 1.003, None));
                 }
             } else {
                 self.limit_close_set = false;
@@ -113,11 +109,14 @@ impl Strat for RsiEmaStrategy {
             None
         })();
 
-        if self.active_window_start.is_none() && open_pos.is_none() {
-            if rsi_1h_value < 30.0 && !uptrend {
-                self.active_window_start = Some(now);
-            }
+        if self.active_window_start.is_none()
+            && open_pos.is_none()
+            && rsi_1h_value < 30.0
+            && !uptrend
+        {
+            self.active_window_start = Some(now);
         }
+
         self.prev_fast_above = Some(uptrend);
         order
     }
