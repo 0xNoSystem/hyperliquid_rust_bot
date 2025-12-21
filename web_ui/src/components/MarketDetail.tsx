@@ -9,7 +9,7 @@ import TradingViewWidget from "./TradingViewWidget";
 import { BackgroundFX } from "./BackgroundFX";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatUTC } from "../chart/utils";
-import {MAX_DECIMALS} from "../consts";
+import {MAX_DECIMALS, MIN_ORDER_VALUE} from "../consts";
 import { ErrorBanner } from "./ErrorBanner";
 
 import {
@@ -371,7 +371,7 @@ export default function MarketDetail() {
 
                         {/* Margin */}
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                        {(market.margin * market.lev < 10) &&
+                        {(market.margin * market.lev < MIN_ORDER_VALUE) &&
                         (<>
                             <img src="   https://cdn-icons-png.flaticon.com/512/14022/14022507.png " width="12" height="12" alt="" title="" class="img-small"/>    
                             <p className="text-[12px] text-orange-500">MAX ORDER VALUE is lower than 10$, no orders can be passed</p>

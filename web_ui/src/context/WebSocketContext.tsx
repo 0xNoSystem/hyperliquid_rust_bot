@@ -34,7 +34,7 @@ interface WebSocketContextValue {
     cacheMarket: (market: MarketInfo) => void;
     deleteCachedMarket: (asset: string) => void;
     requestRemoveMarket: (asset: string) => Promise<void>;
-    requestToggleMarket: (asset: string) => Promise<void>;
+    requestToggleMarket: (asset: string, pause: bool) => Promise<void>;
     requestCloseAll: () => Promise<void>;
     requestPauseAll: () => Promise<void>;
 }
@@ -237,7 +237,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             if ("marketInfoEdit" in payload) {
                 const [asset, edit] = payload.marketInfoEdit as [
                     string,
-                    EditMarketInfo,
+                    editMarketInfo,
                 ];
 
                 setMarkets((prev) =>

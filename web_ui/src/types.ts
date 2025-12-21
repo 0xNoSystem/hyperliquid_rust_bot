@@ -55,7 +55,7 @@ export type Value =
     | { adxValue: number }
     | { atrValue: number };
 
-export function get_value(v?: Value, decimals: number): string {
+export function get_value(v: Value, decimals: number): string {
     if (!v) return "No value";
     if ("rsiValue" in v) return `${v.rsiValue.toFixed(2)}`;
     if ("stochRsiValue" in v)
