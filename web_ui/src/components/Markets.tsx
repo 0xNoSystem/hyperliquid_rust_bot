@@ -220,8 +220,7 @@ export default function MarketsPage() {
                 </main>
             </div>
             {/* Error toast */}
-            <ErrorBanner message={errorMsg} onDismiss={dismissError} />            
-
+            <ErrorBanner message={errorMsg} onDismiss={dismissError} />
             {/* Add Market modal */}
             {showAdd && (
                 <div className="fixed inset-0 z-50">

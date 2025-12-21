@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { TimeFrame } from "../types";
 import type { CandleData } from "./utils";
@@ -85,6 +85,39 @@ export default function ChartProvider({ children }: ChartProviderProps) {
     const [intervalEndX, setIntervalEndX] = useState<number | null>(null);
 
     const [mouseOnChart, setMouseOnChart] = useState(false);
+    const candleBounds = useMemo(() => {
+        if (!candles.length) return null;
+        let min = candles[0].start;
+        let max = candles[0].end;
+        for (const candle of candles) {
+            if (candle.start < min) min = candle.start;
+            if (candle.end > max) max = candle.end;
+        }
+        if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+            return null;
+        }
+        let candleDuration = 0;
+        for (let i = 0; i < Math.min(10, candles.length); i++) {
+            const d = candles[i].end - candles[i].start;
+            if (Number.isFinite(d) && d > 0) {
+                candleDuration = d;
+                break;
+            }
+        }
+        if (!candleDuration && candles.length > 0) {
+            candleDuration = (max - min) / candles.length;
+        }
+        const range = max - min;
+        const padding = Math.max(candleDuration * 150, range * 0.75);
+        return {
+            min,
+            max,
+            padding,
+            paddedMin: min - padding,
+            paddedMax: max + padding,
+            maxRange: range + padding * 2,
+        };
+    }, [candles]);
 
     // --- ACTIONS ---
 
@@ -106,8 +139,37 @@ export default function ChartProvider({ children }: ChartProviderProps) {
     };
 
     const setTimeRange = (start: number, end: number) => {
-        setStartTime(start);
-        setEndTime(end);
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+        let s = start;
+        let e = end;
+        if (s > e) {
+            const tmp = s;
+            s = e;
+            e = tmp;
+        }
+        if (candleBounds) {
+            const { paddedMin, paddedMax, maxRange } = candleBounds;
+            const desiredRange = e - s;
+            if (desiredRange >= maxRange) {
+                s = paddedMin;
+                e = paddedMax;
+            } else {
+                if (s < paddedMin) {
+                    const shift = paddedMin - s;
+                    s += shift;
+                    e += shift;
+                }
+                if (e > paddedMax) {
+                    const shift = e - paddedMax;
+                    s -= shift;
+                    e -= shift;
+                }
+                s = Math.max(paddedMin, s);
+                e = Math.min(paddedMax, e);
+            }
+        }
+        setStartTime(s);
+        setEndTime(e);
     };
 
     const setCrosshair = (x: number | null, y: number | null) => {

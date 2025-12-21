@@ -33,7 +33,6 @@ import type {
 } from "../types";
 import { ArrowLeft, Plus, Minus, X } from "lucide-react";
 
-
 const formatPrice = (n: number) => {
     if (n > 1 && n < 2) return n.toFixed(4);
     if (n < 1) return n.toFixed(6);
@@ -90,8 +89,15 @@ const kindKeys = Object.keys(indicatorParamLabels) as IndicatorName[];
 
 export default function MarketDetail() {
     const { asset: routeAsset } = useParams<{ asset: string }>();
-    const { markets, universe, sendCommand, requestToggleMarket, totalMargin, errorMsg, dismissError } =
-        useWebSocketContext();
+    const {
+        markets,
+        universe,
+        sendCommand,
+        requestToggleMarket,
+        totalMargin,
+        errorMsg,
+        dismissError,
+    } = useWebSocketContext();
     const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
 
     const handleConfirmToggle = (asset: string, isPaused: boolean) => {
@@ -241,7 +247,7 @@ export default function MarketDetail() {
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
-        <div className="relative z-40 min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono text-white bg-gray-500/30">
+        <div className="relative z-40 min-h-screen max-w-[3300px] overflow-hidden bg-gray-500/30 py-8 pb-80 font-mono text-white">
             <ErrorBanner message={errorMsg} onDismiss={dismissError} />
             <div className="mt-10 mb-1 flex items-center justify-around">
                 <div className="relative right-[3vw] flex items-center gap-3">
@@ -371,20 +377,22 @@ export default function MarketDetail() {
 
                         {/* Margin */}
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                        {showMinOrderWarning &&
-                        (<>
-                            <img
-                                src="https://cdn-icons-png.flaticon.com/512/14022/14022507.png"
-                                width="12"
-                                height="12"
-                                alt=""
-                                title=""
-                                className="img-small"
-                            />
-                            <p className="text-[12px] text-orange-500">MAX ORDER VALUE is lower than 10$, no orders can be passed</p>
-                           </> 
-                        )
-                        }
+                            {showMinOrderWarning && (
+                                <>
+                                    <img
+                                        src="https://cdn-icons-png.flaticon.com/512/14022/14022507.png"
+                                        width="12"
+                                        height="12"
+                                        alt=""
+                                        title=""
+                                        className="img-small"
+                                    />
+                                    <p className="text-[12px] text-orange-500">
+                                        MAX ORDER VALUE is lower than 10$, no
+                                        orders can be passed
+                                    </p>
+                                </>
+                            )}
                             <div
                                 className="cursor-pointer text-[12px] text-white/50 uppercase"
                                 onClick={() =>
@@ -399,7 +407,9 @@ export default function MarketDetail() {
                                     <input
                                         type="range"
                                         min={0}
-                                        max={(totalMargin + marketMargin).toFixed(3)}
+                                        max={(
+                                            totalMargin + marketMargin
+                                        ).toFixed(3)}
                                         step={0.01}
                                         value={margin.toFixed(2)}
                                         onChange={(e) =>
@@ -487,7 +497,9 @@ export default function MarketDetail() {
                             {market.indicators.map((data, i) => {
                                 const { kind, timeframe, value } =
                                     decompose(data);
-                                const kindKey = Object.keys(kind)[0] as IndicatorName;
+                                const kindKey = Object.keys(
+                                    kind
+                                )[0] as IndicatorName;
                                 return (
                                     <div className="group flex flex-col items-center gap-2 rounded-lg border border-white/10 px-2.5 py-1 text-[11px]">
                                         <div
@@ -516,7 +528,9 @@ export default function MarketDetail() {
                                         <span
                                             className={`text-center text-xl font-bold text-${indicatorColors[kindKey]}`}
                                         >
-                                            {value ? get_value(value,pxDecimals) : "N/A"}
+                                            {value
+                                                ? get_value(value, pxDecimals)
+                                                : "N/A"}
                                         </span>
                                     </div>
                                 );
@@ -595,7 +609,8 @@ export default function MarketDetail() {
                                                     <td className="py-2 pr-4 text-right">
                                                         {num(
                                                             t.size,
-                                                            meta?.szDecimals ?? 3
+                                                            meta?.szDecimals ??
+                                                                3
                                                         )}
                                                     </td>
 

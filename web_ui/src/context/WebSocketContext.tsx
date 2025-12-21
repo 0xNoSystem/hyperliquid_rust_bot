@@ -14,7 +14,7 @@ import type {
     assetMargin,
     assetMeta,
 } from "../types";
-import {API_URL, WS_ENDPOINT} from "../consts";
+import { API_URL, WS_ENDPOINT } from "../consts";
 import { market_add_info } from "../types";
 
 const CACHED_MARKETS_KEY = "cachedMarkets.v1";
@@ -109,13 +109,13 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             if (raw) setCachedMarkets(JSON.parse(raw));
         } catch {}
 
-        try{
+        try {
             const raw = localStorage.getItem(MARKET_INFO_KEY);
             if (raw) {
                 const parsed = JSON.parse(raw) as assetMeta[];
                 setUniverse(parsed);
             }
-        }catch{}
+        } catch {}
     }, []);
 
     useEffect(() => {
@@ -130,8 +130,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     useEffect(() => {
         localStorage.setItem(UNIVERSE_KEY, JSON.stringify(universe));
     }, [universe]);
-
- 
 
     useEffect(() => {
         const onStorage = (e: StorageEvent) => {
@@ -161,14 +159,13 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                     setUniverse([]);
                     return;
                 }
-            try{
-            const raw = localStorage.getItem(MARKET_INFO_KEY);
-            if (raw) {
-                const parsed = JSON.parse(raw) as assetMeta[];
-                setUniverse(parsed);
-            }
-        }catch{}
-
+                try {
+                    const raw = localStorage.getItem(MARKET_INFO_KEY);
+                    if (raw) {
+                        const parsed = JSON.parse(raw) as assetMeta[];
+                        setUniverse(parsed);
+                    }
+                } catch {}
             }
         };
         window.addEventListener("storage", onStorage);
@@ -189,15 +186,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 setMarkets((prev) => {
                     const has = prev.some((m) => m.asset === asset);
                     const updated = has
-                        ? prev.map((m) =>
-                              m.asset === asset
-                                  ? readyMarket
-                                  : m
-                          )
-                        : [
-                              ...prev,
-                              readyMarket,
-                          ];
+                        ? prev.map((m) => (m.asset === asset ? readyMarket : m))
+                        : [...prev, readyMarket];
                     return dedupeMarkets(updated);
                 });
                 return;

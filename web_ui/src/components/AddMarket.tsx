@@ -194,7 +194,9 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         <select
                             value={marginType}
                             onChange={(e) =>
-                                setMarginType(e.target.value as "alloc" | "amount")
+                                setMarginType(
+                                    e.target.value as "alloc" | "amount"
+                                )
                             }
                             className={selectClass}
                         >

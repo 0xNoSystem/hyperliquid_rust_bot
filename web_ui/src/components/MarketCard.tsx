@@ -11,7 +11,7 @@ import {
     num,
     computeUPnL,
 } from "../types";
-import {MAX_DECIMALS} from "../consts";
+import { MAX_DECIMALS } from "../consts";
 import LoadingDots from "./Loading";
 import { Link } from "react-router-dom";
 
@@ -199,9 +199,7 @@ const MarketCard = ({
                 ) : (
                     indicators.map((data, i) => {
                         const { kind, timeframe, value } = decompose(data);
-                        const kindKey = Object.keys(
-                            kind
-                        )[0] as IndicatorName;
+                        const kindKey = Object.keys(kind)[0] as IndicatorName;
 
                         return (
                             <div
@@ -232,86 +230,82 @@ const MarketCard = ({
                     </div>
                 ) : (
                     <>
-                    <div className= "rounded-xl border border-white/10 bg-[#0B0E12]/80 my-2">
-                    <p className="py-1 text-center">
-                        OPEN POSITION
-                    </p>
+                        <div className="my-2 rounded-xl border border-white/10 bg-[#0B0E12]/80">
+                            <p className="py-1 text-center">OPEN POSITION</p>
 
-                    <div className="px-3 py-2">
-                        {position == null ? (
-                            <p className="text-center">---</p>
-                        ) : (
-                            <table className="min-w-full text-[11px]">
-                                <thead className="text-white/60">
-                                    <tr>
-                                        <th className="py-2 pr-2 text-left">
-                                            Side
-                                        </th>
+                            <div className="px-3 py-2">
+                                {position == null ? (
+                                    <p className="text-center">---</p>
+                                ) : (
+                                    <table className="min-w-full text-[11px]">
+                                        <thead className="text-white/60">
+                                            <tr>
+                                                <th className="py-2 pr-2 text-left">
+                                                    Side
+                                                </th>
 
-                                        <th className="py-2 pr-2 text-right">
-                                            Entry
-                                        </th>
+                                                <th className="py-2 pr-2 text-right">
+                                                    Entry
+                                                </th>
 
-                                        <th className="py-2 pr-2 text-right">
-                                            Size
-                                        </th>
+                                                <th className="py-2 pr-2 text-right">
+                                                    Size
+                                                </th>
 
-                                        <th className="py-2 pr-2 text-right">
-                                            Funding
-                                        </th>
+                                                <th className="py-2 pr-2 text-right">
+                                                    Funding
+                                                </th>
 
-                                        <th className="py-2 text-right">
-                                            UPNL
-                                        </th>
-                                    </tr>
-                                </thead>
+                                                <th className="py-2 text-right">
+                                                    UPNL
+                                                </th>
+                                            </tr>
+                                        </thead>
 
-                                <tbody>
-                                    <tr className="border-t border-white/10">
-                                        <td
-                                            className={`py-2 pr-4 font-semibold uppercase ${
-                                                position.side === "long"
-                                                    ? "text-green-500"
-                                                    : "text-red-500"
-                                            }`}
-                                        >
-                                            {position.side}
-                                        </td>
+                                        <tbody>
+                                            <tr className="border-t border-white/10">
+                                                <td
+                                                    className={`py-2 pr-4 font-semibold uppercase ${
+                                                        position.side === "long"
+                                                            ? "text-green-500"
+                                                            : "text-red-500"
+                                                    }`}
+                                                >
+                                                    {position.side}
+                                                </td>
 
-                                        <td className="py-2 pr-2 text-right">
-                                            {format(position.entryPx)}
-                                        </td>
+                                                <td className="py-2 pr-2 text-right">
+                                                    {format(position.entryPx)}
+                                                </td>
 
-                                        <td className="py-2 pr-2 text-right">
-                                            {num(
-                                                position.size, szDecimals,
-                                            )}
-                                        </td>
+                                                <td className="py-2 pr-2 text-right">
+                                                    {num(
+                                                        position.size,
+                                                        szDecimals
+                                                    )}
+                                                </td>
 
-                                        <td className="py-2 pr-2 text-right">
-                                            {num(
-                                                position.funding,2
-                                            )}
-                                            $
-                                        </td>
+                                                <td className="py-2 pr-2 text-right">
+                                                    {num(position.funding, 2)}$
+                                                </td>
 
-                                        <td className="py-2 text-right text-orange-400">
-                                            {price == null
-                                                ? "—"
-                                                : `${num(
-                                                      computeUPnL(
-                                                          position,
-                                                          price
-                                                      ),
-                                                      2
-                                                  )}$`}
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        )}
-                    </div>
-                </div>
+                                                <td className="py-2 text-right text-orange-400">
+                                                    {price == null
+                                                        ? "—"
+                                                        : `${num(
+                                                              computeUPnL(
+                                                                  position,
+                                                                  price
+                                                              ),
+                                                              2
+                                                          )}$`}
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                        </div>
 
                         <div className="text-center">
                             <div className="text-[12px] text-white/50 uppercase">

@@ -1,9 +1,6 @@
 import React from "react";
 import type { AddMarketInfo, IndicatorName } from "../types";
-import {
-    indicatorColors,
-    indicatorLabels,
-} from "../types";
+import { indicatorColors, indicatorLabels } from "../types";
 
 interface CachedMarketProps {
     market: AddMarketInfo;
