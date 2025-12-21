@@ -1,3 +1,13 @@
+export type IndicatorName =
+    | "rsi"
+    | "smaOnRsi"
+    | "stochRsi"
+    | "adx"
+    | "atr"
+    | "ema"
+    | "emaCross"
+    | "sma";
+
 export type IndicatorKind =
     | { rsi: number }
     | { smaOnRsi: { periods: number; smoothing_length: number } }
@@ -14,7 +24,7 @@ export type IndicatorKind =
     | { emaCross: { short: number; long: number } }
     | { sma: number };
 
-export const indicatorParamLabels: Record<string, string[]> = {
+export const indicatorParamLabels: Record<IndicatorName, string[]> = {
     rsi: ["Periods"],
     smaOnRsi: ["Periods", "Smoothing"],
     stochRsi: ["Periods", "kSmoothing", "dSmoothing"],
@@ -37,7 +47,7 @@ export interface MarketInfo {
     isPaused: boolean;
     indicators: indicatorData[];
     trades: TradeInfo[];
-    position?: OpenPositionLocal;
+    position: OpenPositionLocal | null;
 }
 
 export interface indicatorData {
@@ -210,7 +220,7 @@ export type Message =
     | { updateIndicatorValues: { asset: string; data: indicatorData[] } }
     | { marketInfoEdit: [string, editMarketInfo] }
     | { userError: string }
-    | { loadSession: MarketInfo[] };
+    | { loadSession: [MarketInfo[], assetMeta[]] };
 
 export type assetPrice = [string, number];
 export type assetMargin = [string, number];
@@ -265,7 +275,7 @@ export interface OpenPositionLocal {
     fillType: FillType;
 }
 
-export const indicatorLabels: Record<string, string> = {
+export const indicatorLabels: Record<IndicatorName, string> = {
     rsi: "RSI",
     smaOnRsi: "SMA on RSI",
     stochRsi: "Stoch RSI",
@@ -276,7 +286,7 @@ export const indicatorLabels: Record<string, string> = {
     sma: "SMA",
 };
 
-export const indicatorColors: Record<string, string> = {
+export const indicatorColors: Record<IndicatorName, string> = {
     rsi: "bg-green-800/30 text-green-200",
     smaOnRsi: "bg-indigo-800/30 text-indigo-200",
     stochRsi: "bg-purple-800/30 text-purple-200",

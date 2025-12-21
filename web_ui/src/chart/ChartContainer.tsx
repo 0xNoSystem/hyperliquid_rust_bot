@@ -9,7 +9,8 @@ import { useChartContext } from "./ChartContext";
 import { xToTime } from "./utils";
 import { Settings } from "lucide-react";
 
-import type { TimeFrame, CandleData } from "../types";
+import type { TimeFrame } from "../types";
+import type { CandleData } from "./utils";
 
 interface ChartContainerProps {
     asset: string;
@@ -25,7 +26,6 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
     candleData,
 }) => {
     const {
-        height,
         setCandles,
         selectingInterval,
         startTime,
@@ -111,7 +111,9 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
                             <ChartSettings
                                 initialColors={candleColor}
-                                onApply={setCandleColor}
+                                onApply={(colors) =>
+                                    setCandleColor(colors.up, colors.down)
+                                }
                                 onReset={() =>
                                     setCandleColor("#cf7b15", "#c4c3c2")
                                 }

@@ -1,5 +1,3 @@
-import React from "react";
-
 export default function LoadingDots() {
     return (
         <span className="mt-3 flex items-center gap-1">

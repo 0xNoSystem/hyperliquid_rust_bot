@@ -25,7 +25,7 @@ const ChartSettings: React.FC<ChartSettingsProps> = ({
     };
 
     const handleApply = () => {
-        onApply?.(colors.up, colors.down);
+        onApply?.(colors);
         onClose?.();
     };
 

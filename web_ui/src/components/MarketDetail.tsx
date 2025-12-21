@@ -2,14 +2,13 @@
 // Alternative “Trading Terminal” layout — keyboard/terminal vibes, split panes, neon accents.
 // Keeps the same backend interactions and batching behavior.
 
-import React, { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import TradingViewWidget from "./TradingViewWidget";
-import { BackgroundFX } from "./BackgroundFX";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatUTC } from "../chart/utils";
-import {MAX_DECIMALS, MIN_ORDER_VALUE} from "../consts";
+import { MAX_DECIMALS, MIN_ORDER_VALUE } from "../consts";
 import { ErrorBanner } from "./ErrorBanner";
 
 import {
@@ -26,6 +25,7 @@ import {
 } from "../types";
 import type {
     IndicatorKind,
+    IndicatorName,
     IndexId,
     MarketInfo,
     TimeFrame,
@@ -58,8 +58,6 @@ const Head =
     "px-4 py-3 border-b border-white/10 text-[11px] uppercase tracking-wide text-white/60";
 const Body = "p-4";
 const Chart = "";
-const Kbd =
-    "px-1.5 py-0.5 rounded border border-white/15 bg-black/30 font-mono text-[11px] text-white/80";
 const Input =
     "w-full rounded-lg px-3 py-2 border border-white/10 bg-[#0F1318] text-white focus:outline-none focus:ring-2 focus:ring-emerald-400/30";
 const Select =
@@ -72,12 +70,6 @@ const Chip =
     "inline-flex items-center gap-2 rounded-md border border-white/10 bg-orange-400/10 px-2 py-1 text-[15px] hover:bg-orange-500 hover:cursor-pointer";
 const GridCols =
     "grid grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)_360px] gap-4 p-8 ";
-
-function px(n: number) {
-    if (n > 1 && n < 2) return n.toFixed(4);
-    if (n < 1) return n.toFixed(6);
-    return n.toFixed(2);
-}
 
 function PnlTicker({ pnl }: { pnl: number | null }) {
     if (pnl == null)
@@ -94,9 +86,7 @@ function PnlTicker({ pnl }: { pnl: number | null }) {
 }
 
 type PendingEdit = { id: IndexId; edit: "add" | "remove" };
-const kindKeys = Object.keys(indicatorParamLabels) as Array<
-    keyof typeof indicatorParamLabels
->;
+const kindKeys = Object.keys(indicatorParamLabels) as IndicatorName[];
 
 export default function MarketDetail() {
     const { asset: routeAsset } = useParams<{ asset: string }>();
@@ -132,11 +122,11 @@ export default function MarketDetail() {
     const pxDecimals = meta ? MAX_DECIMALS - meta.szDecimals : 3;
 
     /* ----- local state ----- */
-    const [lev, setLev] = useState<number>(market ? market.lev : 1);
-    const [margin, setMargin] = useState<number>(market ? market.margin : 0);
+    const [lev, setLev] = useState<number>(market?.lev ?? 1);
+    const [margin, setMargin] = useState<number>(market?.margin ?? 0);
 
     // builder
-    const [kindKey, setKindKey] = useState<string>("rsi");
+    const [kindKey, setKindKey] = useState<IndicatorName>("rsi");
     const [p1, setP1] = useState<number>(14);
     const [p2, setP2] = useState<number>(14);
     const [tfSym, setTfSym] = useState<string>("1m");
@@ -212,16 +202,19 @@ export default function MarketDetail() {
 
     const discardPending = () => setPending([]);
     const applyPending = async () => {
+        if (!market) return;
         if (pending.length === 0) return;
         await sendMarketCmd(market.asset, { editIndicators: pending });
         setPending([]);
     };
 
     const onSaveLev = async () => {
+        if (!market) return;
         const clamped = Math.max(1, Math.min(lev, maxLev));
         await sendMarketCmd(market.asset, { updateLeverage: clamped });
     };
     const onSaveMargin = async () => {
+        if (!market) return;
         await sendCommand({
             manualUpdateMargin: [market.asset, Math.max(0, margin)],
         });
@@ -238,6 +231,13 @@ export default function MarketDetail() {
             </div>
         );
     }
+
+    const marketLev = market.lev ?? 0;
+    const marketMargin = market.margin ?? 0;
+    const showMinOrderWarning =
+        market.margin != null &&
+        market.lev != null &&
+        market.margin * market.lev < MIN_ORDER_VALUE;
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
@@ -262,9 +262,9 @@ export default function MarketDetail() {
                     <h1 className="text-[40px] tracking-widest">
                         {market.asset}
                         <span
-                            className={`ml-3 text-[24px] ${leverageColor(market.lev, maxLev)}`}
+                            className={`ml-3 text-[24px] ${leverageColor(marketLev, maxLev)}`}
                         >
-                            {market.lev}x
+                            {marketLev}x
                         </span>
                     </h1>
                 </div>
@@ -317,7 +317,7 @@ export default function MarketDetail() {
                             <div className="text-[10px] text-white/50 uppercase">
                                 Leverage{" "}
                                 <strong className="text-[13px]">
-                                    {market.lev}×
+                                    {marketLev}×
                                 </strong>
                             </div>
                             <div className="mt-2 flex items-center gap-2">
@@ -371,9 +371,16 @@ export default function MarketDetail() {
 
                         {/* Margin */}
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                        {(market.margin * market.lev < MIN_ORDER_VALUE) &&
+                        {showMinOrderWarning &&
                         (<>
-                            <img src="   https://cdn-icons-png.flaticon.com/512/14022/14022507.png " width="12" height="12" alt="" title="" class="img-small"/>    
+                            <img
+                                src="https://cdn-icons-png.flaticon.com/512/14022/14022507.png"
+                                width="12"
+                                height="12"
+                                alt=""
+                                title=""
+                                className="img-small"
+                            />
                             <p className="text-[12px] text-orange-500">MAX ORDER VALUE is lower than 10$, no orders can be passed</p>
                            </> 
                         )
@@ -381,20 +388,18 @@ export default function MarketDetail() {
                             <div
                                 className="cursor-pointer text-[12px] text-white/50 uppercase"
                                 onClick={() =>
-                                    setMargin(totalMargin + market.margin)
+                                    setMargin(totalMargin + marketMargin)
                                 }
                             >
                                 Margin (MAX:{" "}
-                                {(totalMargin + market.margin).toFixed(2)}$)
+                                {(totalMargin + marketMargin).toFixed(2)}$)
                             </div>
                             <div className="mt-2 items-center gap-2">
                                 <div className="flex flex-col py-4">
                                     <input
                                         type="range"
                                         min={0}
-                                        max={(
-                                            totalMargin + market.margin
-                                        ).toFixed(3)}
+                                        max={(totalMargin + marketMargin).toFixed(3)}
                                         step={0.01}
                                         value={margin.toFixed(2)}
                                         onChange={(e) =>
@@ -408,7 +413,7 @@ export default function MarketDetail() {
                                             {(
                                                 (margin /
                                                     (totalMargin +
-                                                        market.margin)) *
+                                                        marketMargin)) *
                                                 100
                                             ).toFixed(1)}
                                             %
@@ -423,7 +428,7 @@ export default function MarketDetail() {
                                         Apply
                                     </button>
                                     <span className="">
-                                        Margin: {market.margin.toFixed(2)} $
+                                        Margin: {marketMargin.toFixed(2)} $
                                     </span>
                                 </div>
                             </div>
@@ -482,7 +487,7 @@ export default function MarketDetail() {
                             {market.indicators.map((data, i) => {
                                 const { kind, timeframe, value } =
                                     decompose(data);
-                                const kindKey = Object.keys(kind)[0] as string;
+                                const kindKey = Object.keys(kind)[0] as IndicatorName;
                                 return (
                                     <div className="group flex flex-col items-center gap-2 rounded-lg border border-white/10 px-2.5 py-1 text-[11px]">
                                         <div
@@ -590,7 +595,7 @@ export default function MarketDetail() {
                                                     <td className="py-2 pr-4 text-right">
                                                         {num(
                                                             t.size,
-                                                            meta.szDecimals
+                                                            meta?.szDecimals ?? 3
                                                         )}
                                                     </td>
 
@@ -671,7 +676,7 @@ export default function MarketDetail() {
                                             <td className="py-2 pr-2 text-right">
                                                 {num(
                                                     market.position.size,
-                                                    meta.szDecimals
+                                                    meta?.szDecimals ?? 3
                                                 )}
                                             </td>
 
@@ -684,14 +689,15 @@ export default function MarketDetail() {
                                             </td>
 
                                             <td className="py-2 text-right text-orange-400">
-                                                {num(
-                                                    computeUPnL(
-                                                        market.position,
-                                                        market.price
-                                                    ),
-                                                    2
-                                                )}
-                                                $
+                                                {market.price == null
+                                                    ? "—"
+                                                    : `${num(
+                                                          computeUPnL(
+                                                              market.position,
+                                                              market.price
+                                                          ),
+                                                          2
+                                                      )}$`}
                                             </td>
                                         </tr>
                                     </tbody>
@@ -710,7 +716,9 @@ export default function MarketDetail() {
                                     className={Select}
                                     value={kindKey}
                                     onChange={(e) => {
-                                        setKindKey(e.target.value);
+                                        setKindKey(
+                                            e.target.value as IndicatorName
+                                        );
                                         setP1(14);
                                         setP2(14);
                                     }}
@@ -830,7 +838,7 @@ export default function MarketDetail() {
                                             const [kind, tf] = e.id;
                                             const k = Object.keys(
                                                 kind
-                                            )[0] as string;
+                                            )[0] as IndicatorName;
                                             return (
                                                 <div
                                                     key={idx}

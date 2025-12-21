@@ -1,5 +1,3 @@
-import React from "react";
-
 /**
  * Layered moving grid/glow background.
  * Place inside a container with `relative` (or use the fixed variant below).

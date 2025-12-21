@@ -1,7 +1,6 @@
-import React, { useMemo, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Pause, Play, Trash2, ExternalLink } from "lucide-react";
-import type { MarketInfo } from "../types";
+import type { MarketInfo, assetMeta, IndicatorName } from "../types";
 import {
     indicatorLabels,
     indicatorColors,
@@ -18,13 +17,15 @@ import { Link } from "react-router-dom";
 
 interface MarketCardProps {
     market: MarketInfo;
+    assetMeta?: assetMeta;
     onTogglePause: (asset: string) => void;
     onRemove: (asset: string) => void;
 }
 
-const PnlBar: React.FC<{ pnl: number }> = ({ pnl }) => {
-    const w = Math.min(100, Math.abs(pnl));
-    const pos = pnl != null ? pnl >= 0 : true;
+const PnlBar = ({ pnl }: { pnl: number | null }) => {
+    const safePnl = pnl ?? 0;
+    const w = Math.min(100, Math.abs(safePnl));
+    const pos = safePnl >= 0;
     return (
         <div className="rounded-md border border-white/10 bg-black p-1">
             <div className="h-1.5 w-full bg-white/5">
@@ -39,23 +40,22 @@ const PnlBar: React.FC<{ pnl: number }> = ({ pnl }) => {
                 }`}
             >
                 {pos ? "+" : ""}
-                {pnl != null ? pnl.toFixed(2) : 0.0}
+                {safePnl.toFixed(2)}
             </div>
         </div>
     );
 };
 
-const MarketCard: React.FC<MarketCardProps> = ({
+const MarketCard = ({
     market,
     assetMeta,
     onTogglePause,
     onRemove,
-}) => {
+}: MarketCardProps) => {
     const {
         asset,
         state,
         price,
-        prev,
         lev,
         margin,
         params,
@@ -201,7 +201,7 @@ const MarketCard: React.FC<MarketCardProps> = ({
                         const { kind, timeframe, value } = decompose(data);
                         const kindKey = Object.keys(
                             kind
-                        )[0] as keyof typeof indicatorColors;
+                        )[0] as IndicatorName;
 
                         return (
                             <div
@@ -296,13 +296,15 @@ const MarketCard: React.FC<MarketCardProps> = ({
                                         </td>
 
                                         <td className="py-2 text-right text-orange-400">
-                                            {num(
-                                                computeUPnL(
-                                                    position,
-                                                    price
-                                                ), 2
-                                            )}
-                                            $
+                                            {price == null
+                                                ? "—"
+                                                : `${num(
+                                                      computeUPnL(
+                                                          position,
+                                                          price
+                                                      ),
+                                                      2
+                                                  )}$`}
                                         </td>
                                     </tr>
                                 </tbody>
@@ -319,7 +321,7 @@ const MarketCard: React.FC<MarketCardProps> = ({
                         </div>
                     </>
                 )}
-                            </div>
+            </div>
         </motion.div>
     );
 };

@@ -1,10 +1,8 @@
 import React from "react";
-import type { AddMarketInfo, IndicatorKind } from "../types";
+import type { AddMarketInfo, IndicatorName } from "../types";
 import {
     indicatorColors,
-    decompose,
     indicatorLabels,
-    get_params,
 } from "../types";
 
 interface CachedMarketProps {
@@ -35,8 +33,8 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                 </span>
                 <span className="w-24">Lev: {tradeParams.lev}x</span>
                 <div className="flex flex-col">
-                    {config.map(([ind, tf], i) => {
-                        const kind = Object.keys(ind)[0] as IndicatorKind;
+                    {(config ?? []).map(([ind, tf], i) => {
+                        const kind = Object.keys(ind)[0] as IndicatorName;
                         return (
                             <div
                                 key={i}
@@ -55,7 +53,6 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
             </div>
             <div className="flex">
                 <button
-                    variant="outline"
                     className="rounded-lg bg-red-500/30 px-3 py-3 hover:cursor-pointer hover:bg-red-500"
                     onClick={() => onRemove(asset)}
                 >
@@ -63,7 +60,6 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                 </button>
 
                 <button
-                    variant="outline"
                     className="ml-2 rounded-lg bg-cyan-300/30 px-4 py-3 hover:cursor-pointer hover:bg-cyan-700"
                     onClick={() => onAdd(asset)}
                 >

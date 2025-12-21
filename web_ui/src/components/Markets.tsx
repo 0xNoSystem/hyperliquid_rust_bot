@@ -1,13 +1,11 @@
-import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Power, Pause, X, AlertCircle } from "lucide-react";
+import { Plus, Power, Pause } from "lucide-react";
 import MarketCard from "./MarketCard";
 import { AddMarket } from "./AddMarket";
 import { CachedMarket } from "./CachedMarket";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { ErrorBanner } from "./ErrorBanner";
-import { BackgroundFX } from "../components/BackgroundFX";
 import LoadingDots from "./Loading";
 
 export default function MarketsPage() {

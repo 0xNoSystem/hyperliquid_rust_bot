@@ -4,6 +4,11 @@ import { timeToX, xToTime, formatUTC, computeTimePan } from "../utils";
 import { MAX_CANDLE_WIDTH } from "../constants";
 import { TF_TO_MS } from "../../types";
 
+type TouchPoint = {
+    clientX: number;
+    clientY: number;
+};
+
 function computeTimeDragZoom(
     initialStart: number,
     initialEnd: number,
@@ -93,8 +98,9 @@ const TimeScale: React.FC = () => {
         crosshairX !== null
             ? xToTime(crosshairX, startTime, endTime, width)
             : null;
+    const crosshairXValue = crosshairX ?? 0;
 
-    const beginTouchDrag = (touch: Touch) => {
+    const beginTouchDrag = (touch: TouchPoint) => {
         touchState.current = {
             mode: "drag",
             startX: touch.clientX,
@@ -103,7 +109,7 @@ const TimeScale: React.FC = () => {
         };
     };
 
-    const beginTouchPinch = (t1: Touch, t2: Touch) => {
+    const beginTouchPinch = (t1: TouchPoint, t2: TouchPoint) => {
         const distance = Math.hypot(
             t2.clientX - t1.clientX,
             t2.clientY - t1.clientY
@@ -319,12 +325,13 @@ const TimeScale: React.FC = () => {
                 ))}
 
                 {/* Crosshair Time Label */}
-                {crosshairTime !== null &&
+                {crosshairX !== null &&
+                    crosshairTime !== null &&
                     mouseOnChart &&
                     !selectingInterval && (
                         <>
                             <rect
-                                x={crosshairX - 70}
+                                x={crosshairXValue - 70}
                                 y={0}
                                 width={160}
                                 height={24}
@@ -334,7 +341,7 @@ const TimeScale: React.FC = () => {
                                 rx={4}
                             />
                             <text
-                                x={crosshairX + 10}
+                                x={crosshairXValue + 10}
                                 y={15}
                                 textAnchor="middle"
                                 fill="white"

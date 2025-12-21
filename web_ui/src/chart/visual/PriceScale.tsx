@@ -78,6 +78,7 @@ const PriceScale: React.FC = () => {
         crosshairY !== null
             ? yToPrice(crosshairY, minPrice, maxPrice, height)
             : null;
+    const crosshairYValue = crosshairY ?? 0;
 
     const onTouchStart = (e: React.TouchEvent) => {
         if (e.touches.length === 1) {
@@ -253,12 +254,15 @@ const PriceScale: React.FC = () => {
             ))}
 
             {/* --- Crosshair Price Label --- */}
-            {crosshairPrice !== null && mouseOnChart && !selectingInterval && (
+            {crosshairY !== null &&
+                crosshairPrice !== null &&
+                mouseOnChart &&
+                !selectingInterval && (
                 <>
                     {/* Background box (TV style) */}
                     <rect
                         x={5}
-                        y={crosshairY - 9}
+                        y={crosshairYValue - 9}
                         width={120}
                         height={18}
                         fill="#2a2a2a"
@@ -270,7 +274,7 @@ const PriceScale: React.FC = () => {
                     {/* Price text */}
                     <text
                         x={65}
-                        y={crosshairY}
+                        y={crosshairYValue}
                         textAnchor="middle"
                         alignmentBaseline="middle"
                         fill="white"

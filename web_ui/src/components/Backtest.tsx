@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
     TIMEFRAME_CAMELCASE,
@@ -168,11 +168,9 @@ function buildCustomRangeISO(
 
 async function loadCandles(
     tf: TimeFrame,
-    intervalOn: boolean,
     startMs: number,
     endMs: number,
     asset: string,
-    updatePrev: (a: number, b: number) => void,
     setCached?: (c: CandleData[]) => void
 ): Promise<CandleData[]> {
     if (!asset) return [];
@@ -217,7 +215,6 @@ async function loadCandles(
 
     // Serve straight from cache when we already have full coverage
     if (missing.length === 0 && cached.length > 0) {
-        updatePrev(rangeStart, rangeEnd);
         return fullCache;
     }
 
@@ -241,7 +238,6 @@ async function loadCandles(
 
     const merged = cacheToArray(tfCache, asset);
 
-    updatePrev(rangeStart, rangeEnd);
     return merged;
 }
 
@@ -256,19 +252,12 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     const nav = useNavigate();
     const { startTime, endTime, setTimeRange } = useChartContext();
     const { universe } = useWebSocketContext();
+    const activeAsset = routeAsset ?? "";
     const defaultStartParts = useMemo(
         () => dateToParts(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
         []
     );
     const defaultEndParts = useMemo(() => dateToParts(new Date()), []);
-
-    const [prevStartTime, setPrevStartTime] = useState(0);
-    const [prevEndTime, setPrevEndTime] = useState(0);
-
-    const updatePrevTimeRange = (newStart: number, newEnd: number) => {
-        setPrevStartTime(newStart);
-        setPrevEndTime(newEnd);
-    };
 
     const [timeframe, setTimeframe] = useState<TimeFrame>("hour4");
     const [intervalOn, setIntervalOn] = useState(false);
@@ -396,11 +385,9 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
             (async () => {
                 const data = await loadCandles(
                     timeframe,
-                    intervalOn,
                     startTime,
                     endTime,
                     routeAsset,
-                    updatePrevTimeRange,
                     setCandleData
                 );
                 setCandleData(data);
@@ -566,7 +553,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         )}
                         <div className="ml-auto">
                             <select
-                                value={routeAsset}
+                                value={activeAsset}
                                 onChange={(e) =>
                                     nav(
                                         `/backtest/${sanitizeAsset(e.target.value)}`
@@ -590,10 +577,10 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                     {/* Asset Title */}
                     <h2 className="rounded-t-lg bg-black/80 p-2 text-center text-2xl font-semibold">
                         <AssetIcon
-                            symbol={sanitizeAsset(routeAsset)}
+                            symbol={sanitizeAsset(activeAsset)}
                             className="mr-2 mb-1 inline-block"
                         />
-                        {routeAsset}
+                        {activeAsset}
                     </h2>
 
                     {/* TF SELECTOR */}
@@ -624,7 +611,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
 
                         {/* CHART PROVIDER + CHART */}
                         <ChartContainer
-                            asset={routeAsset}
+                            asset={activeAsset}
                             tf={timeframe}
                             settingInterval={intervalOn}
                             candleData={candleData}

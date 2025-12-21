@@ -7,17 +7,17 @@ import {
     indicatorParamLabels,
 } from "../types";
 import type {
-    TimeFrame,
     Strategy,
     TradeParams,
     AddMarketInfo,
     IndexId,
     IndicatorKind,
+    IndicatorName,
     AddMarketProps,
 } from "../types";
 
-const strategyOptions: Strategy[] = ["rsiEmaScalp",  "srsiAdxScalp"];
-const indicatorKinds: IndicatorKind[] = [
+const strategyOptions: Strategy[] = ["rsiEmaScalp", "srsiAdxScalp"];
+const indicatorKinds: IndicatorName[] = [
     "rsi",
     "smaOnRsi",
     "stochRsi",
@@ -28,9 +28,8 @@ const indicatorKinds: IndicatorKind[] = [
     "sma",
 ];
 
-function getMaxLeverage(name: string): number | undefined {
-    return assets.find((u) => u.name === name)?.maxLeverage;
-}
+type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
+type ConfigDraft = [IndicatorKind, TimeframeKey];
 
 export const AddMarket: React.FC<AddMarketProps> = ({
     onClose,
@@ -44,12 +43,12 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     const [strategy, setStrategy] = useState<Strategy>("rsiEmaScalp");
 
     const [showConfig, setShowConfig] = useState(false);
-    const [config, setConfig] = useState<IndexId[]>([]);
+    const [config, setConfig] = useState<ConfigDraft[]>([]);
 
-    const [newKind, setNewKind] = useState<IndicatorKind>("rsi");
+    const [newKind, setNewKind] = useState<IndicatorName>("rsi");
     const [newParam, setNewParam] = useState(14);
     const [newParam2, setNewParam2] = useState(14);
-    const [newTf, setNewTf] = useState<keyof typeof TIMEFRAME_CAMELCASE>("1m");
+    const [newTf, setNewTf] = useState<TimeframeKey>("1m");
 
     const computedAmount = useMemo(
         () => (marginType === "alloc" ? totalMargin * (marginValue / 100) : 0),
@@ -57,7 +56,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     );
 
     const handleAddIndicator = () => {
-        let cfg: any;
+        let cfg: IndicatorKind;
         switch (newKind) {
             case "emaCross":
                 cfg = { emaCross: { short: newParam, long: newParam2 } };
@@ -82,11 +81,23 @@ export const AddMarket: React.FC<AddMarketProps> = ({
             case "adx":
                 cfg = { adx: { periods: newParam, di_length: newParam2 } };
                 break;
+            case "rsi":
+                cfg = { rsi: newParam };
+                break;
+            case "atr":
+                cfg = { atr: newParam };
+                break;
+            case "ema":
+                cfg = { ema: newParam };
+                break;
+            case "sma":
+                cfg = { sma: newParam };
+                break;
             default:
-                cfg = { [newKind]: newParam };
+                cfg = { rsi: newParam };
         }
 
-        const newItem: [any, string] = [cfg, newTf];
+        const newItem: ConfigDraft = [cfg, newTf];
 
         setConfig((prev) => {
             const exists = prev.some(
@@ -103,7 +114,10 @@ export const AddMarket: React.FC<AddMarketProps> = ({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const validConfig = config.map(([ind, tf]) => [ind, into(tf)]);
+        const validConfig: IndexId[] = config.map(([ind, tf]) => [
+            ind,
+            into(tf),
+        ]);
         const info: AddMarketInfo = {
             asset: asset,
             marginAlloc:
@@ -180,7 +194,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         <select
                             value={marginType}
                             onChange={(e) =>
-                                setMarginType(e.target.value as any)
+                                setMarginType(e.target.value as "alloc" | "amount")
                             }
                             className={selectClass}
                         >
@@ -288,7 +302,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             {config.map(([ind, tf], i) => {
                                 const kind = Object.keys(
                                     ind
-                                )[0] as IndicatorKind;
+                                )[0] as IndicatorName;
                                 return (
                                     <div
                                         key={i}
@@ -327,7 +341,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             <select
                                 value={newKind}
                                 onChange={(e) =>
-                                    setNewKind(e.target.value as IndicatorKind)
+                                    setNewKind(e.target.value as IndicatorName)
                                 }
                                 className={selectClass}
                             >
@@ -389,7 +403,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             <select
                                 value={newTf}
                                 onChange={(e) =>
-                                    setNewTf(e.target.value as any)
+                                    setNewTf(e.target.value as TimeframeKey)
                                 }
                                 className={selectClass}
                             >

@@ -1,11 +1,3 @@
-function scaleY(price, min, max, height) {
-    return height - ((price - min) / (max - min)) * height;
-}
-
-function scaleX(i, count, width) {
-    return (i / count) * width;
-}
-
 export async function fetchCandles(
     asset: string,
     startTime: number,
@@ -54,19 +46,6 @@ export async function fetchCandles(
     return all;
 }
 
-export interface HyperliquidCandle {
-    T: number;
-    c: string;
-    h: string;
-    i: string;
-    l: string;
-    n: number;
-    o: string;
-    s: string;
-    t: number;
-    v: string;
-}
-
 export interface CandleData {
     open: number;
     high: number;
@@ -78,21 +57,6 @@ export interface CandleData {
     trades: number;
     asset: string;
     interval: string;
-}
-
-function parseCandle(raw: HyperliquidCandle): CandleData {
-    return {
-        open: parseFloat(raw.o),
-        high: parseFloat(raw.h),
-        low: parseFloat(raw.l),
-        close: parseFloat(raw.c),
-        start: raw.t,
-        end: raw.T,
-        volume: parseFloat(raw.v),
-        trades: raw.n,
-        asset: raw.s,
-        interval: raw.i,
-    };
 }
 
 export function priceToY(

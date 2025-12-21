@@ -12,7 +12,6 @@ const clamp = (value: number, min: number, max: number) => {
 const IntervalOverlay: React.FC = () => {
     const {
         width,
-        height,
         startTime,
         endTime,
         selectingInterval,
@@ -96,7 +95,6 @@ const IntervalOverlay: React.FC = () => {
             const startClientX = e.clientX;
             const initialStart = start;
             const initialEnd = end;
-            const windowSize = initialEnd - initialStart;
 
             const handleMove = (ev: MouseEvent) => {
                 const dx = ev.clientX - startClientX;

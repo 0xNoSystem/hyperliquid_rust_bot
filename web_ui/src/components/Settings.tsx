@@ -1,7 +1,6 @@
-import React, { useState } from "react";
-import { AlertCircle, Link as LinkIcon } from "lucide-react";
+import { useState } from "react";
+import { Link as LinkIcon, ArrowLeft, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export default function Settings() {

@@ -41,6 +41,12 @@ type CandleCanvasProps = {
     onMouseLeave?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
 };
 
+type TouchPoint = {
+    identifier: number;
+    clientX: number;
+    clientY: number;
+};
+
 const CandleCanvas: React.FC<CandleCanvasProps> = ({
     width,
     height,
@@ -686,7 +692,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     // ------------------------------------------------------------
     // Touch interactions (pan + pinch zoom)
     // ------------------------------------------------------------
-    const startTouchPan = (touch: Touch) => {
+    const startTouchPan = (touch: TouchPoint) => {
         touchState.current = {
             mode: "pan",
             touchId: touch.identifier,
@@ -699,7 +705,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         };
     };
 
-    const startTouchPinch = (t1: Touch, t2: Touch) => {
+    const startTouchPinch = (t1: TouchPoint, t2: TouchPoint) => {
         const distance = Math.hypot(
             t2.clientX - t1.clientX,
             t2.clientY - t1.clientY

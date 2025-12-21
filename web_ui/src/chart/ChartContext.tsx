@@ -1,4 +1,5 @@
 import { createContext, useContext, useState } from "react";
+import type { ReactNode } from "react";
 import type { TimeFrame } from "../types";
 import type { CandleData } from "./utils";
 
@@ -12,7 +13,7 @@ interface ChartContextState {
 
     candles: CandleData[];
     candleColor: { up: string; down: string };
-    timeframe: TimeFrame;
+    timeframe: TimeFrame | null;
 
     minPrice: number;
     maxPrice: number;
@@ -36,6 +37,7 @@ interface ChartContextActions {
     setTf: (tf: TimeFrame) => void;
 
     setCandles: (c: CandleData[]) => void;
+    setCandleColor: (up: string | null, down: string | null) => void;
 
     setPriceRange: (min: number, max: number) => void;
     setManualPriceRange: (manual: boolean) => void;
@@ -51,7 +53,9 @@ interface ChartContextActions {
     setMouseOnChart: (y: boolean) => void;
 }
 
-export default function ChartProvider({ children }) {
+type ChartProviderProps = { children: ReactNode };
+
+export default function ChartProvider({ children }: ChartProviderProps) {
     const [width, setWidth] = useState(0);
     const [height, setHeight] = useState(0);
 

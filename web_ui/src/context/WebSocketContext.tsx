@@ -10,11 +10,9 @@ import type {
     editMarketInfo,
     AddMarketInfo,
     MarketInfo,
-    MarketTradeInfo,
     Message,
     assetMargin,
     assetMeta,
-    assetPrice,
 } from "../types";
 import {API_URL, WS_ENDPOINT} from "../consts";
 import { market_add_info } from "../types";
@@ -34,7 +32,7 @@ interface WebSocketContextValue {
     cacheMarket: (market: MarketInfo) => void;
     deleteCachedMarket: (asset: string) => void;
     requestRemoveMarket: (asset: string) => Promise<void>;
-    requestToggleMarket: (asset: string, pause: bool) => Promise<void>;
+    requestToggleMarket: (asset: string, pause: boolean) => Promise<void>;
     requestCloseAll: () => Promise<void>;
     requestPauseAll: () => Promise<void>;
 }
@@ -45,16 +43,9 @@ const WebSocketContext = createContext<WebSocketContextValue | undefined>(
 
 const DEFAULT_PLACEHOLDER_PARAMS: MarketInfo["params"] = {
     timeFrame: "min1",
-    lev: 0,
+    lev: 1,
     tradeTime: 0,
-    strategy: {
-        custom: {
-            risk: "Normal",
-            style: "Scalp",
-            stance: "Neutral",
-            followTrend: false,
-        },
-    },
+    strategy: "rsiEmaScalp",
 };
 
 const dedupeMarkets = (markets: MarketInfo[]): MarketInfo[] => {
@@ -73,7 +64,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     const wsRef = useRef<WebSocket | null>(null);
-    const reconnectRef = useRef<number>();
+    const reconnectRef = useRef<number | null>(null);
     const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const hasLocalMarketsRef = useRef(false);
     const activeRef = useRef(true);
@@ -191,17 +182,21 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
             if ("confirmMarket" in payload) {
                 const asset = payload.confirmMarket.asset;
+                const readyMarket: MarketInfo = {
+                    ...payload.confirmMarket,
+                    state: "Ready",
+                };
                 setMarkets((prev) => {
                     const has = prev.some((m) => m.asset === asset);
                     const updated = has
                         ? prev.map((m) =>
                               m.asset === asset
-                                  ? { ...payload.confirmMarket, state: "Ready" }
+                                  ? readyMarket
                                   : m
                           )
                         : [
                               ...prev,
-                              { ...payload.confirmMarket, state: "Ready" },
+                              readyMarket,
                           ];
                     return dedupeMarkets(updated);
                 });
@@ -210,26 +205,24 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
             if ("preconfirmMarket" in payload) {
                 const asset = payload.preconfirmMarket;
+                const loadingMarket: MarketInfo = {
+                    asset,
+                    state: "Loading",
+                    price: null,
+                    prev: null,
+                    lev: null,
+                    margin: null,
+                    pnl: null,
+                    indicators: [],
+                    trades: [],
+                    params: DEFAULT_PLACEHOLDER_PARAMS,
+                    isPaused: false,
+                    position: null,
+                };
                 setMarkets((prev) =>
                     prev.some((m) => m.asset === asset)
                         ? prev
-                        : [
-                              ...prev,
-                              {
-                                  asset,
-                                  state: "Loading",
-                                  price: null,
-                                  prev: null,
-                                  lev: null,
-                                  margin: null,
-                                  pnl: null,
-                                  indicators: [],
-                                  trades: [],
-                                  params: DEFAULT_PLACEHOLDER_PARAMS,
-                                  isPaused: false,
-                                  position: null,
-                              },
-                          ]
+                        : [...prev, loadingMarket]
                 );
                 return;
             }
@@ -301,10 +294,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             }
 
             if ("loadSession" in payload) {
-                const [sessionMarkets, meta] = payload.loadSession as [
-                    MarketInfo[],
-                    assetMeta[],
-                ];
+                const [sessionMarkets, meta] = payload.loadSession;
                 setUniverse(meta);
                 setMarkets((prev) => {
                     if (hasLocalMarketsRef.current && prev.length > 0)
