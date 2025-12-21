@@ -16,6 +16,7 @@ import {
     computePricePan,
 } from "./utils";
 import { MIN_CANDLE_WIDTH, MAX_CANDLE_WIDTH } from "./constants";
+import { TF_TO_MS } from "../types";
 import type { TimeFrame } from "../types";
 import type { CandleData } from "./utils";
 
@@ -634,6 +635,32 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     // ------------------------------------------------------------
     // Crosshair
     // ------------------------------------------------------------
+    const snapToMonthCenter = (timeMs: number) => {
+        const d = new Date(timeMs);
+        const year = d.getUTCFullYear();
+        const month = d.getUTCMonth();
+        const center = (y: number, m: number) => {
+            const start = Date.UTC(y, m, 1);
+            const next = Date.UTC(y, m + 1, 1);
+            return start + (next - start) / 2;
+        };
+        const candidates = [
+            center(year, month - 1),
+            center(year, month),
+            center(year, month + 1),
+        ];
+        let best = candidates[0];
+        let bestDiff = Math.abs(best - timeMs);
+        for (let i = 1; i < candidates.length; i++) {
+            const diff = Math.abs(candidates[i] - timeMs);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = candidates[i];
+            }
+        }
+        return best;
+    };
+
     const handleMove = (e: React.MouseEvent<Element>) => {
         const rect = e.currentTarget.getBoundingClientRect();
         const effectiveWidth = width || rect.width || 0;
@@ -651,10 +678,36 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
             !effectiveWidth ||
             !effectiveHeight ||
             selectingInterval ||
-            drawCandles.length === 0 ||
             endTime <= startTime
         ) {
             setCrosshair(x, y);
+            return;
+        }
+
+        const rawTime =
+            startTime +
+            (x / Math.max(1, effectiveWidth)) * (endTime - startTime);
+        const stepMs = TF_TO_MS[tf] ?? 0;
+
+        if (stepMs > 0) {
+            const snappedTime =
+                tf === "month"
+                    ? snapToMonthCenter(rawTime)
+                    : (() => {
+                          const anchor =
+                              candles.length > 0 ? candles[0].start : startTime;
+                          const centerOffset = stepMs / 2;
+                          const origin = anchor + centerOffset;
+                          const idx = Math.round((rawTime - origin) / stepMs);
+                          return origin + idx * stepMs;
+                      })();
+            const snappedX = timeToX(
+                snappedTime,
+                startTime,
+                endTime,
+                effectiveWidth
+            );
+            setCrosshair(Math.min(Math.max(snappedX, 0), effectiveWidth), y);
             return;
         }
 
