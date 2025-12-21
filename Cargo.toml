@@ -27,6 +27,6 @@ alloy = { version = "1.0", default-features = false, features = [
 ] }
 reqwest = "0.12.24"
 
-
-
+[profile.release]
+panic = "abort"
 

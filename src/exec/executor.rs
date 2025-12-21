@@ -199,6 +199,10 @@ impl Executor {
             if roundf!(resting.sz, self.asset.sz_decimals) == 0.0 {
                 clean_up = true;
             }
+        }else{
+            if fill.intent != PositionOp::Close{
+                info!("Manual trade opened by the user, will be tracked");
+            }
         }
 
         if clean_up {
@@ -232,6 +236,7 @@ impl Executor {
 
         //Clean up resting orders in case of user closing a position manually on HL's interface
         if trade_info.is_some() && !clean_up {
+            info!("Trade has been closed manually on the exchange, canceling local resting orders...");
             let _ = self.cancel_all_resting().await;
         }
 

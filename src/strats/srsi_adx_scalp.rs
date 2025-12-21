@@ -135,7 +135,6 @@ impl Strat for SrsiAdxScalp {
                 self.active_window_start = Some(now);
             }
         }
-
         self.prev_rsi_above_sma = Some(rsi_above_sma);
         order
     }
