@@ -125,7 +125,7 @@ export default function MarketDetail() {
         [universe, market]
     );
 
-    const pxDecimals = meta ? MAX_DECIMALS - meta.szDecimals : 3;
+    const pxDecimals = meta ? MAX_DECIMALS - meta.szDecimals - 1 : 3;
 
     /* ----- local state ----- */
     const [lev, setLev] = useState<number>(market?.lev ?? 1);
@@ -706,13 +706,16 @@ export default function MarketDetail() {
                                             <td className="py-2 text-right text-orange-400">
                                                 {market.price == null
                                                     ? "—"
-                                                    : `${num(
-                                                          computeUPnL(
-                                                              market.position,
-                                                              market.price
-                                                          ),
-                                                          2
-                                                      )}$`}
+                                                    : (() => {
+                                                          const [upnl, change] =
+                                                              computeUPnL(
+                                                                  market.position,
+                                                                  market.price,
+                                                                  market.lev
+                                                              );
+
+                                                          return `${num(upnl, 2)}$ (${num(change * 100, 2)}%)`;
+                                                      })()}
                                             </td>
                                         </tr>
                                     </tbody>

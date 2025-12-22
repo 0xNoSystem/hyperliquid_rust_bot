@@ -66,7 +66,7 @@ const MarketCard = ({
     } = market;
     const { strategy } = params;
     const szDecimals = assetMeta ? assetMeta.szDecimals : 3;
-    const pxDecimals = MAX_DECIMALS - szDecimals;
+    const pxDecimals = MAX_DECIMALS - szDecimals - 1;
     const format = (n: number) => n.toFixed(pxDecimals);
 
     const price_color = "orange";
@@ -292,13 +292,18 @@ const MarketCard = ({
                                                 <td className="py-2 text-right text-orange-400">
                                                     {price == null
                                                         ? "—"
-                                                        : `${num(
-                                                              computeUPnL(
+                                                        : (() => {
+                                                              const [
+                                                                  upnl,
+                                                                  change,
+                                                              ] = computeUPnL(
                                                                   position,
-                                                                  price
-                                                              ),
-                                                              2
-                                                          )}$`}
+                                                                  price,
+                                                                  lev
+                                                              );
+
+                                                              return `${num(upnl, 2)}$ (${num(change * 100, 2)}%)`;
+                                                          })()}
                                                 </td>
                                             </tr>
                                         </tbody>

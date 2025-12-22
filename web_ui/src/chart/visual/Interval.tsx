@@ -57,8 +57,7 @@ const IntervalOverlay: React.FC = () => {
     const lastCandleEnd =
         candles.length > 0 ? candles[candles.length - 1].end : endTime;
     const maxTime = Math.min(endTime, lastCandleEnd);
-    const minSelectableTime =
-        candles.length > 0 ? candles[0].start : startTime;
+    const minSelectableTime = candles.length > 0 ? candles[0].start : startTime;
     const minBound = Math.max(startTime, minSelectableTime);
     const stepMs = timeframe ? (TF_TO_MS[timeframe] ?? 0) : 0;
     const stepOrigin =

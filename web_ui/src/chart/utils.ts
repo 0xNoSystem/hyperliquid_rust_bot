@@ -24,8 +24,9 @@ export async function fetchCandles(
     let fetchStart = startTime;
 
     while (fetchStart < endTime) {
-        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}` +
-                    `&interval=${interval}&startTime=${fetchStart}&endTime=${endTime}&limit=1500`;
+        const url =
+            `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}` +
+            `&interval=${interval}&startTime=${fetchStart}&endTime=${endTime}&limit=1500`;
 
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Binance error ${res.status}`);

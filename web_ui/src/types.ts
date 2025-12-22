@@ -328,11 +328,18 @@ export const sanitizeAsset = (asset: string) => {
 
 export function computeUPnL(
     position: OpenPositionLocal,
-    marketPrice: number
-): number {
+    marketPrice: number,
+    leverage: number
+): [number, number] {
     const direction = position.side === "long" ? 1 : -1;
 
-    return (marketPrice - position.entryPx) * direction * position.size;
+    const upnl = (marketPrice - position.entryPx) * direction * position.size;
+
+    const margin = (position.entryPx * position.size) / leverage;
+
+    const relativeChange = upnl / margin;
+
+    return [upnl, relativeChange];
 }
 
 export const formatPrice = (n: number) => {

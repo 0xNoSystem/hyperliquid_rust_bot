@@ -35,6 +35,7 @@ pub struct Market {
     senders: MarketSenders,
     pub active_tfs: HashSet<TimeFrame>,
     pub margin: f64,
+
 }
 
 impl Market {
@@ -189,25 +190,29 @@ impl Market {
 
         let asset_name: Arc<str> = Arc::from(self.asset.name.clone());
         let candle_stream_handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-            let mut tick: u64 = 0;
-            let mut curr = f64::from_bits(1);
-            while let Some(Message::Candle(candle)) = self.receivers.price_rv.recv().await {
-                let price = parse_candle(candle.data)?;
+    
+      while let Some(msg) = self.receivers.price_rv.recv().await {
+          match msg {
+              Message::Candle(candle) => {
+                  let price = parse_candle(candle.data)?;
 
-                let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
-                if price.close != curr && tick.is_multiple_of(2) {
-                    let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
-                        UpdateFrontend::MarketInfoEdit((
-                            asset_name.clone().to_string(),
-                            EditMarketInfo::Price(price.close),
-                        )),
-                    ));
-                    curr = price.close;
-                };
-                tick += 1;
-            }
-            Ok(())
-        });
+                  let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
+                  let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
+                      UpdateFrontend::MarketInfoEdit((
+                          asset_name.clone().to_string(),
+                          EditMarketInfo::Price(price.close),
+                      )),
+                  ));
+              }
+              Message::NoData => {
+                  info!("{} price stream disconnected, receiver is still alive and well", &asset_name);
+              }
+              _ => {}
+          }
+      }
+      Ok(())
+  });
+
 
         //listen to changes and trade results
         let engine_update_tx = self.senders.engine_tx.clone();

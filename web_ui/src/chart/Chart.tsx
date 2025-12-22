@@ -116,12 +116,7 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
                         endTime,
                         cssWidth
                     );
-                    const endX = timeToX(
-                        cd.end,
-                        startTime,
-                        endTime,
-                        cssWidth
-                    );
+                    const endX = timeToX(cd.end, startTime, endTime, cssWidth);
                     const centerX = (startX + endX) / 2;
                     const lineX = centerX;
                     const yHigh = priceToY(
@@ -157,12 +152,7 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
                         endTime,
                         cssWidth
                     );
-                    const endX = timeToX(
-                        cd.end,
-                        startTime,
-                        endTime,
-                        cssWidth
-                    );
+                    const endX = timeToX(cd.end, startTime, endTime, cssWidth);
                     const intervalWidth = Math.max(0, endX - startX);
                     const bodyWidth = Math.min(candleWidth, intervalWidth);
                     if (bodyWidth <= 0) continue;
