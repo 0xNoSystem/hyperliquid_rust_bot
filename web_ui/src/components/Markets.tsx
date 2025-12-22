@@ -4,7 +4,7 @@ import { Plus, Power, Pause } from "lucide-react";
 import MarketCard from "./MarketCard";
 import { AddMarket } from "./AddMarket";
 import { CachedMarket } from "./CachedMarket";
-import { useWebSocketContext } from "../context/WebSocketContext";
+import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { ErrorBanner } from "./ErrorBanner";
 import LoadingDots from "./Loading";
 

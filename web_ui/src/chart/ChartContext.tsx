@@ -1,57 +1,8 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { TimeFrame } from "../types";
 import type { CandleData } from "./utils";
-
-export const ChartContext = createContext<
-    ChartContextState & ChartContextActions
->({} as ChartContextState & ChartContextActions);
-
-interface ChartContextState {
-    width: number;
-    height: number;
-
-    candles: CandleData[];
-    candleColor: { up: string; down: string };
-    timeframe: TimeFrame | null;
-
-    minPrice: number;
-    maxPrice: number;
-    manualPriceRange: boolean;
-
-    startTime: number;
-    endTime: number;
-
-    crosshairX: number | null;
-    crosshairY: number | null;
-
-    selectingInterval: boolean;
-    intervalStartX: number | null;
-    intervalEndX: number | null;
-
-    mouseOnChart: boolean;
-}
-
-interface ChartContextActions {
-    setSize: (w: number, h: number) => void;
-    setTf: (tf: TimeFrame) => void;
-
-    setCandles: (c: CandleData[]) => void;
-    setCandleColor: (up: string | null, down: string | null) => void;
-
-    setPriceRange: (min: number, max: number) => void;
-    setManualPriceRange: (manual: boolean) => void;
-
-    setTimeRange: (start: number, end: number) => void;
-
-    setCrosshair: (x: number | null, y: number | null) => void;
-
-    setSelectingInterval: (bool: boolean) => void;
-    setIntervalStartX: (x: number | null) => void;
-    setIntervalEndX: (x: number | null) => void;
-
-    setMouseOnChart: (y: boolean) => void;
-}
+import { ChartContext } from "./ChartContextStore";
 
 type ChartProviderProps = { children: ReactNode };
 
@@ -229,8 +180,4 @@ export default function ChartProvider({ children }: ChartProviderProps) {
             {children}
         </ChartContext.Provider>
     );
-}
-
-export function useChartContext() {
-    return useContext(ChartContext);
 }

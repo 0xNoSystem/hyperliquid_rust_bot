@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
     TIMEFRAME_CAMELCASE,
@@ -12,8 +12,8 @@ import { getTimeframeCache } from "../chart/candleCache";
 import { fetchCandles } from "../chart/utils";
 import AssetIcon from "../chart/visual/AssetIcon";
 import type { CandleData } from "../chart/utils";
-import { useChartContext } from "../chart/ChartContext";
-import { useWebSocketContext } from "../context/WebSocketContext";
+import { useChartContext } from "../chart/ChartContextStore";
+import { useWebSocketContext } from "../context/WebSocketContextStore";
 
 type RangePreset = "24H" | "7D" | "30D" | "YTD" | "CUSTOM";
 
@@ -290,29 +290,36 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         }
     };
 
-    const applyPresetTimeRange = (preset: RangePreset) => {
-        const now = Date.now();
-        switch (preset) {
-            case "24H":
-                setTimeRange(now - 24 * 60 * 60 * 1000, now);
-                break;
-            case "7D":
-                setTimeRange(now - 7 * 24 * 60 * 60 * 1000, now);
-                break;
-            case "30D":
-                setTimeRange(now - 30 * 24 * 60 * 60 * 1000, now);
-                break;
-            case "YTD": {
-                const current = new Date();
-                const startOfYear = Date.UTC(current.getUTCFullYear(), 0, 1);
-                setTimeRange(startOfYear, now);
-                break;
+    const applyPresetTimeRange = useCallback(
+        (preset: RangePreset) => {
+            const now = Date.now();
+            switch (preset) {
+                case "24H":
+                    setTimeRange(now - 24 * 60 * 60 * 1000, now);
+                    break;
+                case "7D":
+                    setTimeRange(now - 7 * 24 * 60 * 60 * 1000, now);
+                    break;
+                case "30D":
+                    setTimeRange(now - 30 * 24 * 60 * 60 * 1000, now);
+                    break;
+                case "YTD": {
+                    const current = new Date();
+                    const startOfYear = Date.UTC(
+                        current.getUTCFullYear(),
+                        0,
+                        1
+                    );
+                    setTimeRange(startOfYear, now);
+                    break;
+                }
+                default:
+                    // CUSTOM handled separately
+                    break;
             }
-            default:
-                // CUSTOM handled separately
-                break;
-        }
-    };
+        },
+        [setTimeRange]
+    );
 
     const handlePresetSelect = (preset: RangePreset) => {
         if (preset === rangePreset) return;
@@ -375,7 +382,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         if (rangePreset !== "CUSTOM") {
             applyPresetTimeRange(rangePreset);
         }
-    }, []);
+    }, [applyPresetTimeRange, rangePreset]);
 
     useEffect(() => {
         if (!routeAsset) return;

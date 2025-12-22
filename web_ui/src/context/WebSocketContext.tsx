@@ -1,11 +1,4 @@
-import React, {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useRef,
-    useState,
-} from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type {
     editMarketInfo,
     AddMarketInfo,
@@ -16,30 +9,12 @@ import type {
 } from "../types";
 import { API_URL, WS_ENDPOINT } from "../consts";
 import { market_add_info } from "../types";
+import type { WebSocketContextValue } from "./WebSocketContextStore";
+import { WebSocketContext } from "./WebSocketContextStore";
 
 const CACHED_MARKETS_KEY = "cachedMarkets.v1";
 const MARKET_INFO_KEY = "markets.v1";
 const UNIVERSE_KEY = "universe.v1";
-
-interface WebSocketContextValue {
-    markets: MarketInfo[];
-    universe: assetMeta[];
-    cachedMarkets: AddMarketInfo[];
-    totalMargin: number;
-    errorMsg: string | null;
-    sendCommand: (body: unknown) => Promise<Response>;
-    dismissError: () => void;
-    cacheMarket: (market: MarketInfo) => void;
-    deleteCachedMarket: (asset: string) => void;
-    requestRemoveMarket: (asset: string) => Promise<void>;
-    requestToggleMarket: (asset: string, pause: boolean) => Promise<void>;
-    requestCloseAll: () => Promise<void>;
-    requestPauseAll: () => Promise<void>;
-}
-
-const WebSocketContext = createContext<WebSocketContextValue | undefined>(
-    undefined
-);
 
 const DEFAULT_PLACEHOLDER_PARAMS: MarketInfo["params"] = {
     timeFrame: "min1",
@@ -103,11 +78,15 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 hasLocalMarketsRef.current = parsed.length > 0;
                 setMarkets(dedupeMarkets(parsed));
             }
-        } catch {}
+        } catch (err) {
+            void err;
+        }
         try {
             const raw = localStorage.getItem(CACHED_MARKETS_KEY);
             if (raw) setCachedMarkets(JSON.parse(raw));
-        } catch {}
+        } catch (err) {
+            void err;
+        }
 
         try {
             const raw = localStorage.getItem(MARKET_INFO_KEY);
@@ -115,7 +94,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 const parsed = JSON.parse(raw) as assetMeta[];
                 setUniverse(parsed);
             }
-        } catch {}
+        } catch (err) {
+            void err;
+        }
     }, []);
 
     useEffect(() => {
@@ -143,7 +124,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                     const parsed = JSON.parse(e.newValue) as MarketInfo[];
                     hasLocalMarketsRef.current = parsed.length > 0;
                     setMarkets(dedupeMarkets(parsed));
-                } catch {}
+                } catch (err) {
+                    void err;
+                }
             }
             if (e.key === CACHED_MARKETS_KEY) {
                 if (!e.newValue) {
@@ -152,7 +135,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 }
                 try {
                     setCachedMarkets(JSON.parse(e.newValue));
-                } catch {}
+                } catch (err) {
+                    void err;
+                }
             }
             if (e.key === UNIVERSE_KEY) {
                 if (!e.newValue) {
@@ -165,7 +150,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                         const parsed = JSON.parse(raw) as assetMeta[];
                         setUniverse(parsed);
                     }
-                } catch {}
+                } catch (err) {
+                    void err;
+                }
             }
         };
         window.addEventListener("storage", onStorage);
@@ -341,7 +328,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             wsRef.current = null;
             if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
         };
-    }, []); // important: run once
+    }, [handleMessage, sendCommand]);
 
     /** ------------ exposed API ------------ **/
     const cacheMarket = useCallback((market: MarketInfo) => {
@@ -417,13 +404,4 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             {children}
         </WebSocketContext.Provider>
     );
-};
-
-export const useWebSocketContext = (): WebSocketContextValue => {
-    const ctx = useContext(WebSocketContext);
-    if (!ctx)
-        throw new Error(
-            "useWebSocketContext must be used within WebSocketProvider"
-        );
-    return ctx;
 };

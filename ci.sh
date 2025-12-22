@@ -7,6 +7,7 @@ cargo build --release
 cargo test
 
 cd ./web_ui
+bun run lint
 bun run build
 
 echo "CI checks passed successfully."

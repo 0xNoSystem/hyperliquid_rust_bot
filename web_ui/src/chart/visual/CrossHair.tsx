@@ -1,6 +1,6 @@
-import { useChartContext } from "../ChartContext";
+import { useChartContext } from "../ChartContextStore";
 
-const CrossHair = ({}) => {
+const CrossHair = () => {
     const { crosshairX, crosshairY, height, width } = useChartContext();
     if (crosshairX === null || crosshairY === null) return null;
 

@@ -5,7 +5,7 @@ import TimeScale from "./visual/TimeScale";
 import IntervalOverlay from "./visual/Interval";
 import ChartSettings from "./visual/ChartSettings";
 import CandleInfo from "./visual/CandleInfo";
-import { useChartContext } from "./ChartContext";
+import { useChartContext } from "./ChartContextStore";
 import { xToTime } from "./utils";
 import { Settings } from "lucide-react";
 

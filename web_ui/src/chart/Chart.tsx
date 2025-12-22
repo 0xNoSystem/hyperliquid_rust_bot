@@ -6,7 +6,7 @@ import React, {
     useCallback,
 } from "react";
 import CrossHair from "./visual/CrossHair";
-import { useChartContext } from "./ChartContext";
+import { useChartContext } from "./ChartContextStore";
 
 import {
     priceToY,
@@ -110,10 +110,20 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
                     const cd = candles[i];
                     if (cd.close >= cd.open !== isUp) continue;
 
-                    const centerX =
-                        timeToX(cd.start, startTime, endTime, cssWidth) +
-                        candleWidth / 2;
-                    const lineX = Math.round(centerX) + 0.5;
+                    const startX = timeToX(
+                        cd.start,
+                        startTime,
+                        endTime,
+                        cssWidth
+                    );
+                    const endX = timeToX(
+                        cd.end,
+                        startTime,
+                        endTime,
+                        cssWidth
+                    );
+                    const centerX = (startX + endX) / 2;
+                    const lineX = centerX;
                     const yHigh = priceToY(
                         cd.high,
                         minPrice,
@@ -141,7 +151,23 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
                     const cd = candles[i];
                     if (cd.close >= cd.open !== isUp) continue;
 
-                    const x = timeToX(cd.start, startTime, endTime, cssWidth);
+                    const startX = timeToX(
+                        cd.start,
+                        startTime,
+                        endTime,
+                        cssWidth
+                    );
+                    const endX = timeToX(
+                        cd.end,
+                        startTime,
+                        endTime,
+                        cssWidth
+                    );
+                    const intervalWidth = Math.max(0, endX - startX);
+                    const bodyWidth = Math.min(candleWidth, intervalWidth);
+                    if (bodyWidth <= 0) continue;
+                    const centerX = (startX + endX) / 2;
+                    const x = centerX - bodyWidth / 2;
                     const yOpen = priceToY(
                         cd.open,
                         minPrice,
@@ -157,7 +183,7 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
                     const top = Math.min(yOpen, yClose);
                     const heightPx = Math.max(1, Math.abs(yOpen - yClose));
 
-                    ctx.fillRect(x, top, candleWidth, heightPx);
+                    ctx.fillRect(x, top, bodyWidth, heightPx);
                 }
             };
 
@@ -320,6 +346,7 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     }, [
         tf,
         settingInterval,
+        setTf,
         setSelectingInterval,
         setIntervalStartX,
         setIntervalEndX,
@@ -374,12 +401,17 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         let spacing = Infinity;
         for (let i = 1; i < drawCandles.length; i++) {
             const prevX = timeToX(
-                drawCandles[i - 1].start,
+                (drawCandles[i - 1].start + drawCandles[i - 1].end) / 2,
                 startTime,
                 endTime,
                 width
             );
-            const x = timeToX(drawCandles[i].start, startTime, endTime, width);
+            const x = timeToX(
+                (drawCandles[i].start + drawCandles[i].end) / 2,
+                startTime,
+                endTime,
+                width
+            );
             const gap = x - prevX;
             if (gap > 0 && gap < spacing) spacing = gap;
         }
@@ -459,8 +491,8 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
         setIntervalStartX(null);
         setIntervalEndX(null);
     }, [
+        asset,
         candles,
-        setTimeRange,
         setManualPriceRange,
         setIntervalStartX,
         setIntervalEndX,

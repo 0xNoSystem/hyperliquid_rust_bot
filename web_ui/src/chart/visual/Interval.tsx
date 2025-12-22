@@ -1,12 +1,42 @@
-import React, { useEffect, useMemo } from "react";
-import { useChartContext } from "../ChartContext";
+import React, { useCallback, useEffect, useMemo } from "react";
+import { useChartContext } from "../ChartContextStore";
 import { timeToX } from "../utils";
+import { TF_TO_MS } from "../../types";
 
 const MIN_WINDOW_RATIO = 0.04; // 2% of visible range
 const MIN_WINDOW_MS = 60 * 1000; // 1 minute fallback
 
 const clamp = (value: number, min: number, max: number) => {
     return Math.min(Math.max(value, min), max);
+};
+
+const getMonthIndex = (timeMs: number) => {
+    const d = new Date(timeMs);
+    return d.getUTCFullYear() * 12 + d.getUTCMonth();
+};
+
+const getMonthCenter = (monthIndex: number) => {
+    const year = Math.floor(monthIndex / 12);
+    const month = monthIndex % 12;
+    const start = Date.UTC(year, month, 1);
+    const next = Date.UTC(year, month + 1, 1);
+    return start + (next - start) / 2;
+};
+
+const snapToMonthCenter = (timeMs: number) => {
+    const baseIndex = getMonthIndex(timeMs);
+    const candidates = [baseIndex - 1, baseIndex, baseIndex + 1];
+    let best = getMonthCenter(candidates[0]);
+    let bestDiff = Math.abs(best - timeMs);
+    for (let i = 1; i < candidates.length; i++) {
+        const center = getMonthCenter(candidates[i]);
+        const diff = Math.abs(center - timeMs);
+        if (diff < bestDiff) {
+            bestDiff = diff;
+            best = center;
+        }
+    }
+    return best;
 };
 
 const IntervalOverlay: React.FC = () => {
@@ -19,49 +49,85 @@ const IntervalOverlay: React.FC = () => {
         intervalEndX,
         setIntervalStartX,
         setIntervalEndX,
+        timeframe,
+        candles,
     } = useChartContext();
 
-    const effectiveEndTime = Math.min(endTime, Date.now());
-    const rangeMs = effectiveEndTime - startTime;
+    const visibleRangeMs = endTime - startTime;
+    const lastCandleEnd =
+        candles.length > 0 ? candles[candles.length - 1].end : endTime;
+    const maxTime = Math.min(endTime, lastCandleEnd);
+    const minSelectableTime =
+        candles.length > 0 ? candles[0].start : startTime;
+    const minBound = Math.max(startTime, minSelectableTime);
+    const stepMs = timeframe ? (TF_TO_MS[timeframe] ?? 0) : 0;
+    const stepOrigin =
+        stepMs > 0
+            ? (candles.length > 0 ? candles[0].start : startTime) + stepMs / 2
+            : 0;
+    const snapTime = useCallback(
+        (timeMs: number) => {
+            if (!timeframe || stepMs <= 0) return timeMs;
+            if (timeframe === "month") return snapToMonthCenter(timeMs);
+            const idx = Math.round((timeMs - stepOrigin) / stepMs);
+            return stepOrigin + idx * stepMs;
+        },
+        [stepMs, stepOrigin, timeframe]
+    );
+    const maxSelectableTime = useMemo(() => {
+        if (!timeframe || stepMs <= 0) {
+            return Math.max(minSelectableTime, maxTime);
+        }
+        if (timeframe === "month") {
+            const maxMonthIndex = getMonthIndex(maxTime);
+            let center = getMonthCenter(maxMonthIndex);
+            if (center > maxTime) {
+                center = getMonthCenter(maxMonthIndex - 1);
+            }
+            return Math.max(minSelectableTime, center);
+        }
+        const idx = Math.floor((maxTime - stepOrigin) / stepMs);
+        return Math.max(minSelectableTime, stepOrigin + idx * stepMs);
+    }, [maxTime, minSelectableTime, stepMs, stepOrigin, timeframe]);
+
     const minWindow = useMemo(() => {
-        if (rangeMs <= 0) return MIN_WINDOW_MS;
+        if (visibleRangeMs <= 0) return MIN_WINDOW_MS;
         return Math.min(
-            rangeMs,
-            Math.max(MIN_WINDOW_MS, rangeMs * MIN_WINDOW_RATIO)
+            visibleRangeMs,
+            Math.max(MIN_WINDOW_MS, visibleRangeMs * MIN_WINDOW_RATIO)
         );
-    }, [rangeMs]);
+    }, [visibleRangeMs]);
 
     // Ensure we have an interval defined whenever selection mode is active.
     useEffect(() => {
         if (!selectingInterval) return;
-        if (rangeMs <= 0) return;
+        if (visibleRangeMs <= 0) return;
 
-        let start = intervalStartX ?? startTime + rangeMs * 0.2;
-        let end = intervalEndX ?? startTime + rangeMs * 0.8;
+        let start = intervalStartX ?? startTime + visibleRangeMs * 0.2;
+        let end = intervalEndX ?? startTime + visibleRangeMs * 0.8;
 
-        let changed = false;
+        start = clamp(snapTime(start), minBound, maxSelectableTime);
+        end = clamp(snapTime(end), minBound, maxSelectableTime);
 
-        if (start < startTime) {
-            start = startTime;
-            changed = true;
-        }
-        if (end > effectiveEndTime) {
-            end = effectiveEndTime;
-            changed = true;
-        }
         if (end - start < minWindow) {
-            end = Math.min(effectiveEndTime, start + minWindow);
-            start = Math.max(startTime, end - minWindow);
-            changed = true;
+            end = Math.min(maxSelectableTime, start + minWindow);
+            start = Math.max(minBound, end - minWindow);
+            start = clamp(snapTime(start), minBound, maxSelectableTime);
+            end = clamp(snapTime(end), minBound, maxSelectableTime);
         }
 
-        if (changed || intervalStartX === null || intervalEndX === null) {
+        if (
+            intervalStartX === null ||
+            intervalEndX === null ||
+            start !== intervalStartX ||
+            end !== intervalEndX
+        ) {
             setIntervalStartX(start);
             setIntervalEndX(end);
         }
     }, [
         selectingInterval,
-        rangeMs,
+        visibleRangeMs,
         startTime,
         endTime,
         minWindow,
@@ -69,23 +135,29 @@ const IntervalOverlay: React.FC = () => {
         intervalEndX,
         setIntervalStartX,
         setIntervalEndX,
+        maxSelectableTime,
+        minBound,
+        snapTime,
     ]);
 
-    if (!selectingInterval || width <= 0 || rangeMs <= 0) return null;
+    if (!selectingInterval || width <= 0 || visibleRangeMs <= 0) return null;
     if (intervalStartX === null || intervalEndX === null) return null;
 
-    let start = clamp(intervalStartX, startTime, effectiveEndTime);
-    let end = clamp(intervalEndX, startTime, effectiveEndTime);
+    let start = clamp(snapTime(intervalStartX), minBound, maxSelectableTime);
+    let end = clamp(snapTime(intervalEndX), minBound, maxSelectableTime);
     if (end - start < minWindow) {
-        end = Math.min(effectiveEndTime, start + minWindow);
-        start = Math.max(startTime, end - minWindow);
+        end = Math.min(maxSelectableTime, start + minWindow);
+        start = Math.max(minBound, end - minWindow);
     }
 
     const left = timeToX(start, startTime, endTime, width);
     const right = timeToX(end, startTime, endTime, width);
-    const overlayWidth = Math.max(10, right - left);
+    const crispLeft = Math.round(left) + 0.5;
+    const crispRight = Math.round(right) + 0.5;
+    const overlayLeft = Math.min(crispLeft, crispRight);
+    const overlayWidth = Math.max(1, Math.abs(crispRight - crispLeft));
 
-    const msPerPx = width > 0 ? rangeMs / width : 0;
+    const msPerPx = width > 0 ? visibleRangeMs / width : 0;
 
     const beginDrag =
         (mode: "move" | "start" | "end") => (e: React.MouseEvent) => {
@@ -104,13 +176,37 @@ const IntervalOverlay: React.FC = () => {
                     let nextStart = initialStart + dt;
                     let nextEnd = initialEnd + dt;
 
-                    if (nextStart < startTime) {
-                        const offset = startTime - nextStart;
+                    if (timeframe && stepMs > 0) {
+                        if (timeframe === "month") {
+                            const startMonth = getMonthIndex(initialStart);
+                            const endMonth = getMonthIndex(initialEnd);
+                            const targetStart = snapToMonthCenter(
+                                initialStart + dt
+                            );
+                            const targetMonth = getMonthIndex(targetStart);
+                            const delta = targetMonth - startMonth;
+                            nextStart = getMonthCenter(startMonth + delta);
+                            nextEnd = getMonthCenter(endMonth + delta);
+                        } else {
+                            const startIdx = Math.round(
+                                (initialStart - stepOrigin) / stepMs
+                            );
+                            const targetIdx = Math.round(
+                                (initialStart + dt - stepOrigin) / stepMs
+                            );
+                            const shift = (targetIdx - startIdx) * stepMs;
+                            nextStart = initialStart + shift;
+                            nextEnd = initialEnd + shift;
+                        }
+                    }
+
+                    if (nextStart < minBound) {
+                        const offset = minBound - nextStart;
                         nextStart += offset;
                         nextEnd += offset;
                     }
-                    if (nextEnd > effectiveEndTime) {
-                        const offset = nextEnd - effectiveEndTime;
+                    if (nextEnd > maxSelectableTime) {
+                        const offset = nextEnd - maxSelectableTime;
                         nextStart -= offset;
                         nextEnd -= offset;
                     }
@@ -118,12 +214,12 @@ const IntervalOverlay: React.FC = () => {
                     setIntervalStartX(
                         clamp(
                             nextStart,
-                            startTime,
-                            effectiveEndTime - minWindow
+                            minBound,
+                            maxSelectableTime - minWindow
                         )
                     );
                     setIntervalEndX(
-                        clamp(nextEnd, startTime + minWindow, effectiveEndTime)
+                        clamp(nextEnd, minBound + minWindow, maxSelectableTime)
                     );
                     return;
                 }
@@ -131,7 +227,13 @@ const IntervalOverlay: React.FC = () => {
                 if (mode === "start") {
                     let nextStart = clamp(
                         initialStart + dt,
-                        startTime,
+                        minBound,
+                        initialEnd - minWindow
+                    );
+                    nextStart = snapTime(nextStart);
+                    nextStart = clamp(
+                        nextStart,
+                        minBound,
                         initialEnd - minWindow
                     );
                     setIntervalStartX(nextStart);
@@ -141,7 +243,13 @@ const IntervalOverlay: React.FC = () => {
                 let nextEnd = clamp(
                     initialEnd + dt,
                     initialStart + minWindow,
-                    effectiveEndTime
+                    maxSelectableTime
+                );
+                nextEnd = snapTime(nextEnd);
+                nextEnd = clamp(
+                    nextEnd,
+                    initialStart + minWindow,
+                    maxSelectableTime
                 );
                 setIntervalEndX(nextEnd);
             };
@@ -158,10 +266,18 @@ const IntervalOverlay: React.FC = () => {
     return (
         <div className="pointer-events-none absolute inset-0">
             <div
-                className="pointer-events-auto absolute top-0 flex h-full cursor-grab items-stretch border-2 border-y-0 border-orange-400/60 bg-orange-500/15"
-                style={{ left, width: overlayWidth }}
+                className="pointer-events-auto absolute top-0 flex h-full cursor-grab items-stretch bg-orange-500/15"
+                style={{ left: overlayLeft, width: overlayWidth }}
                 onMouseDown={beginDrag("move")}
             >
+                <div
+                    className="pointer-events-none absolute top-0 h-full w-px bg-orange-400/70"
+                    style={{ left: 0, transform: "translateX(-0.5px)" }}
+                />
+                <div
+                    className="pointer-events-none absolute top-0 h-full w-px bg-orange-400/70"
+                    style={{ left: "100%", transform: "translateX(-0.5px)" }}
+                />
                 <div className="pointer-events-none absolute w-[100%] overflow-hidden py-1 text-xs font-semibold text-black">
                     <span className="bg-orange-500/80 p-2">BackTest</span>
                 </div>

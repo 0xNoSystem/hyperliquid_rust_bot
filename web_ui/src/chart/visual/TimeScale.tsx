@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from "react";
-import { useChartContext } from "../ChartContext";
+import { useChartContext } from "../ChartContextStore";
 import { timeToX, xToTime, formatUTC, computeTimePan } from "../utils";
 import { MAX_CANDLE_WIDTH } from "../constants";
 import { TF_TO_MS } from "../../types";
@@ -639,14 +639,14 @@ const TimeScale: React.FC = () => {
                                     40,
                                     width - 40
                                 );
-                                const text = formatUTC(item.x);
+                                const text = formatCrosshairTime(item.x);
 
                                 return (
                                     <g key={item.label + idx}>
                                         <rect
-                                            x={px - 60}
+                                            x={px - 70}
                                             y={0}
-                                            width={120}
+                                            width={140}
                                             height={22}
                                             fill="#151515"
                                             stroke="#ff7a18"

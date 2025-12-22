@@ -4,7 +4,7 @@
 
 import { useMemo, useState, useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useWebSocketContext } from "../context/WebSocketContext";
+import { useWebSocketContext } from "../context/WebSocketContextStore";
 import TradingViewWidget from "./TradingViewWidget";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatUTC } from "../chart/utils";

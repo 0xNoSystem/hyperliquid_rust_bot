@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useMemo } from "react";
-import { useChartContext } from "../ChartContext";
+import { useChartContext } from "../ChartContextStore";
 import {
     zoomPriceRange,
     priceToY,

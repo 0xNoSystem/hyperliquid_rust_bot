@@ -11,7 +11,7 @@ const formatPrice = (n: number) => {
     return n.toFixed(2);
 };
 
-export function formatVolume(n: number): string {
+function formatVolume(n: number): string {
     const abs = Math.abs(n);
 
     if (abs >= 1_000_000_000)
