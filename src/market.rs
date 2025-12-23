@@ -218,6 +218,10 @@ impl Market {
                                 let mut send_next_px = false;
                                 //Check if missed window is worth fetching
                                 if let Some(timer) = disconnection_start.take() {
+                                    info!(
+                                        "checking for timeout threshold to fetch missed data {}",
+                                        timer.elapsed().as_millis()
+                                    );
                                     if timer.elapsed().as_millis() > MAX_DISCONNECTION_WINDOW {
                                         let cmd = MarketCommand::FetchMissedWindow(
                                             last_confirmed_close.unwrap_or_else(get_time_now),
@@ -259,7 +263,9 @@ impl Market {
                             );
                         }
                     }
-                    _ => {}
+                    _ => {
+                        warn!("Received unexpected Message type in candle stream");
+                    }
                 }
             }
             Ok(())
@@ -396,6 +402,11 @@ impl Market {
                                 end,
                             )
                             .await?;
+                            info!(
+                                "fetched data for {} timeframe in refill window\n missed {} candles\n",
+                                tf,
+                                res.len()
+                            );
                             map.insert(*tf, res);
                         }
                     }

@@ -1,6 +1,6 @@
 use crate::{
-    AddMarketInfo, ExecEvent, HLTradeInfo, Market, MarketCommand, MarketInfo, MarketUpdate,
-    TradeFillInfo, UpdateFrontend, Wallet,
+    AddMarketInfo, BackendStatus, ExecEvent, HLTradeInfo, Market, MarketCommand, MarketInfo,
+    MarketUpdate, TradeFillInfo, UpdateFrontend, Wallet,
 };
 use hyperliquid_rust_sdk::{
     AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, UserData,
@@ -297,8 +297,10 @@ impl Bot {
                         let _ = app_tx_margin.send(UpdateTotalMargin(total));
                     }
                     Err(e) => {
-                        log::warn!("Failed to fetch User Margin");
-                        let _ = app_tx_margin.send(UserError(e.to_string()));
+                        warn!("Failed to fetch User Margin");
+                        let _ = app_tx_margin.send(UserError(format!(
+                            "Failed to fetch user margin, check your connection: {e}"
+                        )));
                         continue;
                     }
                 }
@@ -348,12 +350,14 @@ impl Bot {
                 user_tx,
             )
             .await?;
-
         loop {
             tokio::select!(
                     biased;
 
-                    Some(Message::User(user_event)) = user_rv.recv() => {
+                    Some(msg) = user_rv.recv() => {
+
+                    if let Message::User(user_event) = msg{
+
 
                     match user_event.data{
 
@@ -401,7 +405,12 @@ impl Bot {
                             warn!("Failed to parse user funding");
                         }
                     }
-                    _ => info!("{:?}", user_event)
+
+                    _ => {info!("{:?}", user_event)},
+                    }
+                }else if let Message::NoData = msg{
+                    info!("Received Message::NoData from WS, check connection");
+                        let _ = err_tx.send(Status(BackendStatus::Offline));
                 }
             },
 

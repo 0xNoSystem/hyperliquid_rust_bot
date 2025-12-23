@@ -57,4 +57,12 @@ pub enum UpdateFrontend {
     MarketInfoEdit((String, EditMarketInfo)),
     UserError(String),
     LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),
+    Status(BackendStatus),
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BackendStatus {
+    Online,
+    Offline,
 }
