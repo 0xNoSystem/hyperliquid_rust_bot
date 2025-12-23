@@ -402,7 +402,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         }, 200);
 
         return () => clearTimeout(timer);
-    }, [startTime, endTime, timeframe, intervalOn, routeAsset]);
+    }, [startTime, endTime, timeframe, routeAsset]);
 
     return (
         <div className="flex flex-1 flex-col bg-black/10 pb-50">

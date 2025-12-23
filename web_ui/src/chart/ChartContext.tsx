@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { TimeFrame } from "../types";
 import type { CandleData } from "./utils";
@@ -69,27 +69,28 @@ export default function ChartProvider({ children }: ChartProviderProps) {
             maxRange: range + padding * 2,
         };
     }, [candles]);
+    const candleBoundsRef = useRef<typeof candleBounds>(null);
+    candleBoundsRef.current = candleBounds;
 
     // --- ACTIONS ---
 
-    const setSize = (w: number, h: number) => {
+    const setSize = useCallback((w: number, h: number) => {
         setWidth(w);
         setHeight(h);
-    };
+    }, []);
 
-    const setTf = (tf: TimeFrame) => {
-        setTimeframe(tf);
-    };
+    const setTf = useCallback((tf: TimeFrame) => setTimeframe(tf), []);
 
-    const setPriceRange = (min: number, max: number) => {
+    const setPriceRange = useCallback((min: number, max: number) => {
         setMinPrice(min);
         setMaxPrice(max);
-    };
-    const setManualPriceRange = (manual: boolean) => {
-        setManualPriceRangeState(manual);
-    };
+    }, []);
+    const setManualPriceRange = useCallback(
+        (manual: boolean) => setManualPriceRangeState(manual),
+        []
+    );
 
-    const setTimeRange = (start: number, end: number) => {
+    const setTimeRange = useCallback((start: number, end: number) => {
         if (!Number.isFinite(start) || !Number.isFinite(end)) return;
         let s = start;
         let e = end;
@@ -98,8 +99,9 @@ export default function ChartProvider({ children }: ChartProviderProps) {
             s = e;
             e = tmp;
         }
-        if (candleBounds) {
-            const { paddedMin, paddedMax, maxRange } = candleBounds;
+        const bounds = candleBoundsRef.current;
+        if (bounds) {
+            const { paddedMin, paddedMax, maxRange } = bounds;
             const desiredRange = e - s;
             if (desiredRange >= maxRange) {
                 s = paddedMin;
@@ -121,19 +123,22 @@ export default function ChartProvider({ children }: ChartProviderProps) {
         }
         setStartTime(s);
         setEndTime(e);
-    };
+    }, []);
 
-    const setCrosshair = (x: number | null, y: number | null) => {
+    const setCrosshair = useCallback((x: number | null, y: number | null) => {
         setCrosshairX(x);
         setCrosshairY(y);
-    };
+    }, []);
 
-    const setCandleColor = (up: string | null, down: string | null) => {
-        setCandleColorState((prev) => ({
-            up: up ?? prev.up,
-            down: down ?? prev.down,
-        }));
-    };
+    const setCandleColor = useCallback(
+        (up: string | null, down: string | null) => {
+            setCandleColorState((prev) => ({
+                up: up ?? prev.up,
+                down: down ?? prev.down,
+            }));
+        },
+        []
+    );
 
     return (
         <ChartContext.Provider
