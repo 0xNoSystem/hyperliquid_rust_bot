@@ -203,7 +203,7 @@ impl Tracker {
                 return;
             }
         };
-        if ts >= next {
+        if ts > next {
             while ts >= next {
                 self.prev_close = Some(next);
                 next += tf_ms;
@@ -213,6 +213,12 @@ impl Tracker {
             self.update_indicators_after_close(price, self.prev_close.unwrap());
         } else {
             self.update_indicators_before_close(price);
+        }
+    }
+
+    pub(super) fn digest_bulk(&mut self, price: Vec<Price>) {
+        for p in price {
+            self.digest(p);
         }
     }
 

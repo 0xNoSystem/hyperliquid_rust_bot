@@ -1,8 +1,10 @@
 #![allow(unused_variables)]
-use log::info;
+use log::{info, warn};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use hyperliquid_rust_sdk::{AssetMeta, Error, ExchangeClient, InfoClient, Message};
 
@@ -10,8 +12,11 @@ use crate::signal::{
     EditType, EngineCommand, Entry, ExecParam, ExecParams, IndexId, SignalEngine, TimeFrameData,
 };
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, UpdateFrontend};
-use crate::{ExecCommand, ExecControl, ExecEvent, Executor, load_candles, parse_candle};
-use crate::{MAX_HISTORY, MarketInfo, Strategy, Wallet};
+use crate::{
+    ExecCommand, ExecControl, ExecEvent, Executor, candles_snapshot, get_time_now, load_candles,
+    parse_candle,
+};
+use crate::{MAX_DISCONNECTION_WINDOW, MAX_HISTORY, MarketInfo, Strategy, Wallet};
 
 use crate::{OpenPositionLocal, TimeFrame, TradeInfo, TradeParams};
 
@@ -35,7 +40,7 @@ pub struct Market {
     senders: MarketSenders,
     pub active_tfs: HashSet<TimeFrame>,
     pub margin: f64,
-
+    disconnected: Arc<AtomicBool>,
 }
 
 impl Market {
@@ -72,6 +77,7 @@ impl Market {
             bot_tx,
             engine_tx,
             exec_tx: exec_tx.clone(),
+            market_tx: market_tx.clone(),
         };
 
         let receivers = MarketReceivers {
@@ -105,6 +111,7 @@ impl Market {
                 receivers,
                 senders,
                 active_tfs,
+                disconnected: Arc::new(AtomicBool::new(false)),
             },
             market_tx,
         ))
@@ -189,36 +196,81 @@ impl Market {
         let bot_price_update = self.senders.bot_tx.clone();
 
         let asset_name: Arc<str> = Arc::from(self.asset.name.clone());
+        let disconnected_price_stream_flag = self.disconnected.clone();
+        let disconnection_info_sender = self.senders.market_tx;
+
         let candle_stream_handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-    
-      while let Some(msg) = self.receivers.price_rv.recv().await {
-          match msg {
-              Message::Candle(candle) => {
-                  let price = parse_candle(candle.data)?;
-
-                  let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
-                  let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
-                      UpdateFrontend::MarketInfoEdit((
-                          asset_name.clone().to_string(),
-                          EditMarketInfo::Price(price.close),
-                      )),
-                  ));
-              }
-              Message::NoData => {
-                  info!("{} price stream disconnected, receiver is still alive and well", &asset_name);
-              }
-              _ => {}
-          }
-      }
-      Ok(())
-  });
-
+            let mut disconnected = false;
+            let mut disconnection_start: Option<Instant> = None;
+            let mut last_confirmed_close: Option<u64> = None;
+            while let Some(msg) = self.receivers.price_rv.recv().await {
+                match msg {
+                    Message::Candle(candle) => {
+                        let price = parse_candle(candle.data)?;
+                        let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
+                            UpdateFrontend::MarketInfoEdit((
+                                asset_name.clone().to_string(),
+                                EditMarketInfo::Price(price.close),
+                            )),
+                        ));
+                        if disconnected {
+                            if disconnected_price_stream_flag.load(Ordering::Relaxed) {
+                                let mut send_next_px = false;
+                                //Check if missed window is worth fetching
+                                if let Some(timer) = disconnection_start.take() {
+                                    if timer.elapsed().as_millis() > MAX_DISCONNECTION_WINDOW {
+                                        let cmd = MarketCommand::FetchMissedWindow(
+                                            last_confirmed_close.unwrap_or_else(get_time_now),
+                                        );
+                                        if let Err(e) = disconnection_info_sender.send(cmd).await {
+                                            warn!(
+                                                "Failed to notify market about missing price window,
+                                                    close the market and reopen if indicators drift: {}",e);
+                                            disconnected_price_stream_flag
+                                                .store(false, Ordering::Relaxed);
+                                            disconnected = false;
+                                        }
+                                        continue;
+                                    } else {
+                                        disconnected_price_stream_flag
+                                            .store(false, Ordering::Relaxed);
+                                        disconnected = false;
+                                        send_next_px = true;
+                                    }
+                                }
+                                if !send_next_px {
+                                    continue;
+                                }
+                            } else {
+                                disconnected = false;
+                            }
+                        }
+                        last_confirmed_close = Some(price.open_time);
+                        let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
+                    }
+                    Message::NoData => {
+                        if !disconnected {
+                            disconnected_price_stream_flag.store(true, Ordering::Relaxed);
+                            disconnected = true;
+                            disconnection_start = Some(Instant::now());
+                            info!(
+                                "{} price stream disconnected, receiver is still alive and well",
+                                &asset_name
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(())
+        });
 
         //listen to changes and trade results
         let engine_update_tx = self.senders.engine_tx.clone();
         let bot_update_tx = self.senders.bot_tx;
         let asset = self.asset.clone();
 
+        let disconnection_flag = self.disconnected.clone();
         while let Some(cmd) = self.receivers.market_rv.recv().await {
             match cmd {
                 MarketCommand::UpdateLeverage(lev) => {
@@ -329,6 +381,30 @@ impl Market {
                     ));
                 }
 
+                MarketCommand::FetchMissedWindow(disc_start) => {
+                    info!("FILLING MISSED PRICE WINDOW");
+                    let mut map: TimeFrameData = HashMap::default();
+
+                    let end = get_time_now();
+                    for tf in &self.active_tfs {
+                        if (tf.to_millis()) < (end - disc_start) {
+                            let res = candles_snapshot(
+                                &self.info_client,
+                                asset.name.as_str(),
+                                *tf,
+                                disc_start,
+                                end,
+                            )
+                            .await?;
+                            map.insert(*tf, res);
+                        }
+                    }
+                    if !map.is_empty() {
+                        let _ = engine_update_tx.send(EngineCommand::UpdatePriceBulk(map));
+                    }
+                    disconnection_flag.store(false, Ordering::Relaxed);
+                }
+
                 MarketCommand::Pause => {
                     let _ = self
                         .senders
@@ -411,12 +487,14 @@ pub enum MarketCommand {
     Resume,                                  //UI/Bot
     Pause,                                   //UI/Bot
     Close,                                   //UI/Bot
+    FetchMissedWindow(u64),
 }
 
 struct MarketSenders {
     bot_tx: UnboundedSender<MarketUpdate>,
     engine_tx: UnboundedSender<EngineCommand>,
     exec_tx: FlumeSender<ExecCommand>,
+    market_tx: Sender<MarketCommand>,
 }
 
 struct MarketReceivers {

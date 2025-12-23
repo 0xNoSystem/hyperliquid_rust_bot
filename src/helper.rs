@@ -40,7 +40,7 @@ pub fn get_time_now_and_candles_ago(candle_count: u64, tf: TimeFrame) -> (u64, u
     (start, end)
 }
 
-async fn candles_snapshot(
+pub async fn candles_snapshot(
     info_client: &InfoClient,
     coin: &str,
     time_frame: TimeFrame,

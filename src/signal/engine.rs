@@ -154,6 +154,14 @@ impl SignalEngine {
             tracker.digest(price);
         }
     }
+
+    fn digest_bulk(&mut self, data: TimeFrameData) {
+        for (tf, prices) in data.into_iter() {
+            if let Some(tracker) = self.trackers.get_mut(&tf) {
+                tracker.digest_bulk(prices);
+            }
+        }
+    }
 }
 
 impl SignalEngine {
@@ -182,6 +190,10 @@ impl SignalEngine {
                     }
                     tick += 1;
                     //println!("______TICK_____ => {}", tick);
+                }
+
+                EngineCommand::UpdatePriceBulk(data) => {
+                    self.digest_bulk(data);
                 }
 
                 EngineCommand::UpdateStrategy(_new_strat) => {
@@ -282,6 +294,7 @@ impl SignalEngine {
 
 pub enum EngineCommand {
     UpdatePrice(Price),
+    UpdatePriceBulk(TimeFrameData),
     UpdateStrategy(Strategy),
     EditIndicators {
         indicators: Vec<Entry>,
