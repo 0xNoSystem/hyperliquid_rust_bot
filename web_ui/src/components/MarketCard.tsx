@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+
 import { Pause, Play, Trash2, ExternalLink } from "lucide-react";
 import type { MarketInfo, assetMeta, IndicatorName } from "../types";
 import {
@@ -8,12 +9,11 @@ import {
     get_value,
     get_params,
     fromTimeFrame,
-    num,
-    computeUPnL,
 } from "../types";
 import { MAX_DECIMALS } from "../consts";
 import LoadingDots from "./Loading";
 import { Link } from "react-router-dom";
+import PositionTable from "./Position";
 
 interface MarketCardProps {
     market: MarketInfo;
@@ -237,78 +237,13 @@ const MarketCard = ({
                                 {position == null ? (
                                     <p className="text-center">---</p>
                                 ) : (
-                                    <table className="min-w-full text-[11px]">
-                                        <thead className="text-white/60">
-                                            <tr>
-                                                <th className="py-2 pr-2 text-left">
-                                                    Side
-                                                </th>
-
-                                                <th className="py-2 pr-2 text-right">
-                                                    Entry
-                                                </th>
-
-                                                <th className="py-2 pr-2 text-right">
-                                                    Size
-                                                </th>
-
-                                                <th className="py-2 pr-2 text-right">
-                                                    Funding
-                                                </th>
-
-                                                <th className="py-2 text-right">
-                                                    UPNL
-                                                </th>
-                                            </tr>
-                                        </thead>
-
-                                        <tbody>
-                                            <tr className="border-t border-white/10">
-                                                <td
-                                                    className={`py-2 pr-4 font-semibold uppercase ${
-                                                        position.side === "long"
-                                                            ? "text-green-500"
-                                                            : "text-red-500"
-                                                    }`}
-                                                >
-                                                    {position.side}
-                                                </td>
-
-                                                <td className="py-2 pr-2 text-right">
-                                                    {format(position.entryPx)}
-                                                </td>
-
-                                                <td className="py-2 pr-2 text-right">
-                                                    {num(
-                                                        position.size,
-                                                        szDecimals
-                                                    )}
-                                                </td>
-
-                                                <td className="py-2 pr-2 text-right">
-                                                    {num(position.funding, 2)}$
-                                                </td>
-
-                                                <td className="py-2 text-right text-orange-400">
-                                                    {price == null ||
-                                                    lev == null
-                                                        ? "—"
-                                                        : (() => {
-                                                              const [
-                                                                  upnl,
-                                                                  change,
-                                                              ] = computeUPnL(
-                                                                  position,
-                                                                  price,
-                                                                  lev
-                                                              );
-
-                                                              return `${num(upnl, 2)}$ (${num(change * 100, 2)}%)`;
-                                                          })()}
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
+                                    <PositionTable
+                                        position={position}
+                                        price={price}
+                                        lev={lev}
+                                        szDecimals={szDecimals}
+                                        formatPrice={format}
+                                    />
                                 )}
                             </div>
                         </div>

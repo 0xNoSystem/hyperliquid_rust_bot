@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { formatUTC } from "../chart/utils";
 import { MAX_DECIMALS, MIN_ORDER_VALUE } from "../consts";
 import { ErrorBanner } from "./ErrorBanner";
+import PositionTable from "./Position";
 
 import {
     decompose,
@@ -20,7 +21,6 @@ import {
     get_value,
     into,
     sanitizeAsset,
-    computeUPnL,
     num,
 } from "../types";
 import type {
@@ -648,79 +648,13 @@ export default function MarketDetail() {
                             {market.position == null ? (
                                 <p className="text-center">No open position</p>
                             ) : (
-                                <table className="min-w-full text-[11px]">
-                                    <thead className="text-white/60">
-                                        <tr>
-                                            <th className="py-2 pr-2 text-left">
-                                                Side
-                                            </th>
-                                            <th className="py-2 pr-2 text-right">
-                                                Entry
-                                            </th>
-                                            <th className="py-2 pr-2 text-right">
-                                                Size
-                                            </th>
-
-                                            <th className="py-2 pr-2 text-right">
-                                                Funding
-                                            </th>
-                                            <th className="py-2 text-right">
-                                                UPNL
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr className="border-t border-white/10">
-                                            <td
-                                                className={`py-2 pr-4 font-semibold uppercase ${
-                                                    market.position.side ===
-                                                    "long"
-                                                        ? "text-green-500"
-                                                        : "text-red-500"
-                                                }`}
-                                            >
-                                                {market.position.side}
-                                            </td>
-
-                                            <td className="py-2 pr-2 text-right">
-                                                {formatPrice(
-                                                    market.position.entryPx
-                                                )}
-                                            </td>
-
-                                            <td className="py-2 pr-2 text-right">
-                                                {num(
-                                                    market.position.size,
-                                                    meta?.szDecimals ?? 3
-                                                )}
-                                            </td>
-
-                                            <td className="py-2 pr-2 text-right">
-                                                {num(
-                                                    market.position.funding,
-                                                    2
-                                                )}
-                                                $
-                                            </td>
-
-                                            <td className="py-2 text-right text-orange-400">
-                                                {market.price == null ||
-                                                market.lev == null
-                                                    ? "—"
-                                                    : (() => {
-                                                          const [upnl, change] =
-                                                              computeUPnL(
-                                                                  market.position,
-                                                                  market.price,
-                                                                  market.lev
-                                                              );
-
-                                                          return `${num(upnl, 2)}$ (${num(change * 100, 2)}%)`;
-                                                      })()}
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                                <PositionTable
+                                    position={market.position}
+                                    price={market.price}
+                                    lev={market.lev}
+                                    szDecimals={meta?.szDecimals ?? 3}
+                                    formatPrice={formatPrice}
+                                />
                             )}
                         </div>
                     </div>

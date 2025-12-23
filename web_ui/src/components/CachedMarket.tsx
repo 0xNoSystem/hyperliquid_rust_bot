@@ -16,9 +16,9 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
     const { asset, marginAlloc, tradeParams, config } = market;
 
     return (
-        <div className="my-2 flex h-fit items-center justify-between rounded-lg border-2 border-gray-600 bg-gray-300/30 px-3 py-1 text-black hover:bg-gray-300">
-            <div className="flex h-full items-center space-x-6 text-sm">
-                <span className="flex h-full w-20 items-center justify-center rounded-lg bg-orange-300/50 text-center font-medium">
+        <div className="my-2 flex h-fit items-center justify-between rounded-lg border-2 border-black/60 bg-gray-700/20 px-3 py-1 font-semibold text-black hover:bg-gray-600/70">
+            <div className="jusify-center flex h-full items-center space-x-12 text-sm">
+                <span className="flex h-full w-20 items-center justify-center rounded-lg bg-black/50 text-center font-medium text-white/80">
                     {asset}
                 </span>
                 <span className="w-max">
@@ -46,18 +46,23 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                         );
                     })}
                 </div>
-                <span className="flex flex-col">{tradeParams.strategy}</span>
+                <div className="ml-10 flex items-center gap-2 text-[13px] font-bold text-black/50">
+                    <span className="tracking-wide uppercase">Strategy</span>
+                    <span className="rounded-md bg-black/50 px-2 py-1 text-[12px] font-semibold text-white/70">
+                        {tradeParams.strategy}
+                    </span>
+                </div>
             </div>
             <div className="flex">
                 <button
-                    className="rounded-lg bg-red-500/30 px-3 py-3 hover:cursor-pointer hover:bg-red-500"
+                    className="rounded-lg bg-white/50 px-3 py-3 hover:cursor-pointer hover:bg-black/70 hover:text-white"
                     onClick={() => onRemove(asset)}
                 >
                     <strong>X</strong>
                 </button>
 
                 <button
-                    className="ml-2 rounded-lg bg-cyan-300/30 px-4 py-3 hover:cursor-pointer hover:bg-cyan-700"
+                    className="ml-2 rounded-lg bg-white/50 px-4 py-3 hover:cursor-pointer hover:bg-black/50 hover:text-orange-400"
                     onClick={() => onAdd(asset)}
                 >
                     Add

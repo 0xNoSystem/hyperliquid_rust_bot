@@ -141,7 +141,7 @@ impl Strat for SrsiAdxScalp {
     }
 }
 
-pub fn calc_entry_px(side: Side, ref_px: f64, delta: f64, lev: usize) -> f64 {
+pub fn calc_entry_px(side: Side, delta: f64, ref_px: f64, lev: usize) -> f64 {
     assert!(lev > 0);
     assert!(delta >= 0.0);
 

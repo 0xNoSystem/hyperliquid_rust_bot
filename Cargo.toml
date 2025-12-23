@@ -7,17 +7,15 @@ edition = "2024"
 hyperliquid_rust_sdk = { git = "https://github.com/0xNoSystem/hyperliquid-rust-sdk.git", branch = "main" }
 kwant = { git = "https://github.com/0xNoSystem/Indicators_rs.git", branch = "main" }
 env_logger = "0.10.0"
-futures-util = "0.3.28"
 http = "0.2.9"
 log = "0.4.19"
 serde = { version = "1.0.175", features = ["derive"] }
 serde_json = "1.0.103"
-tokio = { version = "1.29.1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 dotenv = "0.15.0"
 flume = "0.11.1"
 arraydeque = "0.5.1"
 rustc-hash = "2.1.1"
-futures = "0.3.31"
 actix = "0.13"
 actix-web = "4.11.0"
 actix-web-actors = "4"

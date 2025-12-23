@@ -210,6 +210,8 @@ export interface AddMarketProps {
     assets: assetMeta[];
 }
 
+export type LoadSessionPayload = [MarketInfo[], assetMeta[]] | assetMeta[];
+
 export type Message =
     | { preconfirmMarket: string }
     | { confirmMarket: MarketInfo }
@@ -220,7 +222,7 @@ export type Message =
     | { updateIndicatorValues: { asset: string; data: indicatorData[] } }
     | { marketInfoEdit: [string, editMarketInfo] }
     | { userError: string }
-    | { loadSession: [MarketInfo[], assetMeta[]] }
+    | { loadSession: LoadSessionPayload }
     | { status: "offline" | "online" };
 
 export type assetPrice = [string, number];

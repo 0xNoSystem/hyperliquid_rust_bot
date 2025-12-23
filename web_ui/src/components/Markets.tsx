@@ -147,9 +147,11 @@ export default function MarketsPage() {
                         <div className="p-2 text-right text-[25px] font-bold">
                             PnL : {<SessionPnlDisplay />}
                         </div>
-                        <p className="font-semibold text-white/70">Console</p>
+                        <p className="font-semibold text-white/70">
+                            Recent Markets
+                        </p>
 
-                        <div className="h-43 overflow-y-auto rounded-md border border-white/10 bg-[#0F1115] p-3">
+                        <div className="h-43 overflow-y-auto rounded-md border border-white/10 bg-black/50 p-3">
                             {cachedMarkets.length === 0 ? (
                                 <p className="text-white/40 italic">
                                     No cached markets.

@@ -29,6 +29,34 @@ const dedupeMarkets = (markets: MarketInfo[]): MarketInfo[] => {
     return Array.from(map.values());
 };
 
+const hasCachedUniverse = (): boolean => {
+    try {
+        const raw = localStorage.getItem(UNIVERSE_KEY);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed);
+    } catch (err) {
+        void err;
+        return false;
+    }
+};
+
+const isAssetMeta = (value: unknown): value is assetMeta => {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        "name" in value &&
+        "szDecimals" in value &&
+        "maxLeverage" in value
+    );
+};
+
+const isAssetMetaArray = (value: unknown): value is assetMeta[] => {
+    if (!Array.isArray(value)) return false;
+    if (value.length === 0) return true;
+    return isAssetMeta(value[0]);
+};
+
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     children,
 }) => {
@@ -90,7 +118,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         }
 
         try {
-            const raw = localStorage.getItem(MARKET_INFO_KEY);
+            const raw = localStorage.getItem(UNIVERSE_KEY);
             if (raw) {
                 const parsed = JSON.parse(raw) as assetMeta[];
                 setUniverse(parsed);
@@ -146,11 +174,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                     return;
                 }
                 try {
-                    const raw = localStorage.getItem(MARKET_INFO_KEY);
-                    if (raw) {
-                        const parsed = JSON.parse(raw) as assetMeta[];
-                        setUniverse(parsed);
-                    }
+                    const parsed = JSON.parse(e.newValue) as assetMeta[];
+                    setUniverse(parsed);
                 } catch (err) {
                     void err;
                 }
@@ -278,7 +303,13 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             }
 
             if ("loadSession" in payload) {
-                const [sessionMarkets, meta] = payload.loadSession;
+                console.log(payload);
+                const session = payload.loadSession;
+                if (isAssetMetaArray(session)) {
+                    setUniverse(session);
+                    return;
+                }
+                const [sessionMarkets, meta] = session;
                 setUniverse(meta);
                 setMarkets((prev) => {
                     if (hasLocalMarketsRef.current && prev.length > 0)
@@ -307,7 +338,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
             const onOpen = () => {
                 retry = 0;
-                sendCommand({ getSession: null }).catch(console.error);
+                if (!hasCachedUniverse()) {
+                    sendCommand({ getSession: null }).catch(console.error);
+                }
             };
             const onClose = () => {
                 if (!activeRef.current) return;
