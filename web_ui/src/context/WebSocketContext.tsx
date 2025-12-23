@@ -37,6 +37,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     const [cachedMarkets, setCachedMarkets] = useState<AddMarketInfo[]>([]);
     const [totalMargin, setTotalMargin] = useState(0);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [isOffline, setIsOffline] = useState<boolean>(false);
 
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectRef = useRef<number | null>(null);
@@ -164,6 +165,12 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         (event: MessageEvent) => {
             const payload = JSON.parse(event.data) as Message;
 
+            if ("status" in payload) {
+                console.log("status update: ", payload);
+                setIsOffline(payload.status === "offline");
+                return;
+            }
+
             if ("confirmMarket" in payload) {
                 const asset = payload.confirmMarket.asset;
                 const readyMarket: MarketInfo = {
@@ -209,7 +216,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                     string,
                     editMarketInfo,
                 ];
-
+                setIsOffline(false);
                 setMarkets((prev) =>
                     prev.map((m) => {
                         if (m.asset !== asset) return m;
@@ -283,7 +290,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 return;
             }
         },
-        [setErrorWithTimeout]
+        [setErrorWithTimeout, setIsOffline]
     );
 
     /** ------------ socket lifecycle (runs once) ------------ **/
@@ -388,6 +395,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         universe,
         cachedMarkets,
         totalMargin,
+        isOffline,
         errorMsg,
         sendCommand,
         dismissError,

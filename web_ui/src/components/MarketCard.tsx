@@ -290,7 +290,8 @@ const MarketCard = ({
                                                 </td>
 
                                                 <td className="py-2 text-right text-orange-400">
-                                                    {price == null || lev == null
+                                                    {price == null ||
+                                                    lev == null
                                                         ? "—"
                                                         : (() => {
                                                               const [

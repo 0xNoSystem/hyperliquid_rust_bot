@@ -220,7 +220,8 @@ export type Message =
     | { updateIndicatorValues: { asset: string; data: indicatorData[] } }
     | { marketInfoEdit: [string, editMarketInfo] }
     | { userError: string }
-    | { loadSession: [MarketInfo[], assetMeta[]] };
+    | { loadSession: [MarketInfo[], assetMeta[]] }
+    | { status: "offline" | "online" };
 
 export type assetPrice = [string, number];
 export type assetMargin = [string, number];

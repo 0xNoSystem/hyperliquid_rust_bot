@@ -7,6 +7,7 @@ export interface WebSocketContextValue {
     cachedMarkets: AddMarketInfo[];
     totalMargin: number;
     errorMsg: string | null;
+    isOffline: boolean;
     sendCommand: (body: unknown) => Promise<Response>;
     dismissError: () => void;
     cacheMarket: (market: MarketInfo) => void;

@@ -704,7 +704,8 @@ export default function MarketDetail() {
                                             </td>
 
                                             <td className="py-2 text-right text-orange-400">
-                                                {market.price == null || market.lev == null
+                                                {market.price == null ||
+                                                market.lev == null
                                                     ? "—"
                                                     : (() => {
                                                           const [upnl, change] =
