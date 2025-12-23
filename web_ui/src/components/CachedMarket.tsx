@@ -29,7 +29,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                     $
                 </span>
                 <span className="w-24">Lev: {tradeParams.lev}x</span>
-                <div className="flex flex-col">
+                <div className="flex flex-col font-normal">
                     {(config ?? []).map(([ind, tf], i) => {
                         const kind = Object.keys(ind)[0] as IndicatorName;
                         return (
@@ -38,7 +38,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                                 className="mb-3 ml-2 flex items-center"
                             >
                                 <span
-                                    className={`${indicatorColors[kind]} rounded-full px-3 py-1 text-xs`}
+                                    className={`${indicatorColors[kind]} rounded-full px-3 py-1 text-xs text-white`}
                                 >
                                     {indicatorLabels[kind] || kind} -- {tf}
                                 </span>
