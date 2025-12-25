@@ -6,7 +6,7 @@ use log::info;
 
 use kwant::indicators::Price;
 
-use crate::strategy::{Strat, Strategy};
+use crate::strategy::{Strat, StratContext, Strategy};
 use crate::trade_setup::{TimeFrame, TradeParams};
 use crate::{EngineOrder, ExecCommand, IndicatorData, MarketCommand, get_time_now};
 
@@ -145,8 +145,15 @@ impl SignalEngine {
     }
 
     fn get_signal(&mut self, price: f64, values: ValuesMap) -> Option<EngineOrder> {
-        self.strategy
-            .on_tick(values, price, &self.exec_params, get_time_now())
+        let ctx = StratContext {
+            free_margin: self.exec_params.free_margin(),
+            lev: self.exec_params.lev,
+            last_price: price,
+            indicators: &values,
+            tick_time: get_time_now(),
+            open_pos: self.exec_params.open_pos.as_ref(),
+        };
+        self.strategy.on_tick(ctx)
     }
 
     fn digest(&mut self, price: Price) {
@@ -166,8 +173,6 @@ impl SignalEngine {
 
 impl SignalEngine {
     pub async fn start(&mut self) {
-        let mut tick: u64 = 0;
-
         while let Some(cmd) = self.engine_rv.recv().await {
             match cmd {
                 EngineCommand::UpdatePrice(price) => {
@@ -177,19 +182,18 @@ impl SignalEngine {
                     //let values: Vec<Value> = ind.iter().filter_map(|t| t.value).collect();
                     let values = self.get_active_values();
 
-                    if !ind.is_empty() {
-                        if tick.is_multiple_of(2)
-                            && let Some(sender) = &self.data_tx
+                    if !ind.is_empty()
+                        && let Some(sender) = &self.data_tx
+                    {
                         {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
 
                         if let Some(trade) = self.get_signal(price.close, values) {
+                            //self.validate_trade(&trade);
                             let _ = self.trade_tx.try_send(ExecCommand::Order(trade));
                         }
                     }
-                    tick += 1;
-                    //println!("______TICK_____ => {}", tick);
                 }
 
                 EngineCommand::UpdatePriceBulk(data) => {

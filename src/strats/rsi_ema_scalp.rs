@@ -46,30 +46,29 @@ impl Strat for RsiEmaStrategy {
         Self::required_indicators_static()
     }
 
-    fn on_tick(
-        &mut self,
-        snapshot: ValuesMap,
-        price: f64,
-        params: &ExecParams,
-        now: u64,
-    ) -> Option<EngineOrder> {
-        let margin = params.free_margin();
-        let lev = params.lev as f64;
-        let open_pos = params.open_pos;
+    fn on_tick(&mut self, ctx: StratContext) -> Option<EngineOrder> {
+        let StratContext {
+            free_margin,
+            lev,
+            last_price,
+            indicators,
+            tick_time,
+            open_pos,
+        } = ctx;
 
-        let max_size = (margin * lev) / price;
+        let max_size = (free_margin * lev as f64) / last_price;
 
-        let rsi_1h_value = match snapshot.get(&self.rsi_1h)?.value {
+        let rsi_1h_value = match indicators.get(&self.rsi_1h)?.value {
             RsiValue(v) => v,
             _ => return None,
         };
 
-        let rsi_5m_value = match snapshot.get(&self.rsi_5m)?.value {
+        let rsi_5m_value = match indicators.get(&self.rsi_5m)?.value {
             RsiValue(v) => v,
             _ => return None,
         };
 
-        let (_fast, _slow, uptrend) = match snapshot.get(&self.ema_cross_15m)?.value {
+        let (_fast, _slow, uptrend) = match indicators.get(&self.ema_cross_15m)?.value {
             EmaCrossValue { short, long, trend } => (short, long, trend),
             _ => return None,
         };
@@ -77,18 +76,23 @@ impl Strat for RsiEmaStrategy {
             if let Some(open) = open_pos {
                 if !self.limit_close_set
                     && (rsi_5m_value >= 50.0
-                        || ((now - open.open_time > timedelta!(Min15, 1)) && rsi_1h_value < 35.0))
+                        || ((tick_time - open.open_time > timedelta!(Min15, 1))
+                            && rsi_1h_value < 35.0))
                 {
                     self.active_window_start = None;
                     self.limit_close_set = true;
-                    return Some(EngineOrder::new_limit_close(open.size, price * 1.003, None));
+                    return Some(EngineOrder::new_limit_close(
+                        open.size,
+                        last_price * 1.003,
+                        None,
+                    ));
                 }
             } else {
                 self.limit_close_set = false;
             }
             let start = self.active_window_start?;
 
-            if now - start >= timedelta!(Hour1, 3) {
+            if tick_time - start >= timedelta!(Hour1, 3) {
                 self.active_window_start = None;
                 return None;
             }
@@ -99,7 +103,7 @@ impl Strat for RsiEmaStrategy {
             }
 
             if open_pos.is_none() {
-                if max_size * price < MIN_ORDER_VALUE {
+                if max_size * last_price < MIN_ORDER_VALUE {
                     return None;
                 }
                 self.active_window_start = None;
@@ -114,7 +118,7 @@ impl Strat for RsiEmaStrategy {
             && rsi_1h_value < 30.0
             && !uptrend
         {
-            self.active_window_start = Some(now);
+            self.active_window_start = Some(tick_time);
         }
 
         self.prev_fast_above = Some(uptrend);

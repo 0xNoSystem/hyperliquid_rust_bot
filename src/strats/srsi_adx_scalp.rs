@@ -55,30 +55,29 @@ impl Strat for SrsiAdxScalp {
         Self::required_indicators_static()
     }
 
-    fn on_tick(
-        &mut self,
-        snapshot: ValuesMap,
-        price: f64,
-        params: &ExecParams,
-        now: u64,
-    ) -> Option<EngineOrder> {
-        let margin = params.free_margin();
-        let lev = params.lev;
-        let open_pos = params.open_pos;
+    fn on_tick(&mut self, ctx: StratContext) -> Option<EngineOrder> {
+        let StratContext {
+            free_margin,
+            lev,
+            last_price,
+            indicators,
+            tick_time,
+            open_pos,
+        } = ctx;
 
-        let max_size = (margin * lev as f64) / price;
+        let max_size = (free_margin * lev as f64) / last_price;
 
-        let rsi_1h_value = match snapshot.get(&self.rsi_1h)?.value {
+        let rsi_1h_value = match indicators.get(&self.rsi_1h)?.value {
             RsiValue(v) => v,
             _ => return None,
         };
 
-        let sma_rsi_1h_value = match snapshot.get(&self.sma_rsi_1h)?.value {
+        let sma_rsi_1h_value = match indicators.get(&self.sma_rsi_1h)?.value {
             SmaRsiValue(v) => v,
             _ => return None,
         };
 
-        let adx_15m_value = match snapshot.get(&self.adx_15m)?.value {
+        let adx_15m_value = match indicators.get(&self.adx_15m)?.value {
             AdxValue(v) => v,
             _ => return None,
         };
@@ -106,7 +105,7 @@ impl Strat for SrsiAdxScalp {
             }
             let start = self.active_window_start?;
 
-            if now - start >= timedelta!(Min15, 3) {
+            if tick_time - start >= timedelta!(Min15, 3) {
                 self.active_window_start = None;
                 return None;
             }
@@ -118,11 +117,11 @@ impl Strat for SrsiAdxScalp {
 
             if open_pos.is_none() {
                 let size = max_size * 0.95;
-                if size * price < MIN_ORDER_VALUE {
+                if size * last_price < MIN_ORDER_VALUE {
                     return None;
                 }
                 self.active_window_start = None;
-                let limit_px = calc_entry_px(Side::Long, price, 0.3, lev);
+                let limit_px = calc_entry_px(Side::Long, last_price, 0.3, lev);
                 return Some(EngineOrder::limit_open_long(size, limit_px, None));
             }
             None
@@ -133,7 +132,7 @@ impl Strat for SrsiAdxScalp {
             self.closing = false;
             self.sl_set = false;
             if adx_15m_value > 48.0 && !rsi_above_sma {
-                self.active_window_start = Some(now);
+                self.active_window_start = Some(tick_time);
             }
         }
         self.prev_rsi_above_sma = Some(rsi_above_sma);

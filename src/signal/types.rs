@@ -273,7 +273,10 @@ impl Tracker {
     }
 
     pub fn get_active_values(&self) -> ValuesMap {
-        let mut values: ValuesMap = HashMap::default();
+        let mut values: ValuesMap = HashMap::with_capacity_and_hasher(
+            self.indicators.len(),
+            BuildHasherDefault::<FxHasher>::default(),
+        );
         for (kind, handler) in self.indicators.iter() {
             if let Some(value) = handler.get_value() {
                 let tv = TimedValue {
@@ -288,7 +291,7 @@ impl Tracker {
     }
 
     pub fn get_indicators_data(&self) -> Vec<IndicatorData> {
-        let mut values = Vec::new();
+        let mut values = Vec::with_capacity(self.indicators.len());
         for (kind, handler) in self.indicators.iter() {
             values.push(IndicatorData {
                 id: (*kind, self.tf),

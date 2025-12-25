@@ -1,9 +1,9 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
-use crate::signal::{ExecParams, ValuesMap};
+use crate::signal::ValuesMap;
 use crate::strats::*;
-use crate::{EngineOrder, IndexId};
+use crate::{EngineOrder, IndexId, OpenPosInfo};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Copy, PartialEq, Serialize, Deserialize)]
@@ -11,6 +11,15 @@ use serde::{Deserialize, Serialize};
 pub enum Strategy {
     RsiEmaScalp,
     SrsiAdxScalp,
+}
+#[derive(Debug, Clone)]
+pub struct StratContext<'a> {
+    pub free_margin: f64,
+    pub lev: usize,
+    pub last_price: f64,
+    pub indicators: &'a ValuesMap,
+    pub tick_time: u64,
+    pub open_pos: Option<&'a OpenPosInfo>,
 }
 
 impl Strategy {
@@ -32,13 +41,7 @@ impl Strategy {
 }
 
 pub trait Strat {
-    fn on_tick(
-        &mut self,
-        snapshot: ValuesMap,
-        price: f64,
-        params: &ExecParams,
-        now: u64,
-    ) -> Option<EngineOrder>;
+    fn on_tick(&mut self, ctx: StratContext) -> Option<EngineOrder>;
     fn required_indicators(&self) -> Vec<IndexId>;
 }
 
