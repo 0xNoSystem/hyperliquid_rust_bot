@@ -1,10 +1,13 @@
 import React from "react";
-import { Github, ExternalLink } from "lucide-react";
+import { Github, ExternalLink, Moon, Sun } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
+import { useTheme } from "../context/ThemeContextStore";
 
 const Header: React.FC = () => {
     const { isOffline } = useWebSocketContext();
+    const { theme, toggleTheme } = useTheme();
+    const isLight = theme === "light";
     return (
         <header className="top-0 z-40 border-b border-white/10 bg-[#0B0C0E] py-4">
             <div className="mx-auto flex max-w-[2250px] items-center justify-between px-6 py-3">
@@ -57,6 +60,23 @@ const Header: React.FC = () => {
                         <Github className="h-4 w-4" />{" "}
                         <span className="text-[12px]">Repo</span>
                     </a>
+                    <button
+                        type="button"
+                        onClick={toggleTheme}
+                        className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-[#111316] px-3 py-1 text-white hover:bg-white/5"
+                        aria-label={`Switch to ${
+                            isLight ? "dark" : "light"
+                        } theme`}
+                    >
+                        {isLight ? (
+                            <Moon className="h-4 w-4" />
+                        ) : (
+                            <Sun className="h-4 w-4" />
+                        )}
+                        <span className="text-[12px]">
+                            {isLight ? "Dark" : "Light"}
+                        </span>
+                    </button>
 
                     <Link
                         to="/settings"

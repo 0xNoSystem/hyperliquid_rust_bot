@@ -295,8 +295,8 @@ export const indicatorColors: Record<IndicatorName, string> = {
     stochRsi: "bg-purple-800/30 text-purple-200",
     adx: "bg-yellow-800/30 text-yellow-200",
     atr: "bg-red-800/30 text-red-200",
-    ema: "bg-blue-500/30 text-white",
-    emaCross: "bg-orange-800/30 text-white",
+    ema: "bg-blue-500/30 text-indicator",
+    emaCross: "bg-orange-800/30 text-indicator",
     sma: "bg-gray-800/30 text-gray-200",
 };
 

@@ -107,7 +107,7 @@ export default function MarketsPage() {
                         {markets.length !== 0 && (
                             <button
                                 onClick={() => setShowAdd(true)}
-                                className="w-full rounded-md border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-cyan-200 hover:bg-cyan-500/20"
+                                className="theme-hard-btn w-full rounded-md border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-cyan-200 hover:bg-cyan-500/20"
                             >
                                 <div className="flex items-center justify-center gap-2">
                                     <Plus className="h-4 w-4" />
@@ -116,7 +116,7 @@ export default function MarketsPage() {
                             </button>
                         )}
                         <button
-                            className="w-full rounded-md border border-red-500/40 bg-red-600/15 px-3 py-2 text-red-200 hover:bg-red-600/25"
+                            className="theme-hard-btn w-full rounded-md border border-red-500/40 bg-red-600/15 px-3 py-2 text-red-200 hover:bg-red-600/25"
                             onClick={() =>
                                 requestCloseAll().catch((err) =>
                                     console.error("Close all failed", err)
@@ -129,7 +129,7 @@ export default function MarketsPage() {
                             </div>
                         </button>
                         <button
-                            className="w-full rounded-md border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-amber-200 hover:bg-amber-500/25"
+                            className="theme-hard-btn w-full rounded-md border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-amber-200 hover:bg-amber-500/25"
                             onClick={() =>
                                 requestPauseAll().catch((err) =>
                                     console.error("Pause all failed", err)
@@ -151,7 +151,7 @@ export default function MarketsPage() {
                             Recent Markets
                         </p>
 
-                        <div className="h-43 overflow-y-auto rounded-md border border-white/10 bg-black/50 p-3">
+                        <div className="h-43 overflow-y-auto rounded-md border border-white/10 bg-transparent p-3">
                             {cachedMarkets.length === 0 ? (
                                 <p className="text-white/40 italic">
                                     No cached markets.
@@ -184,7 +184,7 @@ export default function MarketsPage() {
                                 </p>
                                 <button
                                     onClick={() => setShowAdd(true)}
-                                    className="mt-5 inline-flex items-center gap-2 rounded-md border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-cyan-200 hover:bg-cyan-500/20"
+                                    className="theme-hard-btn mt-5 inline-flex items-center gap-2 rounded-md border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-cyan-200 hover:bg-cyan-500/20"
                                 >
                                     <Plus className="h-4 w-4" /> Add Market
                                 </button>
@@ -228,7 +228,7 @@ export default function MarketsPage() {
                 <div className="fixed inset-0 z-50">
                     {/* Overlay */}
                     <div
-                        className="absolute inset-0 bg-black/70"
+                        className="theme-overlay absolute inset-0 bg-black/70"
                         onClick={() => setShowAdd(false)}
                     />
 
@@ -254,7 +254,7 @@ export default function MarketsPage() {
                         className="fixed inset-0 z-50"
                     >
                         <div
-                            className="absolute inset-0 bg-black/70"
+                            className="theme-overlay absolute inset-0 bg-black/70"
                             onClick={() => setMarketToRemove(null)}
                         />
                         <motion.div
@@ -282,7 +282,7 @@ export default function MarketsPage() {
                                     Cancel
                                 </button>
                                 <button
-                                    className="rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+                                    className="text-on-accent rounded-md bg-red-600 px-4 py-2 hover:bg-red-700"
                                     onClick={() =>
                                         handleRemove(marketToRemove!)
                                     }
@@ -304,7 +304,7 @@ export default function MarketsPage() {
                         className="fixed inset-0 z-50"
                     >
                         <div
-                            className="absolute inset-0 bg-black/70"
+                            className="theme-overlay absolute inset-0 bg-black/70"
                             onClick={() => setMarketToToggle(null)}
                         />
                         <motion.div
@@ -332,7 +332,7 @@ export default function MarketsPage() {
                                     Cancel
                                 </button>
                                 <button
-                                    className="rounded-md bg-amber-600 px-4 py-2 text-white hover:bg-amber-700"
+                                    className="text-on-accent rounded-md bg-amber-600 px-4 py-2 hover:bg-amber-700"
                                     onClick={() =>
                                         handleTogglePause(marketToToggle!)
                                     }

@@ -108,7 +108,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                         )}
                     </div>
                     {setting && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
+                        <div className="theme-overlay absolute inset-0 z-50 flex items-center justify-center bg-black/50">
                             <ChartSettings
                                 initialColors={candleColor}
                                 onApply={(colors) =>

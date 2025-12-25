@@ -22,13 +22,13 @@ export function BackgroundFX({
 
             {/* subtle grid */}
             <div className="absolute inset-0" style={{ opacity: 0.06 * i }}>
-                <div className="h-full w-full bg-[linear-gradient(transparent_23px,rgba(255,255,255,0.06)_24px),linear-gradient(90deg,transparent_23px,rgba(255,255,255,0.06)_24px)] bg-[size:26px_26px]" />
+                <div className="fx-grid h-full w-full" />
             </div>
 
             {/* scanning lines */}
             <div className="absolute inset-0 [mask-image:linear-gradient(to_bottom,transparent,black_20%,black_80%,transparent)]">
                 <div
-                    className="animate-scan h-[200%] w-[200%] -translate-x-1/4 bg-[repeating-linear-gradient(90deg,transparent_0,transparent_48px,rgba(255,255,255,0.04)_49px,rgba(255,255,255,0.04)_50px)]"
+                    className="animate-scan fx-scan h-[200%] w-[200%] -translate-x-1/4"
                     style={{ opacity: 1 * i }}
                 />
             </div>

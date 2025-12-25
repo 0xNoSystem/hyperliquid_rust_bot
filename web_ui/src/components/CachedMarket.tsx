@@ -38,7 +38,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                                 className="mb-3 ml-2 flex items-center"
                             >
                                 <span
-                                    className={`${indicatorColors[kind]} rounded-full px-3 py-1 text-xs text-white`}
+                                    className={`${indicatorColors[kind]} rounded-full px-3 py-1 text-xs`}
                                 >
                                     {indicatorLabels[kind] || kind} -- {tf}
                                 </span>

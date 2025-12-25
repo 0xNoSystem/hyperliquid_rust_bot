@@ -62,11 +62,11 @@ const Input =
 const Select =
     "appearance-none w-full rounded-lg px-3 py-2 border border-white/10 bg-[#0F1318] text-white focus:outline-none focus:ring-2 focus:ring-emerald-700/30 ";
 const BtnGhost =
-    "inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10";
+    "theme-md-ghost inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10";
 const BtnOK =
-    "inline-flex items-center justify-center rounded-lg border border-emerald-500/40 bg-emerald-700/25 px-3 py-2 text-emerald-200 hover:bg-orange-700/35 hover:cursor-pointer hover:border-orange-600 hover:text-white";
+    "theme-md-ok inline-flex items-center justify-center rounded-lg border border-emerald-500/40 bg-emerald-700/25 px-3 py-2 text-emerald-200 hover:bg-orange-700/35 hover:cursor-pointer hover:border-orange-600 hover:text-white";
 const Chip =
-    "inline-flex items-center gap-2 rounded-md border border-white/10 bg-orange-400/10 px-2 py-1 text-[15px] hover:bg-orange-500 hover:cursor-pointer";
+    "theme-md-chip inline-flex items-center gap-2 rounded-md border border-white/10 bg-orange-400/10 px-2 py-1 text-[15px] hover:bg-orange-500 hover:cursor-pointer";
 const GridCols =
     "grid grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)_360px] gap-4 p-8 ";
 
@@ -478,7 +478,6 @@ export default function MarketDetail() {
                             <TradingViewWidget
                                 symbol={`${market.asset}`}
                                 interval="D"
-                                theme="dark"
                             />
                         </div>
                     </section>
@@ -858,7 +857,7 @@ export default function MarketDetail() {
                         className="fixed inset-0 z-50"
                     >
                         <div
-                            className="absolute inset-0 bg-black/70"
+                            className="theme-overlay absolute inset-0 bg-black/70"
                             onClick={() => setMarketToToggle(null)}
                         />
                         <motion.div
@@ -886,7 +885,7 @@ export default function MarketDetail() {
                                     Cancel
                                 </button>
                                 <button
-                                    className="rounded-md bg-amber-600 px-4 py-2 text-white hover:bg-amber-700"
+                                    className="text-on-accent rounded-md bg-amber-600 px-4 py-2 hover:bg-amber-700"
                                     onClick={() =>
                                         handleTogglePause(marketToToggle!)
                                     }

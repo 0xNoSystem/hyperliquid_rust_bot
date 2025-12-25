@@ -1,4 +1,5 @@
 import { useEffect, useRef, memo } from "react";
+import { useTheme } from "../context/ThemeContextStore";
 
 type Props = {
     symbol: string; // e.g. "CRYPTO:BTCUSD"
@@ -6,8 +7,11 @@ type Props = {
     theme?: "dark" | "light";
 };
 
-function TradingViewWidget({ symbol, interval = "D", theme = "dark" }: Props) {
+function TradingViewWidget({ symbol, interval = "D", theme }: Props) {
     const container = useRef<HTMLDivElement | null>(null);
+    const { theme: appTheme } = useTheme();
+    const resolvedTheme = theme ?? appTheme;
+    const isLight = resolvedTheme === "light";
     if (symbol[0] == "k") {
         symbol = symbol.slice(1);
     }
@@ -40,10 +44,12 @@ function TradingViewWidget({ symbol, interval = "D", theme = "dark" }: Props) {
             save_image: true,
             style: "1",
             symbol, // <- dynamic
-            theme,
+            theme: resolvedTheme,
             timezone: "Etc/UTC",
-            backgroundColor: "#0F0F0F",
-            gridColor: "rgba(242,242,242,0.06)",
+            backgroundColor: isLight ? "#f7f1e7" : "#0F0F0F",
+            gridColor: isLight
+                ? "rgba(60,50,40,0.1)"
+                : "rgba(242,242,242,0.06)",
             withdateranges: false,
             autosize: true,
             studies: [],
@@ -52,7 +58,7 @@ function TradingViewWidget({ symbol, interval = "D", theme = "dark" }: Props) {
         });
 
         container.current.appendChild(script);
-    }, [symbol, interval, theme]);
+    }, [symbol, interval, resolvedTheme, isLight]);
 
     return (
         <div ref={container} className="h-full w-full">

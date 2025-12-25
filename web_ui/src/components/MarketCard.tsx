@@ -27,15 +27,15 @@ const PnlBar = ({ pnl }: { pnl: number | null }) => {
     const w = Math.min(100, Math.abs(safePnl));
     const pos = safePnl >= 0;
     return (
-        <div className="rounded-md border border-white/10 bg-black p-1">
-            <div className="h-1.5 w-full bg-white/5">
+        <div className="pnl-bar rounded-md border border-white/10 bg-black p-1">
+            <div className="pnl-track h-1.5 w-full bg-white/5">
                 <div
                     className={pos ? "bg-orange-400" : "bg-rose-500"}
                     style={{ width: `${w}%`, height: "100%" }}
                 />
             </div>
             <div
-                className={`mt-1 text-right font-mono text-[11px] tabular-nums ${
+                className={`pnl-value mt-1 text-right font-mono text-[11px] tabular-nums ${
                     pos ? "text-orange-300" : "text-rose-300"
                 }`}
             >
@@ -76,7 +76,7 @@ const MarketCard = ({
     return (
         <motion.div
             whileHover={{ y: -2 }}
-            className="group rounded-md border border-white/10 bg-[#111316] p-4 shadow-[0_2px_0_rgba(255,255,255,0.03),_0_12px_24px_rgba(0,0,0,0.35)] hover:bg-[#111311]"
+            className="market-card group rounded-md border border-orange-400/10 bg-[#111316] p-4 hover:bg-gray-800"
         >
             {/* Head */}
             <div className="mb-3 flex items-start justify-between">
