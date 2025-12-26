@@ -16,9 +16,9 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
     const { asset, marginAlloc, tradeParams, config } = market;
 
     return (
-        <div className="my-2 flex h-fit items-center justify-between rounded-lg border-2 border-black/60 bg-gray-700/20 px-3 py-1 font-semibold text-black hover:bg-gray-600/70">
+        <div className="my-2 flex h-fit items-center justify-between rounded-lg border-2 border-line-ink-strong bg-surface-input-soft px-3 py-1 font-semibold text-ink hover:bg-surface-input-muted">
             <div className="jusify-center flex h-full items-center space-x-12 text-sm">
-                <span className="flex h-full w-20 items-center justify-center rounded-lg bg-black/50 text-center font-medium text-white/80">
+                <span className="flex h-full w-20 items-center justify-center rounded-lg bg-ink-50 text-center font-medium text-app-text/80">
                     {asset}
                 </span>
                 <span className="w-max">
@@ -46,23 +46,23 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                         );
                     })}
                 </div>
-                <div className="ml-10 flex items-center gap-2 text-[13px] font-bold text-black/50">
+                <div className="ml-10 flex items-center gap-2 text-[13px] font-bold text-ink-muted">
                     <span className="tracking-wide uppercase">Strategy</span>
-                    <span className="rounded-md bg-black/50 px-2 py-1 text-[12px] font-semibold text-white/70">
+                    <span className="rounded-md bg-ink-50 px-2 py-1 text-[12px] font-semibold text-app-text/70">
                         {tradeParams.strategy}
                     </span>
                 </div>
             </div>
             <div className="flex">
                 <button
-                    className="rounded-lg bg-white/50 px-3 py-3 hover:cursor-pointer hover:bg-black/70 hover:text-white"
+                    className="rounded-lg bg-glow-50 px-3 py-3 hover:cursor-pointer hover:bg-ink-70 hover:text-app-text"
                     onClick={() => onRemove(asset)}
                 >
                     <strong>X</strong>
                 </button>
 
                 <button
-                    className="ml-2 rounded-lg bg-white/50 px-4 py-3 hover:cursor-pointer hover:bg-black/50 hover:text-orange-400"
+                    className="ml-2 rounded-lg bg-glow-50 px-4 py-3 hover:cursor-pointer hover:bg-ink-50 hover:text-accent-brand"
                     onClick={() => onAdd(asset)}
                 >
                     Add

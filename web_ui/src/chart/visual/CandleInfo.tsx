@@ -30,36 +30,36 @@ const CandleInfo: React.FC<CandleInfoProps> = ({ candle }) => {
     const pct = candle.open !== 0 ? (diff / candle.open) * 100 : 0;
     const diffClass =
         diff === 0
-            ? "text-white/70"
+            ? "text-app-text/70"
             : diff > 0
-              ? "text-green-400"
-              : "text-red-400";
+              ? "text-accent-success"
+              : "text-accent-danger-soft";
 
     return (
-        <div className="pointer-events-none absolute top-3 left-4 rounded border border-white/20 bg-black/80 px-3 py-2 text-xs text-white/80 shadow-lg shadow-black/40">
+        <div className="pointer-events-none absolute top-3 left-4 rounded border border-line-weak bg-ink-80 px-3 py-2 text-xs text-app-text/80 shadow-lg shadow-app-ink/40">
             <div className="flex gap-2">
-                <span className="text-white/50">H</span>
+                <span className="text-app-text/50">H</span>
                 <span>{formatPrice(candle.high)}</span>
             </div>
             <div className="flex gap-2">
-                <span className="text-white/50">C</span>
+                <span className="text-app-text/50">C</span>
                 <span>{formatPrice(candle.close)}</span>
             </div>
             <div className="flex gap-2">
-                <span className="text-white/50">L</span>
+                <span className="text-app-text/50">L</span>
                 <span>{formatPrice(candle.low)}</span>
             </div>
             <div className="flex gap-2">
-                <span className="text-white/50">O</span>
+                <span className="text-app-text/50">O</span>
                 <span>{formatPrice(candle.open)}</span>
             </div>
             <div className="flex gap-2">
-                <span className="text-white/50">VLM</span>
+                <span className="text-app-text/50">VLM</span>
                 <span>{formatVolume(candle.volume)}</span>
             </div>
 
             <div className="mt-1 flex justify-between text-[11px]">
-                <span className="text-white/50">Δ</span>
+                <span className="text-app-text/50">Δ</span>
                 <span className={diffClass}>
                     {diff >= 0 ? "+" : ""}
                     {diff.toFixed(2)} ({pct >= 0 ? "+" : ""}

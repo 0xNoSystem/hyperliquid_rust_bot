@@ -18,7 +18,7 @@ const PositionTable = ({
 }: PositionTableProps) => {
     return (
         <table className="min-w-full text-[11px]">
-            <thead className="text-white/60">
+            <thead className="text-app-text/60">
                 <tr>
                     <th className="py-2 pr-2 text-left">Side</th>
 
@@ -33,12 +33,12 @@ const PositionTable = ({
             </thead>
 
             <tbody>
-                <tr className="border-t border-white/10">
+                <tr className="border-t border-line-subtle">
                     <td
                         className={`py-2 pr-4 font-semibold uppercase ${
                             position.side === "long"
-                                ? "text-green-500"
-                                : "text-red-500"
+                                ? "text-accent-success-strong"
+                                : "text-accent-danger"
                         }`}
                     >
                         {position.side}
@@ -56,7 +56,7 @@ const PositionTable = ({
                         {num(position.funding, 2)}$
                     </td>
 
-                    <td className="py-2 text-right text-orange-400">
+                    <td className="py-2 text-right text-accent-brand">
                         {price == null || lev == null
                             ? "—"
                             : (() => {

@@ -16,12 +16,12 @@ export function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
                     exit={{ y: -16, opacity: 0 }}
                     className="fixed top-6 left-1/2 z-50 -translate-x-1/2"
                 >
-                    <div className="flex items-center gap-2 rounded-md border border-red-500/40 bg-[#2A1010] px-3 py-2 text-red-100 shadow">
+                    <div className="flex items-center gap-2 rounded-md border border-accent-danger/40 bg-surface-danger px-3 py-2 text-danger-faint shadow">
                         <AlertCircle className="h-4 w-4" />
                         <span className="text-sm">{message}</span>
                         <button
                             onClick={onDismiss}
-                            className="ml-2 rounded-md px-2 py-1 hover:bg-white/10"
+                            className="ml-2 rounded-md px-2 py-1 hover:bg-glow-10"
                             aria-label="Dismiss error"
                         >
                             <X className="h-4 w-4" />

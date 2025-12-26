@@ -108,7 +108,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                         )}
                     </div>
                     {setting && (
-                        <div className="theme-overlay absolute inset-0 z-50 flex items-center justify-center bg-black/50">
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-app-overlay-soft">
                             <ChartSettings
                                 initialColors={candleColor}
                                 onApply={(colors) =>
@@ -126,25 +126,25 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
                 {/* RIGHT PRICE SCALE */}
                 <div
                     ref={rightRef}
-                    className="w-fit cursor-n-resize bg-[#00000033] text-white"
+                    className="w-fit cursor-n-resize bg-app-scale text-app-text"
                 >
                     <PriceScale />
                 </div>
             </div>
 
             {/* BOTTOM TIME SCALE */}
-            <div className="flex bg-[#00000033] text-white">
+            <div className="flex bg-app-scale text-app-text">
                 <div className="flex-1 cursor-w-resize">
                     <TimeScale />
                 </div>
 
                 {/* Right-side width preview box */}
                 <div
-                    className="flex items-center justify-center bg-black text-center"
+                    className="flex items-center justify-center bg-app-ink text-center"
                     style={{ width: rightWidth }}
                 >
                     <Settings
-                        className="h-5 w-5 text-gray-300"
+                        className="h-5 w-5 text-subtle"
                         onClick={() => setSetting((prev) => !prev)}
                     />
                 </div>

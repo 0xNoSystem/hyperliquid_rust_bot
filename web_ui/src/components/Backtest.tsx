@@ -405,7 +405,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     }, [startTime, endTime, timeframe, routeAsset]);
 
     return (
-        <div className="flex flex-1 flex-col bg-black/10 pb-50">
+        <div className="flex flex-1 flex-col bg-ink-10 pb-50">
             {/* Title */}
             <h1 className="mt-6 p-2 text-center text-3xl font-bold tracking-widest">
                 STRATEGY LAB
@@ -414,23 +414,23 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
             {/* Layout */}
             <div className="z-1 flex flex-grow flex-col items-center justify-between py-8">
                 {/* STRATEGY (top) */}
-                <div className="mb-6 mb-30 w-[60%] border-2 border-white/70 bg-black/60 p-4 text-center tracking-widest">
+                <div className="mb-6 mb-30 w-[60%] border-2 border-line-stronger bg-ink-60 p-4 text-center tracking-widest">
                     <h2 className="p-2 text-xl font-semibold">Strategy</h2>
                 </div>
 
                 {/* CHART (middle) */}
-                <div className="mb-30 flex h-[80vh] min-h-fit w-[90%] flex-grow flex-col rounded-lg border-2 border-white/20 bg-white/10 p-4 tracking-widest">
+                <div className="mb-30 flex h-[80vh] min-h-fit w-[90%] flex-grow flex-col rounded-lg border-2 border-line-weak bg-glow-10 p-4 tracking-widest">
                     {/* Toggle + Dates */}
                     <div className="flex flex-wrap items-center gap-4 p-4 pl-1">
                         {/* Toggle Button */}
                         <button
                             onClick={() => setIntervalOn(!intervalOn)}
                             className={`relative mr-3 flex h-6 w-12 cursor-pointer items-center rounded-full transition-colors duration-300 ${
-                                intervalOn ? "bg-orange-500" : "bg-gray-500"
+                                intervalOn ? "bg-toggle-on" : "bg-toggle-off"
                             }`}
                         >
                             <span
-                                className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white transition-transform duration-300 ${
+                                className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-toggle-knob transition-transform duration-300 ${
                                     intervalOn
                                         ? "translate-x-6"
                                         : "translate-x-0"
@@ -448,8 +448,8 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                     key={preset.id}
                                     className={`rounded border px-3 py-1 text-sm transition ${
                                         rangePreset === preset.id
-                                            ? "border-orange-500 text-orange-400"
-                                            : "border-white/30 text-white/70 hover:border-white/60"
+                                            ? "border-accent-brand-strong text-accent-brand"
+                                            : "border-line-muted text-app-text/70 hover:border-line-strong"
                                     }`}
                                     onClick={() => {
                                         handlePresetSelect(preset.id);
@@ -462,13 +462,13 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         </div>
 
                         {rangePreset === "CUSTOM" && showDatePicker && (
-                            <div className="flex flex-col gap-3 rounded border border-white/30 bg-black/50 p-3 text-sm text-white">
+                            <div className="flex flex-col gap-3 rounded border border-line-muted bg-ink-50 p-3 text-sm text-app-text">
                                 {customRows.map((item) => (
                                     <div
                                         key={item.label}
                                         className="flex flex-wrap items-center gap-2"
                                     >
-                                        <span className="w-14 text-xs tracking-wide text-white/60 uppercase">
+                                        <span className="w-14 text-xs tracking-wide text-app-text/60 uppercase">
                                             {item.label}
                                         </span>
                                         <select
@@ -480,7 +480,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                                     ),
                                                 })
                                             }
-                                            className="rounded border border-white/30 bg-black/70 p-1"
+                                            className="rounded border border-line-muted bg-ink-70 p-1"
                                         >
                                             {YEARS.map((year) => (
                                                 <option key={year} value={year}>
@@ -497,7 +497,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                                     ),
                                                 })
                                             }
-                                            className="rounded border border-white/30 bg-black/70 p-1"
+                                            className="rounded border border-line-muted bg-ink-70 p-1"
                                         >
                                             {MONTHS.map((month) => (
                                                 <option
@@ -515,7 +515,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                                     day: Number(e.target.value),
                                                 })
                                             }
-                                            className="rounded border border-white/30 bg-black/70 p-1"
+                                            className="rounded border border-line-muted bg-ink-70 p-1"
                                         >
                                             {Array.from(
                                                 { length: item.dayCount },
@@ -534,9 +534,9 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                                     time: e.target.value,
                                                 })
                                             }
-                                            className="w-24 w-[115px] rounded border border-white/30 bg-gray-600/70 p-1"
+                                            className="w-24 w-[115px] rounded border border-line-muted bg-surface-input-muted p-1"
                                         />
-                                        <span className="text-xs text-white/50">
+                                        <span className="text-xs text-app-text/50">
                                             UTC
                                         </span>
                                     </div>
@@ -550,8 +550,8 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                     disabled={!isCustomDirty}
                                     className={`self-start rounded border px-3 py-1 text-xs font-semibold transition ${
                                         isCustomDirty
-                                            ? "border-orange-500 text-orange-400 hover:bg-orange-500/20"
-                                            : "cursor-not-allowed border-white/20 text-white/30"
+                                            ? "border-accent-brand-strong text-accent-brand hover:bg-accent-brand-strong/20"
+                                            : "cursor-not-allowed border-line-weak text-app-text/30"
                                     }`}
                                 >
                                     OK
@@ -567,7 +567,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                     )
                                 }
                                 required
-                                className="rounded border border-orange-500 bg-black/80 px-3 py-1 text-sm font-semibold text-orange-400 transition"
+                                className="rounded border border-accent-brand-strong bg-ink-80 px-3 py-1 text-sm font-semibold text-accent-brand transition"
                             >
                                 {universe.map((u) => (
                                     <option
@@ -582,7 +582,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                     </div>
 
                     {/* Asset Title */}
-                    <h2 className="rounded-t-lg bg-black/80 p-2 text-center text-2xl font-semibold">
+                    <h2 className="rounded-t-lg bg-ink-80 p-2 text-center text-2xl font-semibold">
                         <AssetIcon
                             symbol={sanitizeAsset(activeAsset)}
                             className="mr-2 mb-1 inline-block"
@@ -591,12 +591,12 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                     </h2>
 
                     {/* TF SELECTOR */}
-                    <div className="flex flex-1 flex-col rounded-b-lg border-2 border-black/30 bg-[#111212]">
-                        <div className="z-5 grid w-full grid-cols-13 bg-black/70 text-center tracking-normal">
+                    <div className="flex flex-1 flex-col rounded-b-lg border-2 border-line-ink-muted bg-app-surface-5">
+                        <div className="z-5 grid w-full grid-cols-13 bg-ink-70 text-center tracking-normal">
                             {Object.entries(TIMEFRAME_CAMELCASE).map(
                                 ([short, tf]) => (
                                     <div
-                                        className="cursor-pointer border-b-2 border-black py-2 text-white/70 hover:bg-black"
+                                        className="cursor-pointer border-b-2 border-line-ink py-2 text-app-text/70 hover:bg-ink-hover"
                                         key={short}
                                         onClick={() => {
                                             setTimeframe(tf);
@@ -605,7 +605,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                         <span
                                             className={`px-2 text-center text-sm ${
                                                 timeframe === tf
-                                                    ? "font-bold text-orange-500"
+                                                    ? "font-bold text-timeframe-active"
                                                     : ""
                                             }`}
                                         >

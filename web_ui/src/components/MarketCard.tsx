@@ -27,16 +27,18 @@ const PnlBar = ({ pnl }: { pnl: number | null }) => {
     const w = Math.min(100, Math.abs(safePnl));
     const pos = safePnl >= 0;
     return (
-        <div className="pnl-bar rounded-md border border-white/10 bg-black p-1">
-            <div className="pnl-track h-1.5 w-full bg-white/5">
+        <div className="rounded-md border border-pnl-shell-border bg-pnl-shell-bg p-1">
+            <div className="h-1.5 w-full bg-pnl-track">
                 <div
-                    className={pos ? "bg-orange-400" : "bg-rose-500"}
+                    className={
+                        pos ? "bg-pnl-positive-bg" : "bg-pnl-negative-bg"
+                    }
                     style={{ width: `${w}%`, height: "100%" }}
                 />
             </div>
             <div
-                className={`pnl-value mt-1 text-right font-mono text-[11px] tabular-nums ${
-                    pos ? "text-orange-300" : "text-rose-300"
+                className={`mt-1 text-right font-mono text-[11px] tabular-nums ${
+                    pos ? "text-pnl-positive-text" : "text-pnl-negative-text"
                 }`}
             >
                 {pos ? "+" : ""}
@@ -69,19 +71,17 @@ const MarketCard = ({
     const pxDecimals = MAX_DECIMALS - szDecimals - 1;
     const format = (n: number) => n.toFixed(pxDecimals);
 
-    const price_color = "orange";
-
     const loading = state === "Loading";
 
     return (
         <motion.div
             whileHover={{ y: -2 }}
-            className="market-card group rounded-md border border-orange-400/10 bg-[#111316] p-4 hover:bg-gray-800"
+            className="group rounded-md border border-accent-brand/10 bg-app-surface-2 p-4 hover:bg-app-surface-hover"
         >
             {/* Head */}
             <div className="mb-3 flex items-start justify-between">
                 <div>
-                    <div className="text-[10px] text-white/50 uppercase">
+                    <div className="text-[10px] text-app-text/50 uppercase">
                         Asset
                     </div>
                     <div className="-mt-0.5 flex items-baseline gap-3">
@@ -100,22 +100,22 @@ const MarketCard = ({
                                 href={`https://app.hyperliquid.xyz/trade/${asset}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="ml-3 hidden items-center gap-2 rounded-md border border-white/10 bg-[#111316] text-[12px] text-white hover:bg-white/5 md:inline-flex"
+                                className="ml-3 hidden items-center gap-2 rounded-md border border-line-subtle bg-app-surface-2 text-[12px] text-app-text hover:bg-glow-5 md:inline-flex"
                             >
-                                <ExternalLink className="h-3.5 w-3.5 text-orange-400" />
+                                <ExternalLink className="h-3.5 w-3.5 text-accent-brand" />
                             </a>
                         </h2>
                         <span
                             className={`relative bottom-1 rounded-md px-2 py-0.5 text-[10px] uppercase ${
                                 isPaused
-                                    ? "border border-amber-400/60 text-amber-300"
-                                    : "border border-orange-500/60 text-orange-300"
+                                    ? "border border-accent-warning-border/60 text-accent-warning-mid"
+                                    : "border border-accent-brand-strong/60 text-accent-brand-soft"
                             }`}
                         >
                             {loading ? "Loading" : isPaused ? "Paused" : "Live"}
                         </span>
                     </div>
-                    <div className="mt-1 font-mono text-sm text-white/70">
+                    <div className="mt-1 font-mono text-sm text-app-text/70">
                         {loading || lev == null ? <LoadingDots /> : `${lev}×`}
                     </div>
                 </div>
@@ -124,21 +124,21 @@ const MarketCard = ({
                     <div className="flex gap-2">
                         <button
                             onClick={() => onTogglePause(asset)}
-                            className="grid h-9 w-9 place-items-center rounded-md border border-white/10 bg-white/[0.04] hover:bg-white/10"
+                            className="grid h-9 w-9 place-items-center rounded-md border border-line-subtle bg-glow-4 hover:bg-glow-10"
                             title="Toggle"
                         >
                             {isPaused ? (
-                                <Play className="h-4 w-4 text-orange-300" />
+                                <Play className="h-4 w-4 text-accent-brand-soft" />
                             ) : (
-                                <Pause className="h-4 w-4 text-amber-300" />
+                                <Pause className="h-4 w-4 text-accent-warning-mid" />
                             )}
                         </button>
                         <button
                             onClick={() => onRemove(asset)}
-                            className="grid h-9 w-9 place-items-center rounded-md border border-white/10 bg-white/[0.04] hover:bg-rose-600/20"
+                            className="grid h-9 w-9 place-items-center rounded-md border border-line-subtle bg-glow-4 hover:bg-accent-danger-alt-strong/20"
                             title="Remove"
                         >
-                            <Trash2 className="h-4 w-4 text-rose-300" />
+                            <Trash2 className="h-4 w-4 text-accent-danger-alt-soft" />
                         </button>
                     </div>
                 )}
@@ -147,13 +147,13 @@ const MarketCard = ({
             {/* Metrics */}
             <div className="grid grid-cols-3 gap-3">
                 <div>
-                    <div className="text-[10px] text-white/50 uppercase">
+                    <div className="text-[10px] text-app-text/50 uppercase">
                         Price
                     </div>
                     <div
                         className={`font-mono text-xl font-semibold tabular-nums`}
                     >
-                        <span className={`text-${price_color}-400 `}>
+                        <span className="text-accent-brand">
                             {loading ||
                             price == null ||
                             Math.abs(price) < 1e-8 ? (
@@ -165,7 +165,7 @@ const MarketCard = ({
                     </div>
                 </div>
                 <div>
-                    <div className="text-[10px] text-white/50 uppercase">
+                    <div className="text-[10px] text-app-text/50 uppercase">
                         Leverage
                     </div>
                     <div className="font-mono text-xl">
@@ -173,7 +173,7 @@ const MarketCard = ({
                     </div>
                 </div>
                 <div>
-                    <div className="text-[10px] text-white/50 uppercase">
+                    <div className="text-[10px] text-app-text/50 uppercase">
                         Margin
                     </div>
                     <div className="font-mono text-xl">
@@ -188,7 +188,7 @@ const MarketCard = ({
 
             {/* PnL */}
             <div className="mt-4">
-                <div className="text-[10px] text-white/50 uppercase">PnL</div>
+                <div className="text-[10px] text-app-text/50 uppercase">PnL</div>
                 <PnlBar pnl={pnl} />
             </div>
 
@@ -203,7 +203,7 @@ const MarketCard = ({
 
                         return (
                             <div
-                                className={`flex cursor-pointer flex-col rounded-md border border-white/10 px-2.5 py-1 text-[11px] ${indicatorColors[kindKey]}`}
+                                className={`flex cursor-pointer flex-col rounded-md border border-line-subtle px-2.5 py-1 text-[11px] ${indicatorColors[kindKey]}`}
                                 title={get_params(kind)}
                             >
                                 <span key={i}>
@@ -223,17 +223,17 @@ const MarketCard = ({
             </div>
 
             {/* Strategy */}
-            <div className="mt-4 border-t border-white/10 pt-3 text-xs">
+            <div className="mt-4 border-t border-line-subtle pt-3 text-xs">
                 {loading ? (
-                    <div className="col-span-3 flex justify-center">
-                        <LoadingDots />
-                    </div>
-                ) : (
-                    <>
-                        <div className="my-2 rounded-xl border border-white/10 bg-[#0B0E12]/80">
-                            <p className="py-1 text-center">OPEN POSITION</p>
+                            <div className="col-span-3 flex justify-center">
+                                <LoadingDots />
+                            </div>
+                        ) : (
+                            <>
+                                <div className="my-2 rounded-xl border border-line-subtle bg-surface-pane">
+                                    <p className="py-1 text-center">OPEN POSITION</p>
 
-                            <div className="px-3 py-2">
+                                    <div className="px-3 py-2">
                                 {position == null ? (
                                     <p className="text-center">---</p>
                                 ) : (
@@ -249,7 +249,7 @@ const MarketCard = ({
                         </div>
 
                         <div className="text-center">
-                            <div className="text-[12px] text-white/50 uppercase">
+                            <div className="text-[12px] text-app-text/50 uppercase">
                                 Strategy
                             </div>
                             <p className="text-[14px] font-bold">{strategy}</p>

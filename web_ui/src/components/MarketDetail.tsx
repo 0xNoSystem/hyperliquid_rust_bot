@@ -17,6 +17,7 @@ import {
     indicatorLabels,
     indicatorParamLabels,
     indicatorColors,
+    indicatorValueColors,
     fromTimeFrame,
     get_value,
     into,
@@ -42,41 +43,43 @@ const formatPrice = (n: number) => {
 function leverageColor(lev: number, maxLev: number): string {
     const pct = (lev / maxLev) * 100;
 
-    if (pct < 10) return "text-green-500";
-    if (pct < 40) return "text-lime-200";
-    if (pct < 60) return "text-yellow-500";
-    if (pct < 80) return "text-orange-500";
-    return "text-red-600";
+    if (pct < 10) return "text-leverage-low";
+    if (pct < 40) return "text-leverage-mid";
+    if (pct < 60) return "text-leverage-high";
+    if (pct < 80) return "text-leverage-critical";
+    return "text-leverage-max";
 }
 
 /* ====== TOKENS ====== */
 const Rail =
-    "rounded-xl border border-white/10 bg-[#0A0D10]/90 p-4 backdrop-blur";
-const Pane = "rounded-xl border border-white/10 bg-[#0B0E12]/80";
+    "rounded-xl border border-line-subtle bg-surface-rail p-4 backdrop-blur";
+const Pane = "rounded-xl border border-line-subtle bg-surface-pane";
 const Head =
-    "px-4 py-3 border-b border-white/10 text-[11px] uppercase tracking-wide text-white/60";
+    "px-4 py-3 border-b border-line-subtle text-[11px] uppercase tracking-wide text-app-text/60";
 const Body = "p-4";
 const Chart = "";
 const Input =
-    "w-full rounded-lg px-3 py-2 border border-white/10 bg-[#0F1318] text-white focus:outline-none focus:ring-2 focus:ring-emerald-400/30";
+    "w-full rounded-lg px-3 py-2 border border-line-subtle bg-app-surface-3 text-app-text focus:outline-none focus:ring-2 focus:ring-accent-profit-strong/30";
 const Select =
-    "appearance-none w-full rounded-lg px-3 py-2 border border-white/10 bg-[#0F1318] text-white focus:outline-none focus:ring-2 focus:ring-emerald-700/30 ";
+    "appearance-none w-full rounded-lg px-3 py-2 border border-line-subtle bg-app-surface-3 text-app-text focus:outline-none focus:ring-2 focus:ring-accent-profit-deep/30 ";
 const BtnGhost =
-    "theme-md-ghost inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10";
+    "inline-flex items-center justify-center rounded-lg border border-btn-ghost-border bg-btn-ghost-bg px-3 py-2 text-btn-ghost-text hover:bg-btn-ghost-hover";
 const BtnOK =
-    "theme-md-ok inline-flex items-center justify-center rounded-lg border border-emerald-500/40 bg-emerald-700/25 px-3 py-2 text-emerald-200 hover:bg-orange-700/35 hover:cursor-pointer hover:border-orange-600 hover:text-white";
+    "inline-flex items-center justify-center rounded-lg border border-btn-ok-border bg-btn-ok-bg px-3 py-2 text-btn-ok-text hover:cursor-pointer hover:border-btn-ok-hover-border hover:bg-btn-ok-hover-bg hover:text-btn-ok-hover-text";
 const Chip =
-    "theme-md-chip inline-flex items-center gap-2 rounded-md border border-white/10 bg-orange-400/10 px-2 py-1 text-[15px] hover:bg-orange-500 hover:cursor-pointer";
+    "inline-flex items-center gap-2 rounded-md border border-btn-chip-border bg-btn-chip-bg px-2 py-1 text-[15px] text-btn-chip-text hover:cursor-pointer hover:bg-btn-chip-hover";
 const GridCols =
     "grid grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)_360px] gap-4 p-8 ";
 
 function PnlTicker({ pnl }: { pnl: number | null }) {
     if (pnl == null)
-        return <span className="font-mono text-white/60">PnL —</span>;
+        return <span className="font-mono text-app-text/60">PnL —</span>;
     const pos = pnl >= 0;
     return (
         <span
-            className={`font-mono text-xl tabular-nums ${pos ? "text-emerald-300" : "text-rose-300"}`}
+            className={`font-mono text-xl tabular-nums ${
+                pos ? "text-accent-profit" : "text-accent-danger-alt-soft"
+            }`}
         >
             {pos ? "+ $" : ""}
             {num(pnl, 2)}
@@ -228,7 +231,7 @@ export default function MarketDetail() {
 
     if (!market) {
         return (
-            <div className="mx-auto max-w-7xl px-6 py-8 text-white">
+            <div className="mx-auto max-w-7xl px-6 py-8 text-app-text">
                 <Link to="/" className={BtnGhost}>
                     <ArrowLeft className="mr-2 h-4 w-4" />
                     Back
@@ -247,12 +250,12 @@ export default function MarketDetail() {
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
-        <div className="relative z-40 min-h-screen max-w-[3300px] overflow-hidden bg-gray-500/30 py-8 pb-80 font-mono text-white">
+        <div className="relative z-40 min-h-screen max-w-[3300px] overflow-hidden bg-surface-tone py-8 pb-80 font-mono text-app-text">
             <ErrorBanner message={errorMsg} onDismiss={dismissError} />
             <div className="mt-10 mb-1 flex items-center justify-around">
                 <div className="relative right-[3vw] flex items-center gap-3">
                     <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>
-                        <div className="text-md relative right-20 w-fit rounded border border-orange-500/40 px-3 py-1 font-semibold text-orange-400">
+                        <div className="text-md relative right-20 w-fit rounded border border-accent-brand-strong/40 px-3 py-1 font-semibold text-accent-brand">
                             {"BACKTEST (BETA)"}
                         </div>
                     </Link>
@@ -287,8 +290,8 @@ export default function MarketDetail() {
                             <ArrowLeft className="mr-2 h-6 w-6" />
                             Back to Markets
                         </Link>
-                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                            <div className="text-[10px] text-white/50 uppercase">
+                        <div className="rounded-lg border border-line-subtle bg-ink-20 p-3">
+                            <div className="text-[10px] text-app-text/50 uppercase">
                                 Price
                             </div>
                             <div className="mt-1 text-2xl">
@@ -298,15 +301,19 @@ export default function MarketDetail() {
                             </div>
                         </div>
 
-                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        <div className="rounded-lg border border-line-subtle bg-ink-20 p-3">
                             <div className="flex items-center justify-between">
-                                <div className="text-[14px] text-white/50 uppercase">
+                                <div className="text-[14px] text-app-text/50 uppercase">
                                     PnL
                                 </div>
-                                <div className="h-1 w-16 bg-white/10">
+                                <div className="h-1 w-16 bg-glow-10">
                                     {/* mini bar (cosmetic) */}
                                     <div
-                                        className={`h-full ${(market.pnl ?? 0) >= 0 ? "bg-emerald-400" : "bg-rose-400"}`}
+                                        className={`h-full ${
+                                            (market.pnl ?? 0) >= 0
+                                                ? "bg-accent-profit-strong"
+                                                : "bg-accent-danger-alt-mid"
+                                        }`}
                                         style={{
                                             width: `${Math.min(100, Math.abs(market.pnl ?? 0))}%`,
                                         }}
@@ -319,8 +326,8 @@ export default function MarketDetail() {
                         </div>
 
                         {/* Leverage stepper */}
-                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                            <div className="text-[10px] text-white/50 uppercase">
+                        <div className="rounded-lg border border-line-subtle bg-ink-20 p-3">
+                            <div className="text-[10px] text-app-text/50 uppercase">
                                 Leverage{" "}
                                 <strong className="text-[13px]">
                                     {marketLev}×
@@ -364,7 +371,7 @@ export default function MarketDetail() {
                                     <Plus className="h-4 w-4" />
                                 </button>
                             </div>
-                            <div className="mt-2 text-[11px] text-white/50">
+                            <div className="mt-2 text-[11px] text-app-text/50">
                                 Max: {maxLev}×
                             </div>
                             <button
@@ -376,7 +383,7 @@ export default function MarketDetail() {
                         </div>
 
                         {/* Margin */}
-                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        <div className="rounded-lg border border-line-subtle bg-ink-20 p-3">
                             {showMinOrderWarning && (
                                 <>
                                     <img
@@ -387,14 +394,14 @@ export default function MarketDetail() {
                                         title=""
                                         className="img-small"
                                     />
-                                    <p className="text-[12px] text-orange-500">
+                                    <p className="text-[12px] text-accent-brand-strong">
                                         MAX ORDER VALUE is lower than 10$, no
                                         orders can be passed
                                     </p>
                                 </>
                             )}
                             <div
-                                className="cursor-pointer text-[12px] text-white/50 uppercase"
+                                className="cursor-pointer text-[12px] text-app-text/50 uppercase"
                                 onClick={() =>
                                     setMargin(totalMargin + marketMargin)
                                 }
@@ -415,9 +422,9 @@ export default function MarketDetail() {
                                         onChange={(e) =>
                                             setMargin(+e.target.value)
                                         }
-                                        className="h-2 w-full cursor-pointer bg-gray-200"
+                                        className="h-2 w-full cursor-pointer bg-surface-range"
                                     />
-                                    <div className="mt-1 flex justify-between text-sm text-white">
+                                    <div className="mt-1 flex justify-between text-sm text-app-text">
                                         <span>{margin.toFixed(2)}$</span>
                                         <span>
                                             {(
@@ -445,7 +452,7 @@ export default function MarketDetail() {
                         </div>
 
                         {/* Strategy snapshot */}
-                        <div className="space-y-1 rounded-lg border border-white/10 bg-black/20 p-3 text-[12px]">
+                        <div className="space-y-1 rounded-lg border border-line-subtle bg-ink-20 p-3 text-[12px]">
                             <h3 className="text-center text-[18px]">
                                 Strategy
                             </h3>
@@ -462,10 +469,10 @@ export default function MarketDetail() {
                     <section className={`${Pane}`}>
                         <div className={Head}>
                             Chart{" "}
-                            <span className="text-red-300/50">
+                            <span className="text-accent-danger-muted/50">
                                 Note: This is a reference spot price chart,{" "}
                                 <a
-                                    className="font-bold text-yellow-500 underline"
+                                    className="font-bold text-accent-highlight underline"
                                     href={`https://app.hyperliquid.xyz/trade/${market.asset}`}
                                     target="_blank"
                                 >
@@ -488,7 +495,7 @@ export default function MarketDetail() {
                             className={`${Head} flex items-center justify-between`}
                         >
                             <span>Active Indicators</span>
-                            <span className="text-white/40">
+                            <span className="text-app-text/40">
                                 Count: {market.indicators.length}
                             </span>
                         </div>
@@ -500,10 +507,10 @@ export default function MarketDetail() {
                                     kind
                                 )[0] as IndicatorName;
                                 return (
-                                    <div className="group flex flex-col items-center gap-2 rounded-lg border border-white/10 px-2.5 py-1 text-[11px]">
+                                    <div className="group flex flex-col items-center gap-2 rounded-lg border border-line-subtle px-2.5 py-1 text-[11px]">
                                         <div
                                             key={`${kindKey}-${fromTimeFrame(timeframe)}-${i}`}
-                                            className={`group flex items-center gap-4 rounded-lg border border-white/10 px-2.5 py-1 text-[13px] ${indicatorColors[kindKey]}`}
+                                            className={`group flex items-center gap-4 rounded-lg border border-line-subtle px-2.5 py-1 text-[13px] ${indicatorColors[kindKey]}`}
                                             title={JSON.stringify(kind)}
                                         >
                                             <span className="font-medium">
@@ -512,7 +519,7 @@ export default function MarketDetail() {
                                                 — {fromTimeFrame(timeframe)}
                                             </span>
                                             <button
-                                                className="rounded p-0.5 hover:bg-white/10"
+                                                className="rounded p-0.5 hover:bg-glow-10"
                                                 onClick={() =>
                                                     queueRemove([
                                                         kind,
@@ -525,7 +532,7 @@ export default function MarketDetail() {
                                             </button>
                                         </div>
                                         <span
-                                            className={`text-center text-xl font-bold text-${indicatorColors[kindKey]}`}
+                                            className={`text-center text-xl font-bold ${indicatorValueColors[kindKey]}`}
                                         >
                                             {value
                                                 ? get_value(value, pxDecimals)
@@ -542,12 +549,12 @@ export default function MarketDetail() {
                         <div className={Head}>Trades</div>
                         <div className={`${Body} overflow-x-auto`}>
                             {!market.trades || market.trades.length === 0 ? (
-                                <div className="text-sm text-white/60">
+                                <div className="text-sm text-app-text/60">
                                     No trades yet.
                                 </div>
                             ) : (
                                 <table className="min-w-full text-[12px]">
-                                    <thead className="text-white/60">
+                                    <thead className="text-app-text/60">
                                         <tr>
                                             <th className="py-2 pr-4 text-left">
                                                 Side
@@ -583,10 +590,14 @@ export default function MarketDetail() {
                                             (t: TradeInfo, i: number) => (
                                                 <tr
                                                     key={i}
-                                                    className="border-t border-white/10"
+                                                    className="border-t border-line-subtle"
                                                 >
                                                     <td
-                                                        className={`py-2 pr-4 font-semibold uppercase ${t.side == "long" ? "text-green-500" : "text-red-500"}`}
+                                                        className={`py-2 pr-4 font-semibold uppercase ${
+                                                            t.side == "long"
+                                                                ? "text-accent-success-strong"
+                                                                : "text-accent-danger"
+                                                        }`}
                                                     >
                                                         {t.side}
                                                     </td>
@@ -601,7 +612,11 @@ export default function MarketDetail() {
                                                         )}
                                                     </td>
                                                     <td
-                                                        className={`py-2 pr-4 text-right ${t.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}
+                                                        className={`py-2 pr-4 text-right ${
+                                                            t.pnl >= 0
+                                                                ? "text-accent-profit"
+                                                                : "text-accent-danger-alt-soft"
+                                                        }`}
                                                     >
                                                         {num(t.pnl, 2)}$
                                                     </td>
@@ -640,7 +655,7 @@ export default function MarketDetail() {
                 {/* RIGHT — Indicator builder + Pending batch */}
                 <aside className="space-y-4">
                     <div className={Pane}>
-                        <p className="border-b border-orange-600/40 py-1 text-center">
+                        <p className="border-b border-accent-brand-deep/40 py-1 text-center">
                             OPEN POSITION
                         </p>
                         <div className="px-3 py-2">
@@ -661,7 +676,7 @@ export default function MarketDetail() {
                         <div className={Head}>Add Indicator</div>
                         <div className={`${Body} grid grid-cols-2 gap-3`}>
                             <div className="col-span-2">
-                                <label className="text-[10px] text-white/50 uppercase">
+                                <label className="text-[10px] text-app-text/50 uppercase">
                                     Kind
                                 </label>
                                 <select
@@ -679,7 +694,7 @@ export default function MarketDetail() {
                                         <option
                                             key={k}
                                             value={k}
-                                            className="bg-[#0F1318] text-white"
+                                            className="bg-app-surface-3 text-app-text"
                                         >
                                             {indicatorLabels[k] || k}
                                         </option>
@@ -688,7 +703,7 @@ export default function MarketDetail() {
                             </div>
 
                             <div>
-                                <label className="text-[10px] text-white/50 uppercase">
+                                <label className="text-[10px] text-app-text/50 uppercase">
                                     {indicatorParamLabels[kindKey]?.[0] ??
                                         "Param"}
                                 </label>
@@ -704,7 +719,7 @@ export default function MarketDetail() {
                                 kindKey
                             ) && (
                                 <div>
-                                    <label className="text-[10px] text-white/50 uppercase">
+                                    <label className="text-[10px] text-app-text/50 uppercase">
                                         {indicatorParamLabels[kindKey]?.[1] ??
                                             "Param2"}
                                     </label>
@@ -718,7 +733,7 @@ export default function MarketDetail() {
                             )}
 
                             <div className="col-span-2">
-                                <label className="text-[10px] text-white/50 uppercase">
+                                <label className="text-[10px] text-app-text/50 uppercase">
                                     Timeframe
                                 </label>
                                 <select
@@ -744,7 +759,7 @@ export default function MarketDetail() {
                                         <option
                                             key={s}
                                             value={s}
-                                            className="bg-[#0F1318] text-white"
+                                            className="bg-app-surface-3 text-app-text"
                                         >
                                             {s}
                                         </option>
@@ -774,13 +789,13 @@ export default function MarketDetail() {
                             className={`${Head} flex items-center justify-between`}
                         >
                             <span>Pending Changes</span>
-                            <span className="text-white/40">
+                            <span className="text-app-text/40">
                                 {pending.length}
                             </span>
                         </div>
                         <div className={`${Body}`}>
                             {pending.length === 0 ? (
-                                <div className="text-[12px] text-white/50">
+                                <div className="text-[12px] text-app-text/50">
                                     No pending edits.
                                 </div>
                             ) : (
@@ -794,10 +809,10 @@ export default function MarketDetail() {
                                             return (
                                                 <div
                                                     key={idx}
-                                                    className={`flex items-center gap-2 rounded-md border border-white/10 px-2 py-0.5 text-[11px] ${
+                                                    className={`flex items-center gap-2 rounded-md border border-line-subtle px-2 py-0.5 text-[11px] ${
                                                         e.edit === "add"
-                                                            ? "bg-emerald-900/35"
-                                                            : "bg-rose-900/35"
+                                                            ? "bg-accent-profit-darker/35"
+                                                            : "bg-accent-danger-alt-darker/35"
                                                     }`}
                                                 >
                                                     <span className="tracking-wide uppercase">
@@ -810,7 +825,7 @@ export default function MarketDetail() {
                                                         — {fromTimeFrame(tf)}
                                                     </span>
                                                     <button
-                                                        className="rounded p-0.5 hover:bg-white/10"
+                                                        className="rounded p-0.5 hover:bg-glow-10"
                                                         onClick={() =>
                                                             setPending((prev) =>
                                                                 prev.filter(
@@ -857,35 +872,35 @@ export default function MarketDetail() {
                         className="fixed inset-0 z-50"
                     >
                         <div
-                            className="theme-overlay absolute inset-0 bg-black/70"
+                            className="absolute inset-0 bg-app-overlay"
                             onClick={() => setMarketToToggle(null)}
                         />
                         <motion.div
                             initial={{ y: 24, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             exit={{ y: 10, opacity: 0 }}
-                            className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-amber-500/40 bg-[#1A140A] p-6"
+                            className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-accent-warning/40 bg-surface-warning p-6"
                         >
                             <h3 className="text-lg font-semibold">
                                 Pause{" "}
-                                <span className="text-amber-300">
+                                <span className="text-accent-warning-mid">
                                     {marketToToggle}
                                 </span>
                                 ?
                             </h3>
-                            <p className="mt-1 text-amber-200/80">
+                            <p className="mt-1 text-warning-soft/80">
                                 This will close any ongoing trade initiated by
                                 the Bot.
                             </p>
                             <div className="mt-6 flex justify-end gap-2">
                                 <button
-                                    className="rounded-md border border-white/20 px-4 py-2 hover:bg-white/10"
+                                    className="rounded-md border border-line-weak px-4 py-2 hover:bg-glow-10"
                                     onClick={() => setMarketToToggle(null)}
                                 >
                                     Cancel
                                 </button>
                                 <button
-                                    className="text-on-accent rounded-md bg-amber-600 px-4 py-2 hover:bg-amber-700"
+                                    className="text-on-accent rounded-md bg-accent-warning-strong px-4 py-2 hover:bg-accent-warning-deep"
                                     onClick={() =>
                                         handleTogglePause(marketToToggle!)
                                     }

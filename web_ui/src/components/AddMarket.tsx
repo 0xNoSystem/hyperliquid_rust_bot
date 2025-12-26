@@ -145,22 +145,22 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     };
 
     const inputClass =
-        "mt-1 w-full border border-white bg-gray-600 text-white rounded px-3 py-2";
+        "mt-1 w-full rounded border border-line-solid bg-surface-input px-3 py-2 text-app-text";
     const selectClass =
-        "mt-1 w-full border border-white bg-gray-600 text-white rounded px-3 py-2 cursor-pointer";
+        "mt-1 w-full cursor-pointer rounded border border-line-solid bg-surface-input px-3 py-2 text-app-text";
     const btnClass =
-        "px-5 py-2 border border-white bg-gray-600 text-white rounded hover:bg-gray-500 cursor-pointer";
+        "cursor-pointer rounded border border-line-solid bg-surface-input px-5 py-2 text-app-text hover:bg-surface-toggle-off";
 
     return (
         <div className="fixed inset-0 z-50 flex scale-[0.92] transform items-center justify-center backdrop-blur-sm">
             <form
                 onSubmit={handleSubmit}
-                className="relative w-full max-w-lg scale-90 space-y-6 rounded-2xl bg-gray-600 p-8 shadow-2xl"
+                className="relative w-full max-w-lg scale-90 space-y-6 rounded-2xl bg-surface-input p-8 shadow-2xl"
             >
-                <h2 className="text-2xl font-bold text-white">
+                <h2 className="text-2xl font-bold text-app-text">
                     Add New Market
                 </h2>
-                <div className="text-sm text-white">
+                <div className="text-sm text-app-text">
                     Available Margin:{" "}
                     <span className="font-semibold">
                         {totalMargin.toFixed(2)}
@@ -168,14 +168,14 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                     <div className="col-span-2">
-                        <label className="block text-sm text-white">
+                        <label className="block text-sm text-app-text">
                             Asset Symbol
                         </label>
                         <select
                             value={asset}
                             onChange={(e) => setAsset(e.target.value)}
                             required
-                            className={`${inputClass} bg-gray-700 text-white`}
+                            className={`${inputClass} bg-surface-input-strong`}
                         >
                             <option value="" disabled>
                                 -- select an asset --
@@ -188,7 +188,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm text-white">
+                        <label className="block text-sm text-app-text">
                             Margin Type
                         </label>
                         <select
@@ -205,7 +205,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         </select>
                     </div>
                     <div className="col-span-2">
-                        <label className="block text-sm text-white">
+                        <label className="block text-sm text-app-text">
                             {marginType === "alloc" ? "Margin %" : "Value"}
                         </label>
                         {marginType === "alloc" ? (
@@ -219,14 +219,14 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                                     onChange={(e) =>
                                         setMarginValue(+e.target.value)
                                     }
-                                    className="h-2 w-full cursor-pointer bg-gray-200"
+                                    className="h-2 w-full cursor-pointer bg-surface-range"
                                 />
-                                <div className="mt-1 flex justify-between text-sm text-white">
+                                <div className="mt-1 flex justify-between text-sm text-app-text">
                                     <span>0%</span>
                                     <span>{marginValue.toFixed(1)}%</span>
                                     <span>100%</span>
                                 </div>
-                                <div className="text-sm text-white">
+                                <div className="text-sm text-app-text">
                                     Eq: {computedAmount.toFixed(2)}
                                 </div>
                             </>
@@ -243,7 +243,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         )}
                     </div>
                     <div className="col-span-2">
-                        <label className="block text-center text-sm text-white">
+                        <label className="block text-center text-sm text-app-text">
                             Leverage: {lev} (MAX:{" "}
                             {assets.find((u) => u.name === asset)?.maxLeverage})
                         </label>
@@ -257,29 +257,29 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             step={1}
                             value={lev}
                             onChange={(e) => setLev(+e.target.value)}
-                            className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 bg-no-repeat [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-black [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-orange-600"
+                            className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-surface-range bg-no-repeat [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-app-ink [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent-brand-deep"
                             style={{
-                                background: `linear-gradient(to right, white 0%, red ${
+                                background: `linear-gradient(to right, rgb(var(--range-fill-start)) 0%, rgb(var(--range-fill)) ${
                                     ((lev - 1) /
                                         ((assets.find((u) => u.name === asset)
                                             ?.maxLeverage ?? 1) -
                                             1)) *
                                     100
-                                }%, #e5e7eb ${
+                                }%, rgb(var(--range-remaining)) ${
                                     ((lev - 1) /
                                         ((assets.find((u) => u.name === asset)
                                             ?.maxLeverage ?? 1) -
                                             1)) *
                                     100
-                                }%, #e5e7eb 100%)`,
+                                }%, rgb(var(--range-remaining)) 100%)`,
                             }}
                         />
                     </div>
                 </div>
-                <fieldset className="border-t border-white pt-4">
-                    <legend className="text-lg text-white">Strategy</legend>
+                <fieldset className="border-t border-line-solid pt-4">
+                    <legend className="text-lg text-app-text">Strategy</legend>
                     <div>
-                        <label className="block text-sm text-white">
+                        <label className="block text-sm text-app-text">
                             Strategy
                         </label>
                         <select
@@ -297,8 +297,8 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         </select>
                     </div>{" "}
                 </fieldset>
-                <fieldset className="relative mt-6 border-t border-white pt-6">
-                    <legend className="text-lg text-white">Indicators</legend>
+                <fieldset className="relative mt-6 border-t border-line-solid pt-6">
+                    <legend className="text-lg text-app-text">Indicators</legend>
                     <div className="flex flex-col gap-2">
                         <div className="flex flex-wrap">
                             {config.map(([ind, tf], i) => {
@@ -319,7 +319,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                                         <button
                                             type="button"
                                             onClick={() => handleRemove(i)}
-                                            className="cursor-pointer text-red-600"
+                                            className="cursor-pointer text-accent-danger-strong"
                                         >
                                             ×
                                         </button>
@@ -330,14 +330,14 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         <button
                             type="button"
                             onClick={() => setShowConfig(true)}
-                            className="mt-2 cursor-pointer text-sm font-bold text-white hover:underline"
+                            className="mt-2 cursor-pointer text-sm font-bold text-app-text hover:underline"
                         >
                             Add Indicator
                         </button>
                     </div>
                     {showConfig && (
-                        <div className="absolute bottom-10 left-full z-20 ml-4 w-64 rounded border border-white bg-gray-800 p-4 shadow">
-                            <h3 className="text-sm font-semibold text-white">
+                        <div className="absolute bottom-10 left-full z-20 ml-4 w-64 rounded border border-line-solid bg-surface-popover p-4 shadow">
+                            <h3 className="text-sm font-semibold text-app-text">
                                 New Indicator
                             </h3>
                             <select
@@ -419,14 +419,14 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                                 <button
                                     type="button"
                                     onClick={() => setShowConfig(false)}
-                                    className="cursor-pointer rounded bg-gray-400 px-2 py-1 text-sm text-white"
+                                    className="cursor-pointer rounded bg-surface-button-muted px-2 py-1 text-sm text-app-text"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="button"
                                     onClick={handleAddIndicator}
-                                    className="cursor-pointer rounded bg-gray-600 px-2 py-1 text-sm text-white"
+                                    className="cursor-pointer rounded bg-surface-input px-2 py-1 text-sm text-app-text"
                                 >
                                     Add
                                 </button>

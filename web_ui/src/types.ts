@@ -290,14 +290,25 @@ export const indicatorLabels: Record<IndicatorName, string> = {
 };
 
 export const indicatorColors: Record<IndicatorName, string> = {
-    rsi: "bg-green-800/30 text-green-200",
-    smaOnRsi: "bg-indigo-800/30 text-indigo-200",
-    stochRsi: "bg-purple-800/30 text-purple-200",
-    adx: "bg-yellow-800/30 text-yellow-200",
-    atr: "bg-red-800/30 text-red-200",
-    ema: "bg-blue-500/30 text-indicator",
-    emaCross: "bg-orange-800/30 text-indicator",
-    sma: "bg-gray-800/30 text-gray-200",
+    rsi: "bg-indicator-rsi-bg text-indicator-rsi-text",
+    smaOnRsi: "bg-indicator-sma-on-rsi-bg text-indicator-sma-on-rsi-text",
+    stochRsi: "bg-indicator-stoch-rsi-bg text-indicator-stoch-rsi-text",
+    adx: "bg-indicator-adx-bg text-indicator-adx-text",
+    atr: "bg-indicator-atr-bg text-indicator-atr-text",
+    ema: "bg-indicator-ema-bg text-indicator-ema-text",
+    emaCross: "bg-indicator-ema-cross-bg text-indicator-ema-cross-text",
+    sma: "bg-indicator-sma-bg text-indicator-sma-text",
+};
+
+export const indicatorValueColors: Record<IndicatorName, string> = {
+    rsi: "text-indicator-rsi-text",
+    smaOnRsi: "text-indicator-sma-on-rsi-text",
+    stochRsi: "text-indicator-stoch-rsi-text",
+    adx: "text-indicator-adx-text",
+    atr: "text-indicator-atr-text",
+    ema: "text-indicator-ema-text",
+    emaCross: "text-indicator-ema-cross-text",
+    sma: "text-indicator-sma-text",
 };
 
 export interface assetMeta {

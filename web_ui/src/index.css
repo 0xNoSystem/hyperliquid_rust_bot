@@ -1,48 +1,462 @@
+@config "../tailwind.config.js";
 @import "tailwindcss";
 
 :root {
     color-scheme: dark;
-    --app-bg: #07090b;
-    --app-surface-1: #0b0e12;
-    --app-surface-2: #111316;
-    --app-surface-3: #0f1318;
-    --app-surface-4: #101214;
-    --app-surface-5: #111212;
-    --app-text-rgb: 255 255 255;
-    --app-border-rgb: 255 255 255;
-    --app-grid-rgb: 255 255 255;
+    --app-bg: 7 9 11;
+    --app-bg-soft: 7 9 11;
+    --app-bg-soft-alpha: 0.3;
+    --app-surface-1: 11 14 18;
+    --app-surface-2: 17 19 22;
+    --app-surface-3: 15 19 24;
+    --app-surface-4: 16 18 20;
+    --app-surface-5: 17 18 18;
+    --app-surface-hover: 30 41 57;
+    --app-text: 255 255 255;
+    --app-border: 255 255 255;
+    --app-grid: 255 255 255;
+    --app-ink: 0 0 0;
+    --app-overlay: 0 0 0;
+    --app-overlay-alpha: 0.7;
+    --app-overlay-soft: 0 0 0;
+    --app-overlay-soft-alpha: 0.5;
+    --app-scale: 0 0 0;
+    --app-scale-alpha: 0.2;
+    --on-accent: 255 255 255;
+    --on-bright: 0 0 0;
+
+    --ink-10: 0 0 0;
+    --ink-10-alpha: 0.1;
+    --ink-20: 0 0 0;
+    --ink-20-alpha: 0.2;
+    --ink-50: 0 0 0;
+    --ink-50-alpha: 0.5;
+    --ink-60: 0 0 0;
+    --ink-60-alpha: 0.6;
+    --ink-70: 0 0 0;
+    --ink-70-alpha: 0.7;
+    --ink-80: 0 0 0;
+    --ink-80-alpha: 0.8;
+    --ink-hover: 0 0 0;
+    --ink-hover-alpha: 1;
+
+    --glow-4: 255 255 255;
+    --glow-4-alpha: 0.04;
+    --glow-5: 255 255 255;
+    --glow-5-alpha: 0.05;
+    --glow-10: 255 255 255;
+    --glow-10-alpha: 0.1;
+    --glow-50: 255 255 255;
+    --glow-50-alpha: 0.5;
+
+    --surface-input: 74 85 101;
+    --surface-input-strong: 54 65 83;
+    --surface-input-muted: 74 85 101;
+    --surface-input-muted-alpha: 0.7;
+    --surface-input-soft: 54 65 83;
+    --surface-input-soft-alpha: 0.2;
+    --surface-toggle-off: 106 114 130;
+    --surface-tone: 106 114 130;
+    --surface-tone-alpha: 0.3;
+    --surface-modal: 23 23 23;
+    --surface-danger: 42 16 16;
+    --surface-danger-soft: 26 15 18;
+    --surface-warning: 26 20 10;
+    --surface-success: 16 42 18;
+    --surface-rail: 10 13 16;
+    --surface-rail-alpha: 0.9;
+    --surface-pane: 11 14 18;
+    --surface-pane-alpha: 0.8;
+    --surface-panel: 30 30 30;
+    --surface-panel-strong: 64 64 64;
+    --surface-range: 229 231 235;
+    --surface-popover: 30 41 57;
+    --surface-button-muted: 153 161 175;
+
+    --muted: 229 231 235;
+    --subtle: 209 213 220;
+    --faint: 153 161 175;
+    --ink: 0 0 0;
+    --ink-muted: 0 0 0;
+    --ink-muted-alpha: 0.5;
+
+    --danger-soft: 255 201 201;
+    --accent-danger-soft: 255 100 103;
+    --danger-faint: 255 226 226;
+    --warning-soft: 254 230 133;
+    --success-soft: 185 248 207;
+    --success-faint: 220 252 231;
+    --info-soft: 162 244 253;
+    --indigo-soft: 198 210 255;
+    --purple-soft: 233 212 255;
+    --yellow-soft: 255 240 133;
+
+    --accent-brand: 255 137 4;
+    --accent-brand-strong: 255 105 0;
+    --accent-brand-soft: 255 184 106;
+    --accent-brand-deep: 245 73 0;
+    --accent-warning: 254 154 0;
+    --accent-warning-strong: 225 113 0;
+    --accent-warning-deep: 187 77 0;
+    --accent-warning-mid: 255 210 48;
+    --accent-warning-border: 255 185 0;
+    --accent-danger: 251 44 54;
+    --accent-danger-strong: 231 0 11;
+    --accent-danger-deep: 193 0 7;
+    --accent-danger-muted: 255 162 162;
+    --accent-danger-alt-mid: 255 99 126;
+    --accent-danger-alt-strong: 236 0 63;
+    --accent-danger-alt-soft: 255 161 173;
+    --accent-danger-alt-darker: 139 8 54;
+    --accent-success: 5 223 114;
+    --accent-success-strong: 0 201 80;
+    --accent-profit: 94 233 181;
+    --accent-profit-strong: 0 212 146;
+    --accent-profit-deep: 0 122 85;
+    --accent-profit-darker: 0 79 59;
+    --accent-info-link: 83 234 253;
+    --accent-highlight: 240 177 0;
+
+    --gradient-start: 0 211 242;
+    --gradient-mid: 237 106 255;
+    --gradient-end: 0 212 146;
+
+    --action-add-bg: 0 184 219;
+    --action-add-bg-alpha: 0.1;
+    --action-add-border: 0 211 242;
+    --action-add-border-alpha: 0.4;
+    --action-add-hover: 0 184 219;
+    --action-add-hover-alpha: 0.2;
+    --action-add-text: 162 244 253;
+
+    --action-close-bg: 231 0 11;
+    --action-close-bg-alpha: 0.15;
+    --action-close-border: 251 44 54;
+    --action-close-border-alpha: 0.4;
+    --action-close-hover: 231 0 11;
+    --action-close-hover-alpha: 0.25;
+    --action-close-text: 255 201 201;
+
+    --action-pause-bg: 254 154 0;
+    --action-pause-bg-alpha: 0.15;
+    --action-pause-border: 254 154 0;
+    --action-pause-border-alpha: 0.4;
+    --action-pause-hover: 254 154 0;
+    --action-pause-hover-alpha: 0.25;
+    --action-pause-text: 254 230 133;
+
+    --pnl-shell-bg: 0 0 0;
+    --pnl-shell-border: 255 255 255;
+    --pnl-shell-border-alpha: 0.1;
+    --pnl-track: 255 255 255;
+    --pnl-track-alpha: 0.05;
+    --pnl-positive-bg: 255 137 4;
+    --pnl-negative-bg: 255 32 86;
+    --pnl-positive-text: 255 184 106;
+    --pnl-negative-text: 255 161 173;
+
+    --btn-ghost-bg: 255 255 255;
+    --btn-ghost-bg-alpha: 0.05;
+    --btn-ghost-hover: 255 255 255;
+    --btn-ghost-hover-alpha: 0.1;
+    --btn-ghost-border: 255 255 255;
+    --btn-ghost-border-alpha: 0.1;
+    --btn-ghost-text: 255 255 255;
+
+    --btn-ok-bg: 0 122 85;
+    --btn-ok-bg-alpha: 0.25;
+    --btn-ok-border: 0 188 125;
+    --btn-ok-border-alpha: 0.4;
+    --btn-ok-text: 164 244 207;
+    --btn-ok-hover-bg: 202 53 0;
+    --btn-ok-hover-bg-alpha: 0.35;
+    --btn-ok-hover-border: 245 73 0;
+    --btn-ok-hover-text: 255 255 255;
+
+    --btn-chip-bg: 255 137 4;
+    --btn-chip-bg-alpha: 0.1;
+    --btn-chip-border: 255 255 255;
+    --btn-chip-border-alpha: 0.1;
+    --btn-chip-text: 255 255 255;
+    --btn-chip-hover: 255 105 0;
+
+    --line-subtle: 255 255 255;
+    --line-subtle-alpha: 0.1;
+    --line-weak: 255 255 255;
+    --line-weak-alpha: 0.2;
+    --line-muted: 255 255 255;
+    --line-muted-alpha: 0.3;
+    --line-strong: 255 255 255;
+    --line-strong-alpha: 0.6;
+    --line-stronger: 255 255 255;
+    --line-stronger-alpha: 0.7;
+    --line-solid: 255 255 255;
+    --line-solid-alpha: 1;
+    --line-ink: 0 0 0;
+    --line-ink-alpha: 1;
+    --line-ink-muted: 0 0 0;
+    --line-ink-muted-alpha: 0.3;
+    --line-ink-strong: 0 0 0;
+    --line-ink-strong-alpha: 0.6;
+    --line-panel: 38 38 38;
+    --line-panel-strong: 64 64 64;
+    --line-panel-soft: 82 82 82;
+
+    --indicator-rsi-bg: 1 102 48;
+    --indicator-rsi-bg-alpha: 0.3;
+    --indicator-rsi-text: 185 248 207;
+    --indicator-sma-on-rsi-bg: 55 42 172;
+    --indicator-sma-on-rsi-bg-alpha: 0.3;
+    --indicator-sma-on-rsi-text: 198 210 255;
+    --indicator-stoch-rsi-bg: 110 17 176;
+    --indicator-stoch-rsi-bg-alpha: 0.3;
+    --indicator-stoch-rsi-text: 233 212 255;
+    --indicator-adx-bg: 137 75 0;
+    --indicator-adx-bg-alpha: 0.3;
+    --indicator-adx-text: 255 240 133;
+    --indicator-atr-bg: 159 7 18;
+    --indicator-atr-bg-alpha: 0.3;
+    --indicator-atr-text: 255 201 201;
+    --indicator-ema-bg: 43 127 255;
+    --indicator-ema-bg-alpha: 0.3;
+    --indicator-ema-text: 255 255 255;
+    --indicator-ema-cross-bg: 159 45 0;
+    --indicator-ema-cross-bg-alpha: 0.3;
+    --indicator-ema-cross-text: 255 255 255;
+    --indicator-sma-bg: 30 41 57;
+    --indicator-sma-bg-alpha: 0.3;
+    --indicator-sma-text: 229 231 235;
+
+    --chart-selection-bg: 255 105 0;
+    --chart-selection-bg-alpha: 0.15;
+    --chart-selection-edge: 255 137 4;
+    --chart-selection-edge-alpha: 0.7;
+    --chart-selection-label-bg: 255 105 0;
+    --chart-selection-label-bg-alpha: 0.8;
+    --chart-selection-handle-bg: 0 0 0;
+    --chart-selection-handle-hover: 255 105 0;
+    --chart-action-bg: 21 93 252;
+    --chart-action-hover: 43 127 255;
+
+    --toggle-on: 255 105 0;
+    --toggle-off: 106 114 130;
+    --toggle-knob: 255 255 255;
+
+    --timeframe-active: 255 105 0;
+
+    --leverage-low: 0 201 80;
+    --leverage-mid: 216 249 153;
+    --leverage-high: 240 177 0;
+    --leverage-critical: 255 105 0;
+    --leverage-max: 231 0 11;
+
+    --loading-primary: 255 137 4;
+    --loading-secondary: 253 199 0;
+    --loading-tertiary: 255 240 133;
+
+    --tv-bg: 15 15 15;
+    --tv-grid: 242 242 242;
+    --tv-grid-alpha: 0.06;
+    --range-fill-start: 255 255 255;
+    --range-fill: 255 0 0;
+    --range-remaining: 229 231 235;
 }
 
 :root[data-theme="light"] {
     color-scheme: light;
-    --app-bg: #f4efe7;
-    --app-surface-1: #f9f3ea;
-    --app-surface-2: #f0e8dd;
-    --app-surface-2-hover: #e6dccf;
-    --app-surface-3: #f7f1e7;
-    --app-surface-4: #efe7dc;
-    --app-surface-5: #f1eadf;
-    --app-text-rgb: 43 34 26;
-    --app-border-rgb: 62 52 44;
-    --app-grid-rgb: 68 57 48;
-}
+    --app-bg: 244 239 231;
+    --app-bg-soft: 244 239 231;
+    --app-bg-soft-alpha: 1;
+    --app-surface-1: 249 243 234;
+    --app-surface-2: 240 232 221;
+    --app-surface-3: 247 241 231;
+    --app-surface-4: 239 231 220;
+    --app-surface-5: 241 234 223;
+    --app-surface-hover: 230 220 207;
+    --app-text: 43 34 26;
+    --app-border: 62 52 44;
+    --app-grid: 68 57 48;
+    --app-overlay-alpha: 0.6;
+    --app-overlay-soft: 43 34 26;
+    --app-overlay-soft-alpha: 0.1;
+    --app-scale: 43 34 26;
+    --app-scale-alpha: 0.06;
 
-html,
-body,
-#root {
-    background-color: var(--app-bg);
-    color: rgb(var(--app-text-rgb) / 1);
-    height: 100%;
-    zoom: 0.94;
+    --ink-10: 43 34 26;
+    --ink-10-alpha: 0.04;
+    --ink-20: 43 34 26;
+    --ink-20-alpha: 0.06;
+    --ink-50: 43 34 26;
+    --ink-50-alpha: 0.1;
+    --ink-60: 43 34 26;
+    --ink-60-alpha: 0.12;
+    --ink-70: 43 34 26;
+    --ink-70-alpha: 0.14;
+    --ink-80: 43 34 26;
+    --ink-80-alpha: 0.18;
+    --ink-hover: 43 34 26;
+    --ink-hover-alpha: 0.08;
+
+    --surface-input: 240 232 221;
+    --surface-input-strong: 240 232 221;
+    --surface-input-muted: 43 34 26;
+    --surface-input-muted-alpha: 0.1;
+    --surface-input-soft: 43 34 26;
+    --surface-input-soft-alpha: 0.05;
+    --surface-toggle-off: 43 34 26;
+    --surface-toggle-off-alpha: 0.12;
+    --surface-tone: 43 34 26;
+    --surface-tone-alpha: 0.06;
+    --surface-modal: 249 243 234;
+    --surface-danger: 246 229 229;
+    --surface-danger-soft: 247 230 228;
+    --surface-warning: 247 239 225;
+    --surface-success: 231 242 234;
+    --surface-rail: 249 243 234;
+    --surface-rail-alpha: 1;
+    --surface-pane: 249 243 234;
+    --surface-pane-alpha: 1;
+    --surface-panel: 240 232 221;
+    --surface-popover: 247 241 231;
+
+    --muted: 75 85 99;
+    --subtle: 209 213 220;
+    --faint: 153 161 175;
+
+    --danger-soft: 185 28 28;
+    --danger-faint: 153 27 27;
+    --warning-soft: 146 64 14;
+    --success-soft: 21 128 61;
+    --success-faint: 21 128 61;
+    --info-soft: 14 116 144;
+    --indigo-soft: 67 56 202;
+    --purple-soft: 126 34 206;
+    --yellow-soft: 161 98 7;
+
+    --action-add-bg: 8 145 178;
+    --action-add-bg-alpha: 1;
+    --action-add-border: 14 116 144;
+    --action-add-border-alpha: 1;
+    --action-add-hover: 14 116 144;
+    --action-add-hover-alpha: 1;
+    --action-add-text: 255 255 255;
+
+    --action-close-bg: 220 38 38;
+    --action-close-bg-alpha: 1;
+    --action-close-border: 185 28 28;
+    --action-close-border-alpha: 1;
+    --action-close-hover: 185 28 28;
+    --action-close-hover-alpha: 1;
+    --action-close-text: 255 255 255;
+
+    --action-pause-bg: 245 158 11;
+    --action-pause-bg-alpha: 1;
+    --action-pause-border: 180 83 9;
+    --action-pause-border-alpha: 1;
+    --action-pause-hover: 217 119 6;
+    --action-pause-hover-alpha: 1;
+    --action-pause-text: 255 255 255;
+
+    --pnl-shell-bg: 240 232 221;
+    --pnl-shell-border: 62 52 44;
+    --pnl-shell-border-alpha: 0.3;
+    --pnl-track: 43 34 26;
+    --pnl-track-alpha: 0.15;
+    --pnl-positive-bg: 245 158 11;
+    --pnl-negative-bg: 225 29 72;
+    --pnl-positive-text: 180 83 9;
+    --pnl-negative-text: 190 18 60;
+
+    --btn-ghost-bg: 240 232 221;
+    --btn-ghost-bg-alpha: 1;
+    --btn-ghost-hover: 247 241 231;
+    --btn-ghost-hover-alpha: 1;
+    --btn-ghost-border: 62 52 44;
+    --btn-ghost-border-alpha: 0.35;
+    --btn-ghost-text: 43 34 26;
+    --btn-ghost-text-alpha: 0.9;
+
+    --btn-ok-bg: 22 163 74;
+    --btn-ok-bg-alpha: 1;
+    --btn-ok-border: 21 128 61;
+    --btn-ok-border-alpha: 1;
+    --btn-ok-text: 255 255 255;
+    --btn-ok-hover-bg: 21 128 61;
+    --btn-ok-hover-bg-alpha: 1;
+    --btn-ok-hover-border: 22 101 52;
+    --btn-ok-hover-text: 255 255 255;
+
+    --btn-chip-bg: 245 158 11;
+    --btn-chip-bg-alpha: 1;
+    --btn-chip-border: 217 119 6;
+    --btn-chip-border-alpha: 1;
+    --btn-chip-text: 255 255 255;
+    --btn-chip-hover: 217 119 6;
+
+    --line-subtle: 62 52 44;
+    --line-subtle-alpha: 0.12;
+    --line-weak: 62 52 44;
+    --line-weak-alpha: 0.2;
+    --line-muted: 62 52 44;
+    --line-muted-alpha: 0.28;
+    --line-strong: 62 52 44;
+    --line-strong-alpha: 0.5;
+    --line-stronger: 62 52 44;
+    --line-stronger-alpha: 0.6;
+    --line-solid: 62 52 44;
+    --line-solid-alpha: 0.35;
+    --line-ink: 0 0 0;
+    --line-ink-alpha: 0.4;
+    --line-ink-muted: 0 0 0;
+    --line-ink-muted-alpha: 0.2;
+    --line-ink-strong: 0 0 0;
+    --line-ink-strong-alpha: 0.35;
+    --line-panel: 62 52 44;
+    --line-panel-alpha: 0.25;
+
+    --indicator-rsi-bg: 21 128 61;
+    --indicator-rsi-bg-alpha: 0.18;
+    --indicator-rsi-text: 21 128 61;
+    --indicator-sma-on-rsi-bg: 67 56 202;
+    --indicator-sma-on-rsi-bg-alpha: 0.18;
+    --indicator-sma-on-rsi-text: 67 56 202;
+    --indicator-stoch-rsi-bg: 126 34 206;
+    --indicator-stoch-rsi-bg-alpha: 0.18;
+    --indicator-stoch-rsi-text: 126 34 206;
+    --indicator-adx-bg: 161 98 7;
+    --indicator-adx-bg-alpha: 0.18;
+    --indicator-adx-text: 161 98 7;
+    --indicator-atr-bg: 185 28 28;
+    --indicator-atr-bg-alpha: 0.16;
+    --indicator-atr-text: 185 28 28;
+    --indicator-ema-bg: 37 99 235;
+    --indicator-ema-bg-alpha: 0.18;
+    --indicator-ema-text: 30 41 59;
+    --indicator-ema-cross-bg: 180 83 9;
+    --indicator-ema-cross-bg-alpha: 0.18;
+    --indicator-ema-cross-text: 30 41 59;
+    --indicator-sma-bg: 75 85 99;
+    --indicator-sma-bg-alpha: 0.16;
+    --indicator-sma-text: 75 85 99;
+
+
+    --toggle-off: 43 34 26;
+    --toggle-off-alpha: 0.12;
+
+    --timeframe-active: 255 105 0;
+
+    --tv-bg: 247 241 231;
+    --tv-grid: 60 50 40;
+    --tv-grid-alpha: 0.1;
 }
 
 .fx-grid {
     background-image:
-        linear-gradient(transparent 23px, rgb(var(--app-grid-rgb) / 0.06) 24px),
+        linear-gradient(transparent 23px, rgb(var(--app-grid) / 0.06) 24px),
         linear-gradient(
             90deg,
             transparent 23px,
-            rgb(var(--app-grid-rgb) / 0.06) 24px
+            rgb(var(--app-grid) / 0.06) 24px
         );
     background-size: 26px 26px;
 }
@@ -52,404 +466,9 @@ body,
         90deg,
         transparent 0,
         transparent 48px,
-        rgb(var(--app-grid-rgb) / 0.04) 49px,
-        rgb(var(--app-grid-rgb) / 0.04) 50px
+        rgb(var(--app-grid) / 0.04) 49px,
+        rgb(var(--app-grid) / 0.04) 50px
     );
-}
-
-:root[data-theme="light"] .text-white {
-    color: rgb(var(--app-text-rgb) / 1);
-}
-
-:root[data-theme="light"] .text-white\/80 {
-    color: rgb(var(--app-text-rgb) / 0.8);
-}
-
-:root[data-theme="light"] .text-white\/70 {
-    color: rgb(var(--app-text-rgb) / 0.7);
-}
-
-:root[data-theme="light"] .text-white\/60 {
-    color: rgb(var(--app-text-rgb) / 0.6);
-}
-
-:root[data-theme="light"] .text-white\/50 {
-    color: rgb(var(--app-text-rgb) / 0.5);
-}
-
-:root[data-theme="light"] .text-white\/40 {
-    color: rgb(var(--app-text-rgb) / 0.4);
-}
-
-:root[data-theme="light"] .text-white\/30 {
-    color: rgb(var(--app-text-rgb) / 0.3);
-}
-
-:root[data-theme="light"] .text-red-100 {
-    color: rgb(153 27 27 / 1);
-}
-
-:root[data-theme="light"] .text-red-200 {
-    color: rgb(185 28 28 / 1);
-}
-
-:root[data-theme="light"] .text-red-200\/80 {
-    color: rgb(185 28 28 / 0.8);
-}
-
-:root[data-theme="light"] .text-cyan-200 {
-    color: rgb(14 116 144 / 1);
-}
-
-:root[data-theme="light"] .text-green-200 {
-    color: rgb(21 128 61 / 1);
-}
-
-:root[data-theme="light"] .text-indigo-200 {
-    color: rgb(67 56 202 / 1);
-}
-
-:root[data-theme="light"] .text-purple-200 {
-    color: rgb(126 34 206 / 1);
-}
-
-:root[data-theme="light"] .text-yellow-200 {
-    color: rgb(161 98 7 / 1);
-}
-
-:root[data-theme="light"] .text-gray-200 {
-    color: rgb(75 85 99 / 1);
-}
-
-:root[data-theme="light"] .text-amber-200 {
-    color: rgb(146 64 14 / 1);
-}
-
-:root[data-theme="light"] .text-amber-200\/80 {
-    color: rgb(146 64 14 / 0.8);
-}
-
-:root[data-theme="light"] .text-green-100 {
-    color: rgb(21 128 61 / 1);
-}
-
-:root[data-theme="light"] .border-white {
-    border-color: rgb(var(--app-border-rgb) / 0.35);
-}
-
-:root[data-theme="light"] .border-white\/10 {
-    border-color: rgb(var(--app-border-rgb) / 0.12);
-}
-
-:root[data-theme="light"] .border-white\/20 {
-    border-color: rgb(var(--app-border-rgb) / 0.2);
-}
-
-:root[data-theme="light"] .border-white\/30 {
-    border-color: rgb(var(--app-border-rgb) / 0.28);
-}
-
-:root[data-theme="light"] .border-white\/60 {
-    border-color: rgb(var(--app-border-rgb) / 0.5);
-}
-
-:root[data-theme="light"] .border-white\/70 {
-    border-color: rgb(var(--app-border-rgb) / 0.6);
-}
-
-:root[data-theme="light"] .border-black {
-    border-color: rgb(var(--app-border-rgb) / 0.4);
-}
-
-:root[data-theme="light"] .border-black\/30 {
-    border-color: rgb(var(--app-border-rgb) / 0.2);
-}
-
-:root[data-theme="light"] .border-black\/60 {
-    border-color: rgb(var(--app-border-rgb) / 0.35);
-}
-
-:root[data-theme="light"] .border-neutral-800 {
-    border-color: rgb(var(--app-border-rgb) / 0.25);
-}
-
-:root[data-theme="light"] .bg-\[\#07090B\],
-:root[data-theme="light"] .bg-\[\#07090B\]\/30 {
-    background-color: var(--app-bg);
-}
-
-:root[data-theme="light"] .bg-\[\#0B0C0E\],
-:root[data-theme="light"] .bg-\[\#0B0E12\],
-:root[data-theme="light"] .bg-\[\#0B0E12\]\/80,
-:root[data-theme="light"] .bg-\[\#0A0D10\],
-:root[data-theme="light"] .bg-\[\#0A0D10\]\/90 {
-    background-color: var(--app-surface-1);
-}
-
-:root[data-theme="light"] .bg-\[\#111316\],
-:root[data-theme="light"] .bg-\[\#111212\],
-:root[data-theme="light"] .bg-\[\#1E1E1E\] {
-    background-color: var(--app-surface-2);
-}
-
-:root[data-theme="light"] .bg-\[\#111311\],
-:root[data-theme="light"] .bg-\[\#0F1318\] {
-    background-color: var(--app-surface-3);
-}
-
-:root[data-theme="light"] .hover\:bg-\[\#111311\]:hover {
-    background-color: var(--app-surface-3);
-}
-
-:root[data-theme="light"] .market-card:hover {
-    background-color: var(--app-surface-2-hover) !important;
-}
-
-:root[data-theme="light"] .bg-\[\#101214\] {
-    background-color: var(--app-surface-4);
-}
-
-:root[data-theme="light"] .bg-\[\#00000033\] {
-    background-color: rgb(var(--app-text-rgb) / 0.06);
-}
-
-:root[data-theme="light"] .bg-\[\#2A1010\] {
-    background-color: #f6e5e5;
-}
-
-:root[data-theme="light"] .bg-\[\#1A0F12\] {
-    background-color: #f7e6e4;
-}
-
-:root[data-theme="light"] .bg-\[\#1A140A\] {
-    background-color: #f7efe1;
-}
-
-:root[data-theme="light"] .bg-\[\#102A12\] {
-    background-color: #e7f2ea;
-}
-
-:root[data-theme="light"] .theme-hard-btn {
-    color: #fff;
-}
-
-:root[data-theme="light"] .theme-hard-btn.border-cyan-400\/40 {
-    border-color: #0e7490;
-}
-
-:root[data-theme="light"] .theme-hard-btn.bg-cyan-500\/10 {
-    background-color: #0891b2;
-}
-
-:root[data-theme="light"] .theme-hard-btn.hover\:bg-cyan-500\/20:hover {
-    background-color: #0e7490;
-}
-
-:root[data-theme="light"] .theme-hard-btn.border-red-500\/40 {
-    border-color: #b91c1c;
-}
-
-:root[data-theme="light"] .theme-hard-btn.bg-red-600\/15 {
-    background-color: #dc2626;
-}
-
-:root[data-theme="light"] .theme-hard-btn.hover\:bg-red-600\/25:hover {
-    background-color: #b91c1c;
-}
-
-:root[data-theme="light"] .theme-hard-btn.border-amber-500\/40 {
-    border-color: #b45309;
-}
-
-:root[data-theme="light"] .theme-hard-btn.bg-amber-500\/15 {
-    background-color: #f59e0b;
-}
-
-:root[data-theme="light"] .theme-hard-btn.hover\:bg-amber-500\/25:hover {
-    background-color: #d97706;
-}
-
-:root[data-theme="light"] .pnl-bar {
-    background-color: var(--app-surface-2);
-    border-color: rgb(var(--app-border-rgb) / 0.3);
-}
-
-:root[data-theme="light"] .pnl-track {
-    background-color: rgb(var(--app-text-rgb) / 0.15);
-}
-
-:root[data-theme="light"] .pnl-bar .bg-orange-400 {
-    background-color: #f59e0b;
-}
-
-:root[data-theme="light"] .pnl-bar .bg-rose-500 {
-    background-color: #e11d48;
-}
-
-:root[data-theme="light"] .pnl-value.text-orange-300 {
-    color: #b45309;
-}
-
-:root[data-theme="light"] .pnl-value.text-rose-300 {
-    color: #be123c;
-}
-
-:root[data-theme="light"] .bg-green-800\/30 {
-    background-color: rgb(21 128 61 / 0.18);
-}
-
-:root[data-theme="light"] .bg-indigo-800\/30 {
-    background-color: rgb(67 56 202 / 0.18);
-}
-
-:root[data-theme="light"] .bg-purple-800\/30 {
-    background-color: rgb(126 34 206 / 0.18);
-}
-
-:root[data-theme="light"] .bg-yellow-800\/30 {
-    background-color: rgb(161 98 7 / 0.18);
-}
-
-:root[data-theme="light"] .bg-red-800\/30 {
-    background-color: rgb(185 28 28 / 0.16);
-}
-
-:root[data-theme="light"] .bg-blue-500\/30 {
-    background-color: rgb(37 99 235 / 0.18);
-}
-
-:root[data-theme="light"] .bg-orange-800\/30 {
-    background-color: rgb(180 83 9 / 0.18);
-}
-
-:root[data-theme="light"] .bg-gray-800\/30 {
-    background-color: rgb(75 85 99 / 0.16);
-}
-
-:root[data-theme="light"] .bg-cyan-500\/10 {
-    background-color: rgb(6 182 212 / 0.18);
-}
-
-:root[data-theme="light"] .hover\:bg-cyan-500\/20:hover {
-    background-color: rgb(6 182 212 / 0.28);
-}
-
-:root[data-theme="light"] .bg-red-600\/15 {
-    background-color: rgb(220 38 38 / 0.16);
-}
-
-:root[data-theme="light"] .hover\:bg-red-600\/25:hover {
-    background-color: rgb(220 38 38 / 0.24);
-}
-
-:root[data-theme="light"] .bg-amber-500\/15 {
-    background-color: rgb(245 158 11 / 0.18);
-}
-
-:root[data-theme="light"] .hover\:bg-amber-500\/25:hover {
-    background-color: rgb(245 158 11 / 0.26);
-}
-
-:root[data-theme="light"] .bg-neutral-900 {
-    background-color: var(--app-surface-1);
-}
-
-:root[data-theme="light"] .bg-gray-500 {
-    background-color: rgb(var(--app-text-rgb) / 0.12);
-}
-
-:root[data-theme="light"] .bg-gray-500\/30 {
-    background-color: rgb(var(--app-text-rgb) / 0.06);
-}
-
-:root[data-theme="light"] .bg-gray-600,
-:root[data-theme="light"] .bg-gray-700 {
-    background-color: var(--app-surface-2);
-}
-
-:root[data-theme="light"] .bg-gray-800 {
-    background-color: var(--app-surface-3);
-}
-
-:root[data-theme="light"] .bg-gray-600\/70 {
-    background-color: rgb(var(--app-text-rgb) / 0.1);
-}
-
-:root[data-theme="light"] .bg-gray-700\/20 {
-    background-color: rgb(var(--app-text-rgb) / 0.05);
-}
-
-:root[data-theme="light"] .bg-black\/10 {
-    background-color: rgb(var(--app-text-rgb) / 0.04);
-}
-
-:root[data-theme="light"] .bg-black\/20 {
-    background-color: rgb(var(--app-text-rgb) / 0.06);
-}
-
-:root[data-theme="light"] .bg-black\/50 {
-    background-color: rgb(var(--app-text-rgb) / 0.1);
-}
-
-:root[data-theme="light"] .bg-black\/60 {
-    background-color: rgb(var(--app-text-rgb) / 0.12);
-}
-
-:root[data-theme="light"] .bg-black\/70 {
-    background-color: rgb(var(--app-text-rgb) / 0.14);
-}
-
-:root[data-theme="light"] .bg-black\/80 {
-    background-color: rgb(var(--app-text-rgb) / 0.18);
-}
-
-:root[data-theme="light"] .hover\:bg-black:hover {
-    background-color: rgb(var(--app-text-rgb) / 0.08);
-}
-
-:root[data-theme="light"] .theme-overlay {
-    background-color: rgba(0, 0, 0, 0.6);
-}
-
-:root[data-theme="light"] .theme-md-ghost {
-    background-color: var(--app-surface-2);
-    border-color: rgb(var(--app-border-rgb) / 0.35);
-    color: rgb(var(--app-text-rgb) / 0.9);
-}
-
-:root[data-theme="light"] .theme-md-ghost:hover {
-    background-color: var(--app-surface-3);
-}
-
-:root[data-theme="light"] .theme-md-ok {
-    background-color: #16a34a;
-    border-color: #15803d;
-    color: #fff;
-}
-
-:root[data-theme="light"] .theme-md-ok:hover {
-    background-color: #15803d;
-    border-color: #166534;
-    color: #fff;
-}
-
-:root[data-theme="light"] .theme-md-chip {
-    background-color: #f59e0b;
-    border-color: #d97706;
-    color: #fff;
-}
-
-:root[data-theme="light"] .theme-md-chip:hover {
-    background-color: #d97706;
-}
-
-:root[data-theme="light"] .text-indicator {
-    color: rgb(30 41 59 / 1);
-}
-
-.text-indicator,
-.text-on-accent {
-    color: #fff;
 }
 
 @keyframes gradientBG {
@@ -465,14 +484,7 @@ body,
 }
 
 .bg-special {
-    background: 
-    /* your custom palette here */ linear-gradient(
-        90deg,
-        black,
-        gray,
-        gray,
-        black
-    );
+    background: linear-gradient(90deg, black, gray, gray, black);
     background-size: 300% 300%;
     animation: gradientBG 120s ease infinite;
 }
@@ -491,6 +503,7 @@ body,
         transform: translateX(-25%);
     }
 }
+
 .animate-scan {
     animation: scan 20s linear infinite;
 }
@@ -508,10 +521,3 @@ body,
     }
 }
 
-.fade-a {
-    animation: fadeToWhite 1s forwards;
-}
-
-.fade-b {
-    animation: fadeToWhite 1s forwards;
-}

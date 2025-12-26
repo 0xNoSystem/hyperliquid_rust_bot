@@ -35,7 +35,11 @@ export default function MarketsPage() {
 
     const SessionPnlDisplay = () => (
         <span
-            className={`font-mono tabular-nums ${sessionPnl >= 0 ? "text-green-400" : "text-red-400"}`}
+            className={`font-mono tabular-nums ${
+                sessionPnl >= 0
+                    ? "text-accent-success"
+                    : "text-accent-danger-soft"
+            }`}
         >
             {sessionPnl >= 0 ? "+" : ""}
             {sessionPnl.toFixed(2)}$
@@ -82,14 +86,14 @@ export default function MarketsPage() {
     };
 
     return (
-        <div className="relative min-h-screen overflow-hidden bg-[#07090B]/30 pb-100 text-white">
+        <div className="relative min-h-screen overflow-hidden bg-app-bg-soft pb-100 text-app-text">
             {/* layered background */}
             <div className="max-w-8xl mx-auto mt-20 grid w-[83%] grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[280px,1fr]">
                 {/* Command Dock */}
-                <aside className="h-fit rounded-md border border-white/10 bg-[#0B0E12]/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                <aside className="h-fit rounded-md border border-line-subtle bg-surface-pane p-4 shadow-panel">
                     <div className="flex items-baseline justify-between">
                         <div>
-                            <div className="text-[10px] text-white/50 uppercase">
+                            <div className="text-[10px] text-app-text/50 uppercase">
                                 Available Margin
                             </div>
                             <div className="font-mono text-3xl tracking-tight tabular-nums">
@@ -100,14 +104,14 @@ export default function MarketsPage() {
                                 )}
                             </div>
                         </div>
-                        <div className="h-6 w-1 bg-gradient-to-b from-cyan-400 via-fuchsia-400 to-emerald-400" />
+                        <div className="h-6 w-1 bg-gradient-to-b from-gradient-start via-gradient-mid to-gradient-end" />
                     </div>
 
                     <div className="mt-4 grid gap-2">
                         {markets.length !== 0 && (
                             <button
                                 onClick={() => setShowAdd(true)}
-                                className="theme-hard-btn w-full rounded-md border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-cyan-200 hover:bg-cyan-500/20"
+                                className="w-full rounded-md border border-action-add-border bg-action-add-bg px-3 py-2 text-action-add-text hover:bg-action-add-hover"
                             >
                                 <div className="flex items-center justify-center gap-2">
                                     <Plus className="h-4 w-4" />
@@ -116,7 +120,7 @@ export default function MarketsPage() {
                             </button>
                         )}
                         <button
-                            className="theme-hard-btn w-full rounded-md border border-red-500/40 bg-red-600/15 px-3 py-2 text-red-200 hover:bg-red-600/25"
+                            className="w-full rounded-md border border-action-close-border bg-action-close-bg px-3 py-2 text-action-close-text hover:bg-action-close-hover"
                             onClick={() =>
                                 requestCloseAll().catch((err) =>
                                     console.error("Close all failed", err)
@@ -129,7 +133,7 @@ export default function MarketsPage() {
                             </div>
                         </button>
                         <button
-                            className="theme-hard-btn w-full rounded-md border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-amber-200 hover:bg-amber-500/25"
+                            className="w-full rounded-md border border-action-pause-border bg-action-pause-bg px-3 py-2 text-action-pause-text hover:bg-action-pause-hover"
                             onClick={() =>
                                 requestPauseAll().catch((err) =>
                                     console.error("Pause all failed", err)
@@ -143,17 +147,17 @@ export default function MarketsPage() {
                         </button>
                     </div>
 
-                    <div className="mt-6 grid gap-2 border-t border-white/10 pt-4 text-[12px] text-white/60">
+                    <div className="mt-6 grid gap-2 border-t border-line-subtle pt-4 text-[12px] text-app-text/60">
                         <div className="p-2 text-right text-[25px] font-bold">
                             PnL : {<SessionPnlDisplay />}
                         </div>
-                        <p className="font-semibold text-white/70">
+                        <p className="font-semibold text-app-text/70">
                             Recent Markets
                         </p>
 
-                        <div className="h-43 overflow-y-auto rounded-md border border-white/10 bg-transparent p-3">
+                        <div className="h-43 overflow-y-auto rounded-md border border-line-subtle bg-transparent p-3">
                             {cachedMarkets.length === 0 ? (
-                                <p className="text-white/40 italic">
+                                <p className="text-app-text/40 italic">
                                     No cached markets.
                                 </p>
                             ) : (
@@ -173,18 +177,18 @@ export default function MarketsPage() {
                 {/* Markets Grid */}
                 <main>
                     {markets.length === 0 && (
-                        <div className="grid place-items-center rounded-md border border-white/10 bg-[#0B0E12]/80 p-12 text-center">
+                        <div className="grid place-items-center rounded-md border border-line-subtle bg-surface-pane p-12 text-center">
                             <div>
                                 <h2 className="text-2xl font-semibold">
                                     No markets configured
                                 </h2>
-                                <p className="mt-1 text-white/60">
+                                <p className="mt-1 text-app-text/60">
                                     Add a market to begin streaming quotes and
                                     executing strategies.
                                 </p>
                                 <button
                                     onClick={() => setShowAdd(true)}
-                                    className="theme-hard-btn mt-5 inline-flex items-center gap-2 rounded-md border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-cyan-200 hover:bg-cyan-500/20"
+                                    className="mt-5 inline-flex items-center gap-2 rounded-md border border-action-add-border bg-action-add-bg px-4 py-2 text-action-add-text hover:bg-action-add-hover"
                                 >
                                     <Plus className="h-4 w-4" /> Add Market
                                 </button>
@@ -228,13 +232,13 @@ export default function MarketsPage() {
                 <div className="fixed inset-0 z-50">
                     {/* Overlay */}
                     <div
-                        className="theme-overlay absolute inset-0 bg-black/70"
+                        className="absolute inset-0 bg-app-overlay"
                         onClick={() => setShowAdd(false)}
                     />
 
                     {/* Centered Modal */}
                     <div className="absolute inset-0 flex items-center justify-center p-4">
-                        <div className="rounded-xl bg-neutral-900 shadow-xl">
+                        <div className="rounded-xl bg-surface-modal shadow-xl">
                             <AddMarket
                                 onClose={() => setShowAdd(false)}
                                 totalMargin={totalMargin}
@@ -254,35 +258,35 @@ export default function MarketsPage() {
                         className="fixed inset-0 z-50"
                     >
                         <div
-                            className="theme-overlay absolute inset-0 bg-black/70"
+                            className="absolute inset-0 bg-app-overlay"
                             onClick={() => setMarketToRemove(null)}
                         />
                         <motion.div
                             initial={{ y: 24, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             exit={{ y: 10, opacity: 0 }}
-                            className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-red-500/40 bg-[#1A0F12] p-6"
+                            className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-accent-danger/40 bg-surface-danger-soft p-6"
                         >
                             <h3 className="text-lg font-semibold">
                                 Remove{" "}
-                                <span className="text-red-300">
+                                <span className="text-accent-danger-muted">
                                     {marketToRemove}
                                 </span>
                                 ?
                             </h3>
-                            <p className="mt-1 text-red-200/80">
+                            <p className="mt-1 text-danger-soft/80">
                                 This will close any ongoing trade initiated by
                                 the Bot.
                             </p>
                             <div className="mt-6 flex justify-end gap-2">
                                 <button
-                                    className="rounded-md border border-white/20 px-4 py-2 hover:bg-white/10"
+                                    className="rounded-md border border-line-weak px-4 py-2 hover:bg-glow-10"
                                     onClick={() => setMarketToRemove(null)}
                                 >
                                     Cancel
                                 </button>
                                 <button
-                                    className="text-on-accent rounded-md bg-red-600 px-4 py-2 hover:bg-red-700"
+                                    className="text-on-accent rounded-md bg-accent-danger-strong px-4 py-2 hover:bg-accent-danger-deep"
                                     onClick={() =>
                                         handleRemove(marketToRemove!)
                                     }
@@ -304,35 +308,35 @@ export default function MarketsPage() {
                         className="fixed inset-0 z-50"
                     >
                         <div
-                            className="theme-overlay absolute inset-0 bg-black/70"
+                            className="absolute inset-0 bg-app-overlay"
                             onClick={() => setMarketToToggle(null)}
                         />
                         <motion.div
                             initial={{ y: 24, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             exit={{ y: 10, opacity: 0 }}
-                            className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-amber-500/40 bg-[#1A140A] p-6"
+                            className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-accent-warning/40 bg-surface-warning p-6"
                         >
                             <h3 className="text-lg font-semibold">
                                 Pause{" "}
-                                <span className="text-amber-300">
+                                <span className="text-accent-warning-mid">
                                     {marketToToggle}
                                 </span>
                                 ?
                             </h3>
-                            <p className="mt-1 text-amber-200/80">
+                            <p className="mt-1 text-warning-soft/80">
                                 This will close any ongoing trade initiated by
                                 the Bot.
                             </p>
                             <div className="mt-6 flex justify-end gap-2">
                                 <button
-                                    className="rounded-md border border-white/20 px-4 py-2 hover:bg-white/10"
+                                    className="rounded-md border border-line-weak px-4 py-2 hover:bg-glow-10"
                                     onClick={() => setMarketToToggle(null)}
                                 >
                                     Cancel
                                 </button>
                                 <button
-                                    className="text-on-accent rounded-md bg-amber-600 px-4 py-2 hover:bg-amber-700"
+                                    className="text-on-accent rounded-md bg-accent-warning-strong px-4 py-2 hover:bg-accent-warning-deep"
                                     onClick={() =>
                                         handleTogglePause(marketToToggle!)
                                     }
