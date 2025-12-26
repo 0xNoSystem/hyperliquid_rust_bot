@@ -35,15 +35,15 @@ const ChartSettings: React.FC<ChartSettingsProps> = ({
     };
 
     return (
-        <div className="w-64 rounded-2xl border border-line-panel bg-surface-panel p-4 text-app-text shadow-lg">
-            <h2 className="mb-4 border-b text-lg font-semibold text-muted">
+        <div className="border-line-panel bg-surface-panel text-app-text w-64 rounded-2xl border p-4 shadow-lg">
+            <h2 className="text-muted mb-4 border-b text-lg font-semibold">
                 Settings
             </h2>
 
             <div className="flex flex-col gap-3">
                 <h3 className="">Candle Color</h3>
                 <div className="flex items-center justify-between">
-                    <label htmlFor="upColor" className="text-sm text-faint">
+                    <label htmlFor="upColor" className="text-faint text-sm">
                         Up
                     </label>
                     <input
@@ -52,12 +52,12 @@ const ChartSettings: React.FC<ChartSettingsProps> = ({
                         value={colors.up}
                         onChange={(e) => handleChange("up", e.target.value)}
                         placeholder="#00ff00"
-                        className="h-8 w-28 rounded border border-line-panel-strong bg-transparent px-2 text-sm text-muted focus:ring-1 focus:ring-chart-action-hover focus:outline-none"
+                        className="border-line-panel-strong text-muted focus:ring-chart-action-hover h-8 w-28 rounded border bg-transparent px-2 text-sm focus:ring-1 focus:outline-none"
                     />
                 </div>
 
                 <div className="flex items-center justify-between">
-                    <label htmlFor="downColor" className="text-sm text-faint">
+                    <label htmlFor="downColor" className="text-faint text-sm">
                         Down
                     </label>
                     <input
@@ -66,20 +66,20 @@ const ChartSettings: React.FC<ChartSettingsProps> = ({
                         value={colors.down}
                         onChange={(e) => handleChange("down", e.target.value)}
                         placeholder="#ff0000"
-                        className="h-8 w-28 rounded border border-line-panel-strong bg-transparent px-2 text-sm text-muted focus:ring-1 focus:ring-chart-action-hover focus:outline-none"
+                        className="border-line-panel-strong text-muted focus:ring-chart-action-hover h-8 w-28 rounded border bg-transparent px-2 text-sm focus:ring-1 focus:outline-none"
                     />
                 </div>
 
                 <div className="mt-4 flex justify-between">
                     <button
                         onClick={handleReset}
-                        className="rounded-md border border-line-panel-soft px-3 py-1 text-sm transition hover:bg-surface-panel-strong"
+                        className="border-line-panel-soft hover:bg-surface-panel-strong rounded-md border px-3 py-1 text-sm transition"
                     >
                         Reset
                     </button>
                     <button
                         onClick={handleApply}
-                        className="rounded-md bg-chart-action-bg px-3 py-1 text-sm transition hover:bg-chart-action-hover"
+                        className="bg-chart-action-bg hover:bg-chart-action-hover rounded-md px-3 py-1 text-sm transition"
                     >
                         OK
                     </button>

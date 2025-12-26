@@ -10,6 +10,8 @@ const CrossHair = () => {
     const crispX = Math.round(clampedX) + 0.5;
     const crispY = Math.round(clampedY) + 0.5;
 
+    const strokeColor = "rgb(var(--app-text))";
+
     return (
         <g pointerEvents="none" className="z-10">
             {/* Vertical line */}
@@ -18,7 +20,7 @@ const CrossHair = () => {
                 y1={0}
                 x2={crispX}
                 y2={height}
-                stroke="white"
+                stroke={strokeColor}
                 strokeWidth={1}
                 opacity={0.5}
                 strokeDasharray="6 4"
@@ -30,7 +32,7 @@ const CrossHair = () => {
                 y1={crispY}
                 x2={width}
                 y2={crispY}
-                stroke="white"
+                stroke={strokeColor}
                 strokeWidth={1}
                 opacity={0.5}
                 strokeDasharray="6 4"
@@ -42,7 +44,7 @@ const CrossHair = () => {
                 cy={clampedY}
                 r={4}
                 fill="rgba(0,0,0,0.6)"
-                stroke="white"
+                stroke={strokeColor}
                 strokeWidth={1}
                 opacity={0.8}
             />

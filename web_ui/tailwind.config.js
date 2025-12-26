@@ -81,9 +81,13 @@ export default {
                 "accent-danger-deep": withAlpha("accent-danger-deep"),
                 "accent-danger-muted": withAlpha("accent-danger-muted"),
                 "accent-danger-alt-mid": withAlpha("accent-danger-alt-mid"),
-                "accent-danger-alt-strong": withAlpha("accent-danger-alt-strong"),
+                "accent-danger-alt-strong": withAlpha(
+                    "accent-danger-alt-strong"
+                ),
                 "accent-danger-alt-soft": withAlpha("accent-danger-alt-soft"),
-                "accent-danger-alt-darker": withAlpha("accent-danger-alt-darker"),
+                "accent-danger-alt-darker": withAlpha(
+                    "accent-danger-alt-darker"
+                ),
                 "accent-success": withAlpha("accent-success"),
                 "accent-success-strong": withAlpha("accent-success-strong"),
                 "accent-profit": withAlpha("accent-profit"),
@@ -164,7 +168,9 @@ export default {
                 "indicator-sma-text": withAlpha("indicator-sma-text"),
                 "chart-selection-bg": withAlpha("chart-selection-bg"),
                 "chart-selection-edge": withAlpha("chart-selection-edge"),
-                "chart-selection-label-bg": withAlpha("chart-selection-label-bg"),
+                "chart-selection-label-bg": withAlpha(
+                    "chart-selection-label-bg"
+                ),
                 "chart-selection-handle-bg": withAlpha(
                     "chart-selection-handle-bg"
                 ),

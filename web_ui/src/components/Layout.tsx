@@ -6,7 +6,7 @@ import { BackgroundFX } from "./BackgroundFX";
 export default function Layout() {
     return (
         <>
-            <div className="relative flex min-h-screen flex-col text-app-text">
+            <div className="text-app-text relative flex min-h-screen flex-col">
                 <Header />
                 <BackgroundFX intensity={1} />
                 <main className="flex flex-1 flex-col">

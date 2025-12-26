@@ -86,14 +86,14 @@ export default function MarketsPage() {
     };
 
     return (
-        <div className="relative min-h-screen overflow-hidden bg-app-bg-soft pb-100 text-app-text">
+        <div className="bg-app-bg-soft text-app-text relative min-h-screen overflow-hidden pb-100">
             {/* layered background */}
             <div className="max-w-8xl mx-auto mt-20 grid w-[83%] grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[280px,1fr]">
                 {/* Command Dock */}
-                <aside className="h-fit rounded-md border border-line-subtle bg-surface-pane p-4 shadow-panel">
+                <aside className="border-line-subtle bg-surface-pane shadow-panel h-fit rounded-md border p-4">
                     <div className="flex items-baseline justify-between">
                         <div>
-                            <div className="text-[10px] text-app-text/50 uppercase">
+                            <div className="text-app-text/50 text-[10px] uppercase">
                                 Available Margin
                             </div>
                             <div className="font-mono text-3xl tracking-tight tabular-nums">
@@ -104,14 +104,14 @@ export default function MarketsPage() {
                                 )}
                             </div>
                         </div>
-                        <div className="h-6 w-1 bg-gradient-to-b from-gradient-start via-gradient-mid to-gradient-end" />
+                        <div className="from-gradient-start via-gradient-mid to-gradient-end h-6 w-1 bg-gradient-to-b" />
                     </div>
 
                     <div className="mt-4 grid gap-2">
                         {markets.length !== 0 && (
                             <button
                                 onClick={() => setShowAdd(true)}
-                                className="w-full rounded-md border border-action-add-border bg-action-add-bg px-3 py-2 text-action-add-text hover:bg-action-add-hover"
+                                className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover w-full rounded-md border px-3 py-2"
                             >
                                 <div className="flex items-center justify-center gap-2">
                                     <Plus className="h-4 w-4" />
@@ -120,7 +120,7 @@ export default function MarketsPage() {
                             </button>
                         )}
                         <button
-                            className="w-full rounded-md border border-action-close-border bg-action-close-bg px-3 py-2 text-action-close-text hover:bg-action-close-hover"
+                            className="border-action-close-border bg-action-close-bg text-action-close-text hover:bg-action-close-hover w-full rounded-md border px-3 py-2"
                             onClick={() =>
                                 requestCloseAll().catch((err) =>
                                     console.error("Close all failed", err)
@@ -133,7 +133,7 @@ export default function MarketsPage() {
                             </div>
                         </button>
                         <button
-                            className="w-full rounded-md border border-action-pause-border bg-action-pause-bg px-3 py-2 text-action-pause-text hover:bg-action-pause-hover"
+                            className="border-action-pause-border bg-action-pause-bg text-action-pause-text hover:bg-action-pause-hover w-full rounded-md border px-3 py-2"
                             onClick={() =>
                                 requestPauseAll().catch((err) =>
                                     console.error("Pause all failed", err)
@@ -147,15 +147,15 @@ export default function MarketsPage() {
                         </button>
                     </div>
 
-                    <div className="mt-6 grid gap-2 border-t border-line-subtle pt-4 text-[12px] text-app-text/60">
+                    <div className="border-line-subtle text-app-text/60 mt-6 grid gap-2 border-t pt-4 text-[12px]">
                         <div className="p-2 text-right text-[25px] font-bold">
                             PnL : {<SessionPnlDisplay />}
                         </div>
-                        <p className="font-semibold text-app-text/70">
+                        <p className="text-app-text/70 font-semibold">
                             Recent Markets
                         </p>
 
-                        <div className="h-43 overflow-y-auto rounded-md border border-line-subtle bg-transparent p-3">
+                        <div className="border-line-subtle h-43 overflow-y-auto rounded-md border bg-transparent p-3">
                             {cachedMarkets.length === 0 ? (
                                 <p className="text-app-text/40 italic">
                                     No cached markets.
@@ -177,18 +177,18 @@ export default function MarketsPage() {
                 {/* Markets Grid */}
                 <main>
                     {markets.length === 0 && (
-                        <div className="grid place-items-center rounded-md border border-line-subtle bg-surface-pane p-12 text-center">
+                        <div className="border-line-subtle bg-surface-pane grid place-items-center rounded-md border p-12 text-center">
                             <div>
                                 <h2 className="text-2xl font-semibold">
                                     No markets configured
                                 </h2>
-                                <p className="mt-1 text-app-text/60">
+                                <p className="text-app-text/60 mt-1">
                                     Add a market to begin streaming quotes and
                                     executing strategies.
                                 </p>
                                 <button
                                     onClick={() => setShowAdd(true)}
-                                    className="mt-5 inline-flex items-center gap-2 rounded-md border border-action-add-border bg-action-add-bg px-4 py-2 text-action-add-text hover:bg-action-add-hover"
+                                    className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover mt-5 inline-flex items-center gap-2 rounded-md border px-4 py-2"
                                 >
                                     <Plus className="h-4 w-4" /> Add Market
                                 </button>
@@ -232,13 +232,13 @@ export default function MarketsPage() {
                 <div className="fixed inset-0 z-50">
                     {/* Overlay */}
                     <div
-                        className="absolute inset-0 bg-app-overlay"
+                        className="bg-app-overlay absolute inset-0"
                         onClick={() => setShowAdd(false)}
                     />
 
                     {/* Centered Modal */}
                     <div className="absolute inset-0 flex items-center justify-center p-4">
-                        <div className="rounded-xl bg-surface-modal shadow-xl">
+                        <div className="bg-surface-modal rounded-xl shadow-xl">
                             <AddMarket
                                 onClose={() => setShowAdd(false)}
                                 totalMargin={totalMargin}
@@ -258,14 +258,14 @@ export default function MarketsPage() {
                         className="fixed inset-0 z-50"
                     >
                         <div
-                            className="absolute inset-0 bg-app-overlay"
+                            className="bg-app-overlay absolute inset-0"
                             onClick={() => setMarketToRemove(null)}
                         />
                         <motion.div
                             initial={{ y: 24, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             exit={{ y: 10, opacity: 0 }}
-                            className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-accent-danger/40 bg-surface-danger-soft p-6"
+                            className="border-accent-danger/40 bg-surface-danger-soft relative mx-auto mt-28 w-full max-w-md rounded-md border p-6"
                         >
                             <h3 className="text-lg font-semibold">
                                 Remove{" "}
@@ -274,19 +274,19 @@ export default function MarketsPage() {
                                 </span>
                                 ?
                             </h3>
-                            <p className="mt-1 text-danger-soft/80">
+                            <p className="text-danger-soft/80 mt-1">
                                 This will close any ongoing trade initiated by
                                 the Bot.
                             </p>
                             <div className="mt-6 flex justify-end gap-2">
                                 <button
-                                    className="rounded-md border border-line-weak px-4 py-2 hover:bg-glow-10"
+                                    className="border-line-weak hover:bg-glow-10 rounded-md border px-4 py-2"
                                     onClick={() => setMarketToRemove(null)}
                                 >
                                     Cancel
                                 </button>
                                 <button
-                                    className="text-on-accent rounded-md bg-accent-danger-strong px-4 py-2 hover:bg-accent-danger-deep"
+                                    className="text-on-accent bg-accent-danger-strong hover:bg-accent-danger-deep rounded-md px-4 py-2"
                                     onClick={() =>
                                         handleRemove(marketToRemove!)
                                     }
@@ -308,14 +308,14 @@ export default function MarketsPage() {
                         className="fixed inset-0 z-50"
                     >
                         <div
-                            className="absolute inset-0 bg-app-overlay"
+                            className="bg-app-overlay absolute inset-0"
                             onClick={() => setMarketToToggle(null)}
                         />
                         <motion.div
                             initial={{ y: 24, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             exit={{ y: 10, opacity: 0 }}
-                            className="relative mx-auto mt-28 w-full max-w-md rounded-md border border-accent-warning/40 bg-surface-warning p-6"
+                            className="border-accent-warning/40 bg-surface-warning relative mx-auto mt-28 w-full max-w-md rounded-md border p-6"
                         >
                             <h3 className="text-lg font-semibold">
                                 Pause{" "}
@@ -324,19 +324,19 @@ export default function MarketsPage() {
                                 </span>
                                 ?
                             </h3>
-                            <p className="mt-1 text-warning-soft/80">
+                            <p className="text-warning-soft/80 mt-1">
                                 This will close any ongoing trade initiated by
                                 the Bot.
                             </p>
                             <div className="mt-6 flex justify-end gap-2">
                                 <button
-                                    className="rounded-md border border-line-weak px-4 py-2 hover:bg-glow-10"
+                                    className="border-line-weak hover:bg-glow-10 rounded-md border px-4 py-2"
                                     onClick={() => setMarketToToggle(null)}
                                 >
                                     Cancel
                                 </button>
                                 <button
-                                    className="text-on-accent rounded-md bg-accent-warning-strong px-4 py-2 hover:bg-accent-warning-deep"
+                                    className="text-on-accent bg-accent-warning-strong hover:bg-accent-warning-deep rounded-md px-4 py-2"
                                     onClick={() =>
                                         handleTogglePause(marketToToggle!)
                                     }

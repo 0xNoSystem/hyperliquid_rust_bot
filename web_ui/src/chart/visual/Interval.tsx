@@ -265,30 +265,30 @@ const IntervalOverlay: React.FC = () => {
     return (
         <div className="pointer-events-none absolute inset-0">
             <div
-                className="pointer-events-auto absolute top-0 flex h-full cursor-grab items-stretch bg-chart-selection-bg"
+                className="bg-chart-selection-bg pointer-events-auto absolute top-0 flex h-full cursor-grab items-stretch"
                 style={{ left: overlayLeft, width: overlayWidth }}
                 onMouseDown={beginDrag("move")}
             >
                 <div
-                    className="pointer-events-none absolute top-0 h-full w-px bg-chart-selection-edge"
+                    className="bg-chart-selection-edge pointer-events-none absolute top-0 h-full w-px"
                     style={{ left: 0, transform: "translateX(-0.5px)" }}
                 />
                 <div
-                    className="pointer-events-none absolute top-0 h-full w-px bg-chart-selection-edge"
+                    className="bg-chart-selection-edge pointer-events-none absolute top-0 h-full w-px"
                     style={{ left: "100%", transform: "translateX(-0.5px)" }}
                 />
-                <div className="pointer-events-none absolute w-[100%] overflow-hidden py-1 text-xs font-semibold text-on-bright">
+                <div className="text-on-bright pointer-events-none absolute w-[100%] overflow-hidden py-1 text-xs font-semibold">
                     <span className="bg-chart-selection-label-bg p-2">
                         BackTest
                     </span>
                 </div>
                 <button
-                    className="pointer-events-auto absolute top-1/2 left-0 h-8 w-4 -translate-x-2 -translate-y-1/2 cursor-w-resize rounded-full border border-line-stronger bg-chart-selection-handle-bg hover:bg-chart-selection-handle-hover"
+                    className="border-line-stronger bg-chart-selection-handle-bg hover:bg-chart-selection-handle-hover pointer-events-auto absolute top-1/2 left-0 h-8 w-4 -translate-x-2 -translate-y-1/2 cursor-w-resize rounded-full border"
                     onMouseDown={beginDrag("start")}
                     title="Adjust start"
                 />
                 <button
-                    className="pointer-events-auto absolute top-1/2 right-0 h-8 w-4 translate-x-2 -translate-y-1/2 cursor-w-resize rounded-full border border-line-stronger bg-chart-selection-handle-bg hover:bg-chart-selection-handle-hover"
+                    className="border-line-stronger bg-chart-selection-handle-bg hover:bg-chart-selection-handle-hover pointer-events-auto absolute top-1/2 right-0 h-8 w-4 translate-x-2 -translate-y-1/2 cursor-w-resize rounded-full border"
                     onMouseDown={beginDrag("end")}
                     title="Adjust end"
                 />

@@ -33,7 +33,7 @@ const PositionTable = ({
             </thead>
 
             <tbody>
-                <tr className="border-t border-line-subtle">
+                <tr className="border-line-subtle border-t">
                     <td
                         className={`py-2 pr-4 font-semibold uppercase ${
                             position.side === "long"
@@ -56,7 +56,7 @@ const PositionTable = ({
                         {num(position.funding, 2)}$
                     </td>
 
-                    <td className="py-2 text-right text-accent-brand">
+                    <td className="text-accent-brand py-2 text-right">
                         {price == null || lev == null
                             ? "—"
                             : (() => {
