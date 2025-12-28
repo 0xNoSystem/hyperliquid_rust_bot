@@ -129,7 +129,7 @@ impl Market {
             let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
         };
 
-        self.load_engine(2000).await?;
+        self.load_engine(5000).await?;
         println!(
             "\nMarket initialized for {} {:?}\n",
             self.asset.name, self.trade_params
@@ -312,15 +312,29 @@ impl Market {
                     let mut map: TimeFrameData = HashMap::default();
                     for &entry in &entry_vec {
                         if entry.edit == EditType::Add && !self.active_tfs.contains(&entry.id.1) {
-                            let tf_data = load_candles(
+                            match load_candles(
                                 &self.info_client,
                                 asset.name.as_str(),
                                 entry.id.1,
                                 5000,
                             )
-                            .await?;
-                            map.insert(entry.id.1, tf_data);
-                            self.active_tfs.insert(entry.id.1);
+                            .await
+                            {
+                                Ok(tf_data) => {
+                                    map.insert(entry.id.1, tf_data);
+                                    self.active_tfs.insert(entry.id.1);
+                                }
+
+                                Err(e) => {
+                                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                        UpdateFrontend::UserError(format!(
+                                            "Failed to load candle data for {} timeframe: {}\n
+                                                REMOVE CONCERNED INDICATORS ANF TRY AGAIN",
+                                            entry.id.1, e
+                                        )),
+                                    ));
+                                }
+                            }
                         }
                     }
 
@@ -394,20 +408,33 @@ impl Market {
                     let end = get_time_now();
                     for tf in &self.active_tfs {
                         if (tf.to_millis()) < (end - disc_start) {
-                            let res = candles_snapshot(
+                            match candles_snapshot(
                                 &self.info_client,
                                 asset.name.as_str(),
                                 *tf,
                                 disc_start,
                                 end,
                             )
-                            .await?;
-                            info!(
-                                "fetched data for {} timeframe in refill window\n missed {} candles\n",
-                                tf,
-                                res.len()
-                            );
-                            map.insert(*tf, res);
+                            .await
+                            {
+                                Ok(res) => {
+                                    info!(
+                                        "fetched data for {} timeframe in refill window\n missed {} candles\n",
+                                        tf,
+                                        res.len()
+                                    );
+                                    map.insert(*tf, res);
+                                }
+
+                                Err(e) => {
+                                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                        UpdateFrontend::UserError(format!(
+                                            "Failed to missed candle data for {} timeframe: {}",
+                                            tf, e
+                                        )),
+                                    ));
+                                }
+                            }
                         }
                     }
                     if !map.is_empty() {

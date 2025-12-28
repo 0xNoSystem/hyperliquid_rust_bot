@@ -587,7 +587,7 @@ const TimeScale: React.FC = () => {
                                     x={tick.x}
                                     y={20}
                                     textAnchor="middle"
-                                    fill={isMajor ? "#ddd" : "#aaa"}
+                                    fill={isMajor ? "#aaa" : "#aaa"}
                                     fontSize={fontSize}
                                 >
                                     {tick.label}

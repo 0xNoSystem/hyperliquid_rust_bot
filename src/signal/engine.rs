@@ -8,11 +8,15 @@ use kwant::indicators::Price;
 
 use crate::strategy::{Strat, StratContext, Strategy};
 use crate::trade_setup::{TimeFrame, TradeParams};
-use crate::{EngineOrder, ExecCommand, IndicatorData, MarketCommand, get_time_now};
+use crate::{
+    EngineOrder, ExecCommand, IndicatorData, MIN_ORDER_VALUE, MarketCommand, PositionOp, Side,
+    get_time_now,
+};
 
 use flume::{Sender, bounded};
 use tokio::sync::mpsc::{Sender as tokioSender, UnboundedReceiver, unbounded_channel};
 
+use super::helpers::*;
 use super::types::*;
 
 type TrackersMap = HashMap<TimeFrame, Box<Tracker>, BuildHasherDefault<FxHasher>>;
@@ -169,6 +173,43 @@ impl SignalEngine {
             }
         }
     }
+
+    fn validate_trade(&self, trade: &EngineOrder, last_price: f64) -> Result<(), String> {
+        let side = match (trade.action, self.exec_params.open_pos) {
+            (PositionOp::Close, None) => {
+                return Err("INVALID STATE: Close with no open position".into());
+            }
+            (PositionOp::Close, Some(pos)) => !pos.side,
+
+            (PositionOp::OpenLong, Some(pos)) if pos.side == Side::Short => {
+                return Err("INVALID STATE: OpenLong while Short is open".into());
+            }
+            (PositionOp::OpenLong, _) => Side::Long,
+
+            (PositionOp::OpenShort, Some(pos)) if pos.side == Side::Long => {
+                return Err("INVALID STATE: OpenShort while Long is open".into());
+            }
+            (PositionOp::OpenShort, _) => Side::Short,
+        };
+
+        if let Some(limit) = trade.limit {
+            validate_limit(&limit, side, last_price)?;
+            if trade.size * limit.limit_px > MIN_ORDER_VALUE {
+                return Err(format!(
+                    "INVALID ORDER: notional value is below the minimum order value of {}",
+                    MIN_ORDER_VALUE
+                ));
+            }
+        }
+
+        if trade.size >= self.exec_params.get_max_open_size(last_price) {
+            return Err(
+                "EXCEEDED MAX_SIZE: Trade size exceeded maximum available (free_margin * lev / last_price)".into()
+            );
+        }
+
+        Ok(())
+    }
 }
 
 impl SignalEngine {
@@ -190,8 +231,12 @@ impl SignalEngine {
                         }
 
                         if let Some(trade) = self.get_signal(price.close, values) {
-                            //self.validate_trade(&trade);
-                            let _ = self.trade_tx.try_send(ExecCommand::Order(trade));
+                            if let Err(e) = self.validate_trade(&trade, price.close) {
+                                eprintln!("\x1b[31m[{}]\x1b[0m", e);
+                            } else {
+                                //send to executor
+                                let _ = self.trade_tx.try_send(ExecCommand::Order(trade));
+                            }
                         }
                     }
                 }

@@ -45,6 +45,10 @@ impl ExecParams {
             self.margin
         }
     }
+
+    pub fn get_max_open_size(&self, ref_px: f64) -> f64 {
+        self.free_margin() * self.lev as f64 / ref_px
+    }
 }
 
 pub enum ExecParam {
@@ -173,7 +177,7 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
 
 type History = Box<ArrayDeque<Price, { MAX_HISTORY }, Wrapping>>;
 #[derive(Debug)]
-pub struct Tracker {
+pub(super) struct Tracker {
     pub price_data: History,
     pub indicators: HashMap<IndicatorKind, Handler, BuildHasherDefault<FxHasher>>,
     tf: TimeFrame,
