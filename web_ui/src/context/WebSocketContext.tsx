@@ -17,9 +17,7 @@ const MARKET_INFO_KEY = "markets.v1";
 const UNIVERSE_KEY = "universe.v1";
 
 const DEFAULT_PLACEHOLDER_PARAMS: MarketInfo["params"] = {
-    timeFrame: "min1",
     lev: 1,
-    tradeTime: 0,
     strategy: "rsiEmaScalp",
 };
 

@@ -7,7 +7,6 @@ import {
     indicatorParamLabels,
 } from "../types";
 import type {
-    Strategy,
     TradeParams,
     AddMarketInfo,
     IndexId,
@@ -16,7 +15,9 @@ import type {
     AddMarketProps,
 } from "../types";
 
-const strategyOptions: Strategy[] = ["rsiEmaScalp", "srsiAdxScalp"];
+import {strategyOptions} from "../strats.ts";
+import type {Strategy} from "../strats.ts";
+
 const indicatorKinds: IndicatorName[] = [
     "rsi",
     "smaOnRsi",
@@ -40,7 +41,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     const [marginType, setMarginType] = useState<"alloc" | "amount">("alloc");
     const [marginValue, setMarginValue] = useState(0.1);
     const [lev, setLev] = useState(1);
-    const [strategy, setStrategy] = useState<Strategy>("rsiEmaScalp");
+    const [strategy, setStrategy] = useState<Strategy>(strategyOptions[0]);
 
     const [showConfig, setShowConfig] = useState(false);
     const [config, setConfig] = useState<ConfigDraft[]>([]);
@@ -125,10 +126,8 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                     ? { alloc: marginValue / 100 }
                     : { amount: marginValue },
             tradeParams: {
-                timeFrame: "min1",
                 lev,
                 strategy,
-                tradeTime: 100,
             } as TradeParams,
             config: validConfig,
         };

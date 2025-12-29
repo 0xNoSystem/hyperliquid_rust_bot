@@ -6,11 +6,11 @@ use log::info;
 
 use kwant::indicators::Price;
 
-use crate::strategy::{Strat, StratContext, Strategy};
+use crate::strategy::{Strat, StratContext};
 use crate::trade_setup::{TimeFrame, TradeParams};
 use crate::{
     EngineOrder, ExecCommand, IndicatorData, MIN_ORDER_VALUE, MarketCommand, PositionOp, Side,
-    get_time_now,
+    Strategy, get_time_now,
 };
 
 use flume::{Sender, bounded};

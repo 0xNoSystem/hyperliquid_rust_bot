@@ -16,6 +16,7 @@ pub mod signal;
 
 pub use assets::MARKETS;
 pub use strategy::*;
+pub use strats::Strategy;
 //pub use backtest::BackTester;
 pub use bot::{Bot, BotEvent, BotToMarket};
 pub use consts::*;

@@ -1,4 +1,7 @@
-#cargo run --release --bin load #update tradable assets list
+#!/usr/bin/env bash
+set -euo pipefail
+
+./gen_strats.sh
 
 RUST_LOG=info cargo run --release --bin kwant & #PREFIX WITH "RUST_LOG=info" for logging
 

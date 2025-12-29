@@ -1,3 +1,4 @@
+import type {Strategy} from "./strats.ts";
 export type IndicatorName =
     | "rsi"
     | "smaOnRsi"
@@ -174,13 +175,10 @@ export function into(tf: string): TimeFrame {
     return TIMEFRAME_CAMELCASE[tf];
 }
 
-export type Strategy = "rsiEmaScalp" | "srsiAdxScalp";
 
 export interface TradeParams {
-    timeFrame: TimeFrame;
     lev: number;
     strategy: Strategy;
-    tradeTime: number;
 }
 
 export type MarginAllocation = { alloc: number } | { amount: number };

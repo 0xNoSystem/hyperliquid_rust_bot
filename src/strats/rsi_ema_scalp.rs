@@ -2,46 +2,43 @@ use super::*;
 use TimeFrame::*;
 use Value::*;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct RsiEmaStrategy {
+pub struct RsiEmaScalp {
     rsi_1h: IndexId,
     rsi_5m: IndexId,
     ema_cross_15m: IndexId,
     active_window_start: Option<u64>, //ms
-    waiting_for_cross: bool,
     prev_fast_above: Option<bool>,
     limit_close_set: bool,
 }
 
-impl RsiEmaStrategy {
+impl RsiEmaScalp {
     pub fn init() -> Self {
         let inds = Self::required_indicators_static();
-        RsiEmaStrategy {
+        RsiEmaScalp {
             rsi_1h: inds[0],
             ema_cross_15m: inds[1],
             rsi_5m: inds[2],
             active_window_start: None,
-            waiting_for_cross: true,
             prev_fast_above: None,
             limit_close_set: false,
         }
     }
 }
 
-impl NeedsIndicators for RsiEmaStrategy {
+impl NeedsIndicators for RsiEmaScalp {
     fn required_indicators_static() -> Vec<IndexId> {
         vec![
-            (IndicatorKind::Rsi(8), TimeFrame::Min15),
+            (IndicatorKind::Rsi(12), TimeFrame::Min15),
             (
                 IndicatorKind::EmaCross { short: 9, long: 21 },
                 TimeFrame::Min1,
             ),
-            (IndicatorKind::Rsi(10), TimeFrame::Min5),
+            (IndicatorKind::Rsi(14), TimeFrame::Min5),
         ]
     }
 }
 
-impl Strat for RsiEmaStrategy {
+impl Strat for RsiEmaScalp {
     fn required_indicators(&self) -> Vec<IndexId> {
         Self::required_indicators_static()
     }

@@ -3,8 +3,4 @@ pub(super) use crate::{
     StratContext, TimeFrame, TriggerKind, Value, timedelta,
 };
 
-mod rsi_ema_scalp;
-pub use rsi_ema_scalp::RsiEmaStrategy;
-
-mod srsi_adx_scalp;
-pub use srsi_adx_scalp::SrsiAdxScalp;
+include!(concat!(env!("OUT_DIR"), "/strats_gen.rs"));

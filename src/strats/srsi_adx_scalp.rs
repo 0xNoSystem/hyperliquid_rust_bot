@@ -2,7 +2,6 @@ use super::*;
 use TimeFrame::*;
 use Value::*;
 
-#[derive(Clone, Debug, PartialEq)]
 pub struct SrsiAdxScalp {
     rsi_1h: IndexId,
     sma_rsi_1h: IndexId,
@@ -64,6 +63,10 @@ impl Strat for SrsiAdxScalp {
             tick_time,
             open_pos,
         } = ctx;
+        //Continue on ADX_15M close only (if no position is yet open)
+        if open_pos.is_none() && !indicators.get(&self.adx_15m)?.on_close {
+            return None;
+        }
 
         let max_size = (free_margin * lev as f64) / last_price;
 
@@ -105,7 +108,7 @@ impl Strat for SrsiAdxScalp {
             }
             let start = self.active_window_start?;
 
-            if tick_time - start >= timedelta!(Min15, 3) {
+            if tick_time - start >= timedelta!(Hour1, 3) {
                 self.active_window_start = None;
                 return None;
             }

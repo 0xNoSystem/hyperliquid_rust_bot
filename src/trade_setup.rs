@@ -10,8 +10,6 @@ use serde::{Deserialize, Serialize};
 pub struct TradeParams {
     pub strategy: Strategy,
     pub lev: usize,
-    pub trade_time: u64,
-    pub time_frame: TimeFrame,
 }
 
 impl TradeParams {
@@ -43,14 +41,7 @@ impl TradeParams {
 
 impl fmt::Display for TradeParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "leverage: {}\nStrategy: {:?}\nTrade time: {} s\ntime_frame: {}",
-            self.lev,
-            self.strategy,
-            self.trade_time,
-            self.time_frame.as_str(),
-        )
+        write!(f, "leverage: {}\nStrategy: {:?}\n", self.lev, self.strategy,)
     }
 }
 
