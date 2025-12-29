@@ -74,7 +74,7 @@ impl Executor {
         trigger: Option<TriggerKind>,
     ) -> Result<RestingOrderLocal, Error> {
         let side = order.get_side();
-        let limit_px = order.get_px();
+        let limit_px = dbg!(order.get_px());
         let size = order.get_sz();
 
         let status_res = match order {

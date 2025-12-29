@@ -29,18 +29,6 @@ const dedupeMarkets = (markets: MarketInfo[]): MarketInfo[] => {
     return Array.from(map.values());
 };
 
-const hasCachedUniverse = (): boolean => {
-    try {
-        const raw = localStorage.getItem(UNIVERSE_KEY);
-        if (!raw) return false;
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed);
-    } catch (err) {
-        void err;
-        return false;
-    }
-};
-
 const isAssetMeta = (value: unknown): value is assetMeta => {
     return (
         typeof value === "object" &&
@@ -338,7 +326,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
             const onOpen = () => {
                 retry = 0;
-                if (!hasCachedUniverse()) {
+                if (universe.length === 0) {
                     sendCommand({ getSession: null }).catch(console.error);
                 }
             };
@@ -368,7 +356,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             wsRef.current = null;
             if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
         };
-    }, [handleMessage, sendCommand]);
+    }, [handleMessage, sendCommand, universe]);
 
     /** ------------ exposed API ------------ **/
     const cacheMarket = useCallback((market: MarketInfo) => {

@@ -1,11 +1,10 @@
 // src/components/MarketDetail.tsx
 // Alternative “Trading Terminal” layout — keyboard/terminal vibes, split panes, neon accents.
 // Keeps the same backend interactions and batching behavior.
-
+import { KwantChart } from "kwant";
 import { useMemo, useState, useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
-import TradingViewWidget from "./TradingViewWidget";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatUTC } from "../chart/utils";
 import { MAX_DECIMALS, MIN_ORDER_VALUE } from "../consts";
@@ -481,16 +480,20 @@ export default function MarketDetail() {
                                 (PERPS) is likely different
                             </span>
                         </div>
-                        <div className={`${Chart} relative h-[60vh]`}>
-                            <TradingViewWidget
-                                symbol={`${market.asset}`}
-                                interval="D"
+                        <div className={`${Chart} kwant-theme relative h-[60vh]`}>
+                            <KwantChart
+                                asset={routeAsset}
+                                title="KWANT"
+                                backgroundColor="rgb(var(--app-surface-2))"
+                                gridColor="rgb(var(--app-bg))"
+                                secondaryColor="#36c5f0"
+                                crosshairColor="rgb(var(--app-text))"
                             />
                         </div>
                     </section>
 
                     {/* Active indicators list */}
-                    <section className={`${Pane}`}>
+                    <section className={`${Pane} mt-25`}>
                         <div
                             className={`${Head} flex items-center justify-between`}
                         >
