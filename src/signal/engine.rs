@@ -192,20 +192,48 @@ impl SignalEngine {
             (PositionOp::OpenShort, _) => Side::Short,
         };
 
-        if let Some(limit) = trade.limit {
-            validate_limit(&limit, side, last_price)?;
-            if trade.size * limit.limit_px > MIN_ORDER_VALUE {
-                return Err(format!(
-                    "INVALID ORDER: notional value is below the minimum order value of {}",
-                    MIN_ORDER_VALUE
-                ));
-            }
-        }
-
-        if trade.size >= self.exec_params.get_max_open_size(last_price) {
+        if trade.action != PositionOp::Close
+            && trade.size > self.exec_params.get_max_open_size(last_price)
+        {
             return Err(
                 "EXCEEDED MAX_SIZE: Trade size exceeded maximum available (free_margin * lev / last_price)".into()
             );
+        }
+
+        if let Some(limit) = trade.limit {
+            validate_limit(&limit, side, last_price)?;
+            if trade.size * limit.limit_px < MIN_ORDER_VALUE {
+                return Err(format!(
+                    "INVALID ORDER: notional value is below the minimum order value of {}$",
+                    MIN_ORDER_VALUE
+                ));
+            }
+        } else {
+            match trade.action {
+                PositionOp::OpenLong | PositionOp::OpenShort => {
+                    if trade.size * last_price < MIN_ORDER_VALUE {
+                        return Err(format!(
+                            "INVALID ORDER: notional value is below the minimum order value of {}$",
+                            MIN_ORDER_VALUE
+                        ));
+                    }
+                }
+
+                PositionOp::Close => {
+                    //MARKET CLOSE DOESN'T HAVE TO BE LESS THAN MIN_ORDER_VALUE IFF we're closing
+                    //non-partial closes only
+                    if let Some(pos) = self.exec_params.open_pos {
+                        if trade.size < pos.size && trade.size * last_price > MIN_ORDER_VALUE {
+                            return Err(format!(
+                                "INVALID ORDER: notional value is below the minimum order value of {}$",
+                                MIN_ORDER_VALUE
+                            ));
+                        }
+                    } else {
+                        return Err("INVALID STATE: Close order won't be processes, no open position present".to_string());
+                    }
+                }
+            }
         }
 
         Ok(())

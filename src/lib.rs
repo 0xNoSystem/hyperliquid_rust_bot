@@ -31,6 +31,6 @@ pub use signal::{
 pub use trade_setup::*;
 pub use wallet::Wallet;
 
-//expost HL sdk types
-pub use hyperliquid_rust_sdk::{BaseUrl, Error, TradeInfo as HLTradeInfo};
+//exposed HL sdk types
+pub use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, Error, TradeInfo as HLTradeInfo};
 pub use kwant::indicators::{Price, Value};
