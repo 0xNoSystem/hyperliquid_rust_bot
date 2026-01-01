@@ -13,7 +13,7 @@
         "@visx/shape": "^3.12.0",
         "@visx/xychart": "^3.12.0",
         "framer-motion": "^12.23.26",
-        "kwant": "^0.2.10",
+        "kwant": "^0.2.11",
         "lucide-react": "^0.539.0",
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
@@ -852,7 +852,7 @@
 
     "konva": ["konva@10.0.12", "", {}, "sha512-DHmkeG5FbW6tLCkbMQTi1ihWycfzljrn0V7umUUuewxx7aoINcI71ksgBX9fTPNXhlsK4/JoMgKwI/iCde+BRw=="],
 
-    "kwant": ["kwant@0.2.10", "", { "peerDependencies": { "react": ">=18", "react-dom": ">=18" } }, "sha512-l3FW+jhZ2LQPgnO04oZUKSc0JZ+ytZZDWlkImfswOzE5WP/VV2mc8gRs0gbAtevxPxvJoQOOS8xWtKJjsgRJMg=="],
+    "kwant": ["kwant@0.2.11", "", { "peerDependencies": { "react": ">=18", "react-dom": ">=18" } }, "sha512-ke6KX7UNkR+5EcuZ+EcRbFPm6if4xXV1lYligkkFfnOz1CjhWIhgFvly/IemXrTeXvP36Z71Rp1vxZf1EDp19Q=="],
 
     "leven": ["leven@3.1.0", "", {}, "sha512-qsda+H8jTaUaN/x5vzW2rzc+8Rw4TAQ/4KjB46IwK5VH+IlVeeeje/EoZRpiXvIqjFgK84QffqPztGI3VBLG1A=="],
 

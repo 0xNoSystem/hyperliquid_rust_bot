@@ -273,8 +273,8 @@ impl SignalEngine {
                     self.digest_bulk(data);
                 }
 
-                EngineCommand::UpdateStrategy(_new_strat) => {
-                    //self.change_strategy(new_strat);
+                EngineCommand::UpdateStrategy(new_strat) => {
+                    self.strategy = new_strat.init();
                 }
 
                 EngineCommand::EditIndicators {
@@ -301,8 +301,7 @@ impl SignalEngine {
                     //Update frontend without waiting for next price update which makes indicators
                     //editing appear laggy
                     let ind = self.get_indicators_data();
-                    if !ind.is_empty()
-                        && let Some(sender) = &self.data_tx
+                    if let Some(sender) = &self.data_tx
                     {
                         let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                     }

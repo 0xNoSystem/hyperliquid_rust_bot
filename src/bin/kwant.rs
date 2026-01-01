@@ -128,7 +128,7 @@ impl Actor for MyWebSocket {
             fut::wrap_future(async move {
                 while let Ok(update) = rx.recv().await {
                     if let Ok(text) = serde_json::to_string(&update) {
-                        //info!("\n{}\n", text);
+                        info!("\n{}\n", text);
                         addr.do_send(ServerMessage(text));
                     }
                 }

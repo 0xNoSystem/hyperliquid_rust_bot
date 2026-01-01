@@ -259,6 +259,9 @@ impl Tracker {
         self.price_data.extend(buffer);
     }
     pub fn add_indicator(&mut self, kind: IndicatorKind, load: bool) {
+        if self.indicators.contains_key(&kind) {
+            return;
+        }
         let mut handler = Handler::new(kind);
         if load {
             handler.load(&*self.price_data);

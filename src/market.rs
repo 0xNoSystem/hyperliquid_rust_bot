@@ -137,10 +137,6 @@ impl Market {
         Ok(())
     }
 
-    pub fn change_strategy(&mut self, strategy: Strategy) {
-        self.trade_params.strategy = strategy;
-    }
-
     async fn load_engine(&mut self, candle_count: u64) -> Result<(), Error> {
         info!("---------------Loading Engine---------------");
         for tf in &self.active_tfs {
@@ -305,7 +301,57 @@ impl Market {
                 }
 
                 MarketCommand::UpdateStrategy(strat) => {
-                    //let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(strat));
+                    if strat == self.trade_params.strategy{
+                        continue; 
+                    }
+
+                    let mut map: TimeFrameData = HashMap::default();
+                    let required_indicators = strat.indicators();
+
+                    for (kind, tf) in required_indicators.iter() {
+                        if !self.active_tfs.contains(tf) {
+                            match load_candles(&self.info_client, asset.name.as_str(), *tf, 5000)
+                                .await
+                            {
+                                Ok(tf_data) => {
+                                    map.insert(*tf, tf_data);
+                                    self.active_tfs.insert(*tf);
+                                }
+
+                                Err(e) => {
+                                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                        UpdateFrontend::UserError(format!(
+                                            "Failed to load candle data for {} timeframe: {}\n
+                                                REMOVE CONCERNED INDICATORS AND TRY AGAIN",
+                                            tf, e
+                                        )),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(strat));
+
+                    let price_data = if map.is_empty() { None } else { Some(map) };
+                    let indicators: Vec<Entry> = required_indicators
+                        .into_iter()
+                        .map(|id| Entry {
+                            id,
+                            edit: EditType::Add,
+                        })
+                        .collect();
+                    let _ = engine_update_tx.send(EngineCommand::EditIndicators {
+                        indicators,
+                        price_data,
+                    });
+
+                    //close any ongoing trade
+                    let _ = self
+                        .senders
+                        .exec_tx
+                        .send_async(Control(ExecControl::Pause))
+                        .await;
+
                 }
 
                 MarketCommand::EditIndicators(entry_vec) => {
@@ -329,7 +375,7 @@ impl Market {
                                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                                         UpdateFrontend::UserError(format!(
                                             "Failed to load candle data for {} timeframe: {}\n
-                                                REMOVE CONCERNED INDICATORS ANF TRY AGAIN",
+                                                REMOVE CONCERNED INDICATORS AND TRY AGAIN",
                                             entry.id.1, e
                                         )),
                                     ));

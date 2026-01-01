@@ -102,7 +102,7 @@ const CandleCanvas: React.FC<CandleCanvasProps> = ({
 
             const upColor = candleColor.up;
             const downColor = candleColor.down;
-            const wickWidth = candleWidth / 2 <= 1 ? 0.2 : 1;
+            const wickWidth = candleWidth / 2 <= 1 ? 0.7 : 1;
 
             const drawWicks = (isUp: boolean, color: string) => {
                 ctx.beginPath();

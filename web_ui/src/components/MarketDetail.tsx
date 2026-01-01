@@ -2,7 +2,7 @@
 // Alternative “Trading Terminal” layout — keyboard/terminal vibes, split panes, neon accents.
 // Keeps the same backend interactions and batching behavior.
 import { KwantChart } from "kwant";
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { motion, AnimatePresence } from "framer-motion";
@@ -31,6 +31,8 @@ import type {
     TimeFrame,
     TradeInfo,
 } from "../types";
+import type { Strategy } from "../strats.ts";
+import { strategyOptions } from "../strats.ts";
 import { ArrowLeft, Plus, Minus, X } from "lucide-react";
 
 const formatPrice = (n: number) => {
@@ -99,6 +101,7 @@ export default function MarketDetail() {
         totalMargin,
         errorMsg,
         dismissError,
+        updateMarketStrategy,
     } = useWebSocketContext();
     const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
 
@@ -141,6 +144,9 @@ export default function MarketDetail() {
 
     // batch
     const [pending, setPending] = useState<PendingEdit[]>([]);
+    const [pendingStrategy, setPendingStrategy] = useState<Strategy | null>(
+        null
+    );
 
     const maxLev = meta?.maxLeverage ?? 1;
     const eqIndexId = (a: IndexId, b: IndexId) =>
@@ -227,6 +233,9 @@ export default function MarketDetail() {
             manualUpdateMargin: [market.asset, Math.max(0, margin)],
         });
     };
+    useEffect(() => {
+        setPendingStrategy(null);
+    }, [market?.asset, market?.params.strategy]);
 
     if (!market) {
         return (
@@ -242,10 +251,33 @@ export default function MarketDetail() {
 
     const marketLev = market.lev ?? 0;
     const marketMargin = market.margin ?? 0;
+    const currentStrategy = market.params.strategy;
+    const hasPendingStrategy =
+        pendingStrategy !== null && pendingStrategy !== currentStrategy;
     const showMinOrderWarning =
         market.margin != null &&
         market.lev != null &&
         market.margin * market.lev < MIN_ORDER_VALUE;
+    const handleStrategySelect = (option: Strategy) => {
+        setPendingStrategy((prev) => {
+            if (option === currentStrategy) return null;
+            return prev === option ? null : option;
+        });
+    };
+    const cancelStrategyChange = () => setPendingStrategy(null);
+    const applyStrategyChange = async () => {
+        if (!pendingStrategy || pendingStrategy === currentStrategy) return;
+        try {
+            await sendMarketCmd(market.asset, {
+                updateStrategy: pendingStrategy,
+            });
+        } catch (err) {
+            console.error("Update strategy failed", err);
+            return;
+        }
+        updateMarketStrategy(market.asset, pendingStrategy);
+        setPendingStrategy(null);
+    };
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
@@ -451,13 +483,74 @@ export default function MarketDetail() {
                         </div>
 
                         {/* Strategy snapshot */}
-                        <div className="border-line-subtle bg-ink-20 space-y-1 rounded-lg border p-3 text-[12px]">
+                        <div className="border-line-subtle bg-ink-20 space-y-2 rounded-lg border p-3 text-[12px]">
                             <h3 className="text-center text-[18px]">
                                 Strategy
                             </h3>
-                            <p className="py-3 text-center text-[14px]">
-                                {market.params.strategy}
+                            <div className="text-app-text/50 text-center text-[10px] uppercase">
+                                Current
+                            </div>
+                            <p className="text-center text-[14px] font-semibold">
+                                {currentStrategy}
                             </p>
+                            <div className="mt-2 grid gap-2">
+                                {strategyOptions.map((option) => {
+                                    const isCurrent =
+                                        option === currentStrategy;
+                                    const isPending =
+                                        option === pendingStrategy;
+                                    return (
+                                        <button
+                                            key={option}
+                                            type="button"
+                                            onClick={() =>
+                                                handleStrategySelect(option)
+                                            }
+                                            className={`w-full rounded-md border px-2 py-1 text-[11px] uppercase tracking-wide transition ${
+                                                isPending
+                                                    ? "border-accent-warning-strong/60 bg-accent-warning-strong/10 text-accent-warning-mid"
+                                                    : isCurrent
+                                                      ? "border-accent-brand-strong/60 bg-glow-5 text-accent-brand-soft"
+                                                      : "border-line-subtle bg-app-surface-3 text-app-text/70 hover:bg-glow-10"
+                                            }`}
+                                        >
+                                            {option}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {hasPendingStrategy && (
+                                <>
+                                    <div className="text-accent-warning-mid text-center text-[11px] uppercase">
+                                        Pending: {pendingStrategy}
+                                    </div>
+                                    <div className="border-accent-warning/40 bg-surface-warning rounded-md border px-2 py-1 text-[11px]">
+                                        <span className="text-accent-warning-mid font-semibold">
+                                            Warning:
+                                        </span>{" "}
+                                        <span className="text-warning-soft/80">
+                                            Changing strategy will close any
+                                            open position.
+                                        </span>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={cancelStrategyChange}
+                                            className={`${BtnGhost} w-full`}
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={applyStrategyChange}
+                                            className={`${BtnOK} w-full`}
+                                        >
+                                            Apply
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
                 </aside>

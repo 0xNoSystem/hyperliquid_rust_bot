@@ -7,6 +7,7 @@ import type {
     assetMargin,
     assetMeta,
 } from "../types";
+import type { Strategy } from "../strats.ts";
 import { API_URL, WS_ENDPOINT } from "../consts";
 import { market_add_info } from "../types";
 import type { WebSocketContextValue } from "./WebSocketContextStore";
@@ -404,6 +405,19 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         setMarkets((p) => p.map((m) => ({ ...m, isPaused: true })));
     }, [sendCommand]);
 
+    const updateMarketStrategy = useCallback(
+        (asset: string, strategy: Strategy) => {
+            setMarkets((prev) =>
+                prev.map((m) =>
+                    m.asset === asset
+                        ? { ...m, params: { ...m.params, strategy } }
+                        : m
+                )
+            );
+        },
+        []
+    );
+
     const dismissError = useCallback(
         () => setErrorWithTimeout(null),
         [setErrorWithTimeout]
@@ -424,6 +438,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         requestToggleMarket,
         requestCloseAll,
         requestPauseAll,
+        updateMarketStrategy,
     };
 
     return (
