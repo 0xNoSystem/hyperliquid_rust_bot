@@ -301,8 +301,8 @@ impl Market {
                 }
 
                 MarketCommand::UpdateStrategy(strat) => {
-                    if strat == self.trade_params.strategy{
-                        continue; 
+                    if strat == self.trade_params.strategy {
+                        continue;
                     }
 
                     let mut map: TimeFrameData = HashMap::default();
@@ -349,9 +349,8 @@ impl Market {
                     let _ = self
                         .senders
                         .exec_tx
-                        .send_async(Control(ExecControl::Pause))
+                        .send_async(Control(ExecControl::ForceClose))
                         .await;
-
                 }
 
                 MarketCommand::EditIndicators(entry_vec) => {

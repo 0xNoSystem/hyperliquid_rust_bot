@@ -61,6 +61,8 @@ impl Strat for RsiChopSwing{
             if open_pos.is_some(){
                 return None;
             }else{
+                self.sl_set = false;
+                self.tp_set = false;
                 self.closing = false;
             }
         }
@@ -73,7 +75,7 @@ impl Strat for RsiChopSwing{
         };
 
         let atr_1d_value = match indicators.get(&self.atr_1d)?.value {
-            SmaRsiValue(v) => v,
+            AtrValue(v) => v,
             _ => return None,
         };
         let atr_normalized = atr_1d_value / last_price;
@@ -82,15 +84,21 @@ impl Strat for RsiChopSwing{
             AdxValue(v) => v,
             _ => return None,
         };
-
-        (||{
             if let Some(pos) = open_pos{
                 if !self.tp_set{
-                    //todo
+                    self.tp_set = true;
+                    return Some(EngineOrder::new_tp(pos.size, pos.entry_px * 1.04));
                 }
                 if !self.sl_set{
-                    //todo
+                    self.sl_set = true;
+                    return Some(EngineOrder::new_sl(pos.size, pos.entry_px * 0.98));
                 }
+
+                if rsi_1h_value > 52.0{
+                    self.closing = true;
+                    return Some(EngineOrder::new_limit_close(pos.size, last_price * 1.001, None));
+                }
+                return None;
             }
 
             if self.active_window_start.is_none() && (atr_normalized < NATR_THRESH || adx_12h_value > ADX_THRESH){
@@ -104,16 +112,25 @@ impl Strat for RsiChopSwing{
                 }
                 if rsi_1h_value < RSI_THRESH{
                     let side = Side::Long;
-                    //todo
-                }else if rsi_1h_value > 1.0 - RSI_THRESH{
+                    let size = max_size * 0.9;
+                    return Some(EngineOrder::new_limit_open(
+                        side,
+                        size,
+                        last_price * 0.997,
+                        None,
+                    ));
+                }else if rsi_1h_value > 100.0 - RSI_THRESH{
                     let side = Side::Short;
-                    //todo 
+                    let size = max_size * 0.9;
+                    return Some(EngineOrder::new_limit_open(
+                        side,
+                        size,
+                        last_price * 1.003,
+                        None,
+                    ));
                 }
             }
-
             None
-            
-        })()
     }
 
 }

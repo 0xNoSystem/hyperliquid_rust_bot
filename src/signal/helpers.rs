@@ -10,28 +10,28 @@ pub(super) fn validate_tpsl(
     last_price: f64,
 ) -> Result<(), String> {
     match (side, trigger) {
-        (Side::Long, TriggerKind::Tp) if limit_px <= last_price => Err(
+        (Side::Short, TriggerKind::Tp) if limit_px <= last_price => Err(
             "TPSL ERROR (Long TP): TP must be strictly above last_price.\n\
                             Conditional orders must refer to future price movement.\n\
                             Remove TP/SL semantics and submit a non-conditional order."
                 .into(),
         ),
 
-        (Side::Long, TriggerKind::Sl) if limit_px >= last_price => Err(
+        (Side::Short, TriggerKind::Sl) if limit_px >= last_price => Err(
             "TPSL ERROR (Long SL): SL must be strictly below last_price.\n\
                             Conditional orders must refer to future price movement.\n\
                             Remove TP/SL semantics and submit a non-conditional order."
                 .into(),
         ),
 
-        (Side::Short, TriggerKind::Tp) if limit_px >= last_price => Err(
+        (Side::Long, TriggerKind::Tp) if limit_px >= last_price => Err(
             "TPSL ERROR (Short TP): TP must be strictly below last_price.\n\
                             Conditional orders must refer to future price movement.\n\
                             Remove TP/SL semantics and submit a non-conditional order."
                 .into(),
         ),
 
-        (Side::Short, TriggerKind::Sl) if limit_px <= last_price => Err(
+        (Side::Long, TriggerKind::Sl) if limit_px <= last_price => Err(
             "TPSL ERROR (Short SL): SL must be strictly above last_price.\n\
                             Conditional orders must refer to future price movement.\n\
                             Remove TP/SL semantics and submit a non-conditional order."

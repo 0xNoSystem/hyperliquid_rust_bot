@@ -301,8 +301,7 @@ impl SignalEngine {
                     //Update frontend without waiting for next price update which makes indicators
                     //editing appear laggy
                     let ind = self.get_indicators_data();
-                    if let Some(sender) = &self.data_tx
-                    {
+                    if let Some(sender) = &self.data_tx {
                         let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                     }
                 }

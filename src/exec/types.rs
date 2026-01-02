@@ -170,6 +170,7 @@ pub enum ExecControl {
     Kill,
     Pause,
     Resume,
+    ForceClose,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

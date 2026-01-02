@@ -335,6 +335,9 @@ impl Executor {
                     ExecControl::Resume => {
                         self.is_paused = false;
                     }
+                    ExecControl::ForceClose => {
+                        self.kill().await;
+                    }
                 },
 
                 Event(event) => {

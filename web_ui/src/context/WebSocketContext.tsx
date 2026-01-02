@@ -355,7 +355,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             wsRef.current = null;
             if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
         };
-    }, [handleMessage, sendCommand, universe]);
+    }, [handleMessage, sendCommand]);
 
     /** ------------ exposed API ------------ **/
     const cacheMarket = useCallback((market: MarketInfo) => {
