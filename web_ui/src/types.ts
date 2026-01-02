@@ -1,4 +1,4 @@
-import type {Strategy} from "./strats.ts";
+import type { Strategy } from "./strats.ts";
 export type IndicatorName =
     | "rsi"
     | "smaOnRsi"
@@ -174,7 +174,6 @@ export function fromTimeFrame(tf: TimeFrame): string {
 export function into(tf: string): TimeFrame {
     return TIMEFRAME_CAMELCASE[tf];
 }
-
 
 export interface TradeParams {
     lev: number;

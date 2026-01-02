@@ -506,7 +506,7 @@ export default function MarketDetail() {
                                             onClick={() =>
                                                 handleStrategySelect(option)
                                             }
-                                            className={`w-full rounded-md border px-2 py-1 text-[11px] uppercase tracking-wide transition ${
+                                            className={`w-full rounded-md border px-2 py-1 text-[11px] tracking-wide uppercase transition ${
                                                 isPending
                                                     ? "border-accent-warning-strong/60 bg-accent-warning-strong/10 text-accent-warning-mid"
                                                     : isCurrent
@@ -573,7 +573,9 @@ export default function MarketDetail() {
                                 (PERPS) is likely different
                             </span>
                         </div>
-                        <div className={`${Chart} kwant-theme relative h-[60vh]`}>
+                        <div
+                            className={`${Chart} kwant-theme relative h-[60vh]`}
+                        >
                             <KwantChart
                                 asset={routeAsset}
                                 title="KWANT"

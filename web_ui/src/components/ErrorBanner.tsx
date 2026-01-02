@@ -18,7 +18,9 @@ export function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
                 >
                     <div className="border-accent-danger/40 bg-surface-danger text-danger-faint flex items-center gap-2 rounded-md border px-3 py-2 shadow">
                         <AlertCircle className="h-4 w-4" />
-                        <span className="text-sm">{message}</span>
+                        <span className="text-sm whitespace-pre-line">
+                            {message}
+                        </span>
                         <button
                             onClick={onDismiss}
                             className="hover:bg-glow-10 ml-2 rounded-md px-2 py-1"

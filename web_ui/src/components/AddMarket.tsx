@@ -15,8 +15,8 @@ import type {
     AddMarketProps,
 } from "../types";
 
-import {strategyOptions} from "../strats.ts";
-import type {Strategy} from "../strats.ts";
+import { strategyOptions } from "../strats.ts";
+import type { Strategy } from "../strats.ts";
 
 const indicatorKinds: IndicatorName[] = [
     "rsi",

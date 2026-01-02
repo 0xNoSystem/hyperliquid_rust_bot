@@ -304,6 +304,7 @@ impl Market {
                     if strat == self.trade_params.strategy {
                         continue;
                     }
+                    self.trade_params.strategy = strat;
 
                     let mut map: TimeFrameData = HashMap::default();
                     let required_indicators = strat.indicators();
@@ -353,8 +354,19 @@ impl Market {
                         .await;
                 }
 
-                MarketCommand::EditIndicators(entry_vec) => {
+                MarketCommand::EditIndicators(mut entry_vec) => {
                     let mut map: TimeFrameData = HashMap::default();
+                    let strategy_indicators = self.trade_params.strategy.indicators();
+                    let mut failed_removes = Vec::with_capacity(strategy_indicators.len());
+                    entry_vec.retain(|entry| {
+                        if strategy_indicators.contains(&entry.id) && entry.edit == EditType::Remove
+                        {
+                            failed_removes.push(entry.id);
+                            false
+                        } else {
+                            true
+                        }
+                    });
                     for &entry in &entry_vec {
                         if entry.edit == EditType::Add && !self.active_tfs.contains(&entry.id.1) {
                             match load_candles(
@@ -388,6 +400,19 @@ impl Market {
                         indicators: entry_vec,
                         price_data,
                     });
+
+                    if !failed_removes.is_empty() {
+                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                            UpdateFrontend::UserError(format!(
+                                "INVALID OPERATION: Current strategy requires the following indicator(s):\n{}",
+                                failed_removes
+                                .iter()
+                                .map(|id| format!("• {:?}", id))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                            )),
+                        ));
+                    }
                 }
 
                 MarketCommand::UpdateOpenPosition(pos) => {
