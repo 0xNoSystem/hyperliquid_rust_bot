@@ -14,6 +14,7 @@ pub struct RsiChopSwing{
     active_window_start: Option<u64>,
     sl_set: bool,
     tp_set: bool,
+    opening: bool,
     closing: bool,
 }
 
@@ -27,6 +28,7 @@ impl RsiChopSwing{
             active_window_start: None,
             sl_set: false,
             tp_set: false,
+            opening: false,
             closing: false,
         }
     }
@@ -61,8 +63,6 @@ impl Strat for RsiChopSwing{
             if open_pos.is_some(){
                 return None;
             }else{
-                self.sl_set = false;
-                self.tp_set = false;
                 self.closing = false;
             }
         }
@@ -87,21 +87,30 @@ impl Strat for RsiChopSwing{
             if let Some(pos) = open_pos{
                 if !self.tp_set{
                     self.tp_set = true;
-                    return Some(EngineOrder::new_tp(pos.size, pos.entry_px * 1.04));
+                    let delta = if pos.side == Side::Long {1.03} else{ 0.97}; 
+                    return Some(EngineOrder::new_tp(pos.size, pos.entry_px * delta));
                 }
                 if !self.sl_set{
                     self.sl_set = true;
-                    return Some(EngineOrder::new_sl(pos.size, pos.entry_px * 0.98));
+                    let delta = if pos.side == Side::Long {0.98} else{ 1.02};
+                    return Some(EngineOrder::new_sl(pos.size, pos.entry_px * delta));
                 }
 
-                if rsi_1h_value > 52.0{
+                if  pos.side == Side::Long && rsi_1h_value > 52.0{
                     self.closing = true;
                     return Some(EngineOrder::new_limit_close(pos.size, last_price * 1.001, None));
+                }else if pos.side == Side::Short && rsi_1h_value < 48.0{
+                    self.closing = true;
+                    return Some(EngineOrder::new_limit_close(pos.size, last_price * 0.999, None)); 
                 }
+                self.opening = false;
                 return None;
+            }else{
+                self.sl_set = false;
+                self.tp_set = false;
             }
 
-            if self.active_window_start.is_none() && (atr_normalized < NATR_THRESH || adx_12h_value > ADX_THRESH){
+            if self.active_window_start.is_none() && (atr_normalized > NATR_THRESH && adx_12h_value < ADX_THRESH) && !self.opening{
                 self.active_window_start = Some(tick_time);
             }
             
@@ -113,6 +122,10 @@ impl Strat for RsiChopSwing{
                 if rsi_1h_value < RSI_THRESH{
                     let side = Side::Long;
                     let size = max_size * 0.9;
+
+                    self.active_window_start = None;
+                    self.opening = true;
+
                     return Some(EngineOrder::new_limit_open(
                         side,
                         size,
@@ -122,6 +135,10 @@ impl Strat for RsiChopSwing{
                 }else if rsi_1h_value > 100.0 - RSI_THRESH{
                     let side = Side::Short;
                     let size = max_size * 0.9;
+
+                    self.active_window_start = None;
+                    self.opening = true;
+
                     return Some(EngineOrder::new_limit_open(
                         side,
                         size,

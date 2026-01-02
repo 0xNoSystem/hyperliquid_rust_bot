@@ -4,7 +4,7 @@ use Value::*;
 
 pub struct RsiEmaScalp {
     rsi_1h: IndexId,
-    rsi_5m: IndexId,
+    rsi_15m: IndexId,
     ema_cross_15m: IndexId,
     active_window_start: Option<u64>, //ms
     prev_fast_above: Option<bool>,
@@ -17,7 +17,7 @@ impl RsiEmaScalp {
         RsiEmaScalp {
             rsi_1h: inds[0],
             ema_cross_15m: inds[1],
-            rsi_5m: inds[2],
+            rsi_15m: inds[2],
             active_window_start: None,
             prev_fast_above: None,
             limit_close_set: false,
@@ -28,12 +28,12 @@ impl RsiEmaScalp {
 impl NeedsIndicators for RsiEmaScalp {
     fn required_indicators_static() -> Vec<IndexId> {
         vec![
-            (IndicatorKind::Rsi(12), TimeFrame::Min15),
+            (IndicatorKind::Rsi(12), TimeFrame::Hour1),
             (
                 IndicatorKind::EmaCross { short: 9, long: 21 },
-                TimeFrame::Min1,
+                TimeFrame::Min15,
             ),
-            (IndicatorKind::Rsi(14), TimeFrame::Min5),
+            (IndicatorKind::Rsi(14), TimeFrame::Min15),
         ]
     }
 }
@@ -60,7 +60,7 @@ impl Strat for RsiEmaScalp {
             _ => return None,
         };
 
-        let rsi_5m_value = match indicators.get(&self.rsi_5m)?.value {
+        let rsi_15m_value = match indicators.get(&self.rsi_15m)?.value {
             RsiValue(v) => v,
             _ => return None,
         };
@@ -73,7 +73,7 @@ impl Strat for RsiEmaScalp {
             if let Some(open) = open_pos {
                 println!("HEREEEE");
                 if !self.limit_close_set
-                    && (rsi_5m_value >= 50.0
+                    && (rsi_15m_value >= 50.0
                         || ((tick_time - open.open_time > timedelta!(Min15, 1))
                             && rsi_1h_value < 35.0))
                 {

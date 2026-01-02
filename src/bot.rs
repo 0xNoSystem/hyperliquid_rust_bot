@@ -108,6 +108,7 @@ impl Bot {
         }
 
         let margin = book.allocate(asset.clone(), margin_alloc).await?;
+        drop(book);
 
         if let Some(tx) = &self.app_tx {
             let _ = tx.send(UpdateFrontend::PreconfirmMarket(asset.clone()));
@@ -135,8 +136,8 @@ impl Bot {
 
         self.markets.insert(asset.clone(), market_tx);
         self.candle_subs.insert(asset.clone(), sub_id);
-        let cancel_margin = margin_book.clone();
         let app_tx = self.app_tx.clone();
+        let remove_market_tx = self._bot_tx.clone(); //remove subs in case of failed market init
 
         tokio::spawn(async move {
             if let Err(e) = market.start().await {
@@ -146,8 +147,7 @@ impl Bot {
                         &asset, e
                     )));
                 }
-                let mut book = cancel_margin.lock().await;
-                book.remove(&asset);
+                let _ = remove_market_tx.send(BotEvent::RemoveMarket(asset.clone()));
             }
         });
 

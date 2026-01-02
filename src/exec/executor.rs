@@ -41,9 +41,10 @@ impl Executor {
         let exchange_client =
             Arc::new(ExchangeClient::new(None, wallet, Some(BaseUrl::Mainnet), None, None).await?);
 
+        let px_dec_fix = if asset.name == "SOL" { 2 } else { 1 };
         let decimals = Decimals {
             sz: asset.sz_decimals,
-            px: MAX_DECIMALS - asset.sz_decimals - 1,
+            px: MAX_DECIMALS - asset.sz_decimals - px_dec_fix,
         };
         Ok(Executor {
             trade_rv,

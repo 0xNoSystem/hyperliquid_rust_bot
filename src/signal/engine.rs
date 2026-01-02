@@ -378,3 +378,29 @@ pub enum EngineCommand {
     UpdateExecParams(ExecParam),
     Stop,
 }
+
+/*
+struct EngineContext{
+    tp_set: bool,
+    sl_set: bool,
+    state: EngineState,
+    active_window: Option<u64>,
+}
+
+active_window_duration = timedelta!(Hour1, 4);
+activate_on=ema_cross(9,21) == down && rsi < 30;
+long_on = ema_cross(9, 21) == up;
+close_on = rsi_5m(14) < 58 || trade_duration > timedelta!(Hour1, 2) && rsi_1h(14) < 40;
+short=None;
+
+tp=3%;
+sl=1%;
+
+
+enum EngineState{
+    Opening,
+    Open,
+    Closing,
+    Idle,
+}
+*/
