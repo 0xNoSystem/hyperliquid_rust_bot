@@ -1,13 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type {
-    editMarketInfo,
     AddMarketInfo,
     MarketInfo,
     Message,
-    assetMargin,
     assetMeta,
 } from "../types";
-import type { Strategy } from "../strats.ts";
+import type { Strategy } from "../strats";
 import { API_URL, WS_ENDPOINT } from "../consts";
 import { market_add_info } from "../types";
 import type { WebSocketContextValue } from "./WebSocketContextStore";
@@ -28,21 +26,15 @@ const dedupeMarkets = (markets: MarketInfo[]): MarketInfo[] => {
     return Array.from(map.values());
 };
 
-const isAssetMeta = (value: unknown): value is assetMeta => {
-    return (
-        typeof value === "object" &&
-        value !== null &&
-        "name" in value &&
-        "szDecimals" in value &&
-        "maxLeverage" in value
-    );
-};
+const isAssetMeta = (value: unknown): value is assetMeta =>
+    typeof value === "object" &&
+    value !== null &&
+    "name" in value &&
+    "szDecimals" in value &&
+    "maxLeverage" in value;
 
-const isAssetMetaArray = (value: unknown): value is assetMeta[] => {
-    if (!Array.isArray(value)) return false;
-    if (value.length === 0) return true;
-    return isAssetMeta(value[0]);
-};
+const isAssetMetaArray = (value: unknown): value is assetMeta[] =>
+    Array.isArray(value) && (value.length === 0 || isAssetMeta(value[0]));
 
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     children,
@@ -52,15 +44,28 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     const [cachedMarkets, setCachedMarkets] = useState<AddMarketInfo[]>([]);
     const [totalMargin, setTotalMargin] = useState(0);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
-    const [isOffline, setIsOffline] = useState<boolean>(false);
+    const [isOffline, setIsOffline] = useState(false);
 
+    /** ---------- refs for latest state (CRITICAL) ---------- **/
+    const marketsRef = useRef<MarketInfo[]>([]);
+    const universeRef = useRef<assetMeta[]>([]);
+
+    useEffect(() => {
+        marketsRef.current = markets;
+    }, [markets]);
+
+    useEffect(() => {
+        universeRef.current = universe;
+    }, [universe]);
+
+    /** ---------- infra refs ---------- **/
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectRef = useRef<number | null>(null);
     const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const hasLocalMarketsRef = useRef(false);
     const activeRef = useRef(true);
 
-    /** ------------ util functions (stable) ------------ **/
+    /** ---------- utils ---------- **/
     const sendCommand = useCallback(async (body: unknown) => {
         const res = await fetch(`${API_URL}/command`, {
             method: "POST",
@@ -85,7 +90,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         }
     }, []);
 
-    /** ------------ localStorage hydration ------------ **/
+    /** ---------- localStorage hydration ---------- **/
     useEffect(() => {
         try {
             const raw = localStorage.getItem(MARKET_INFO_KEY);
@@ -94,24 +99,22 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 hasLocalMarketsRef.current = parsed.length > 0;
                 setMarkets(dedupeMarkets(parsed));
             }
-        } catch (err) {
-            void err;
+        } catch {
+            console.log("Failed to hydrate localStorage");
         }
+
         try {
             const raw = localStorage.getItem(CACHED_MARKETS_KEY);
             if (raw) setCachedMarkets(JSON.parse(raw));
-        } catch (err) {
-            void err;
+        } catch {
+            console.log("Failed to hydrate localStorage");
         }
 
         try {
             const raw = localStorage.getItem(UNIVERSE_KEY);
-            if (raw) {
-                const parsed = JSON.parse(raw) as assetMeta[];
-                setUniverse(parsed);
-            }
-        } catch (err) {
-            void err;
+            if (raw) setUniverse(JSON.parse(raw));
+        } catch {
+            console.log("Failed to hydrate localStorage");
         }
     }, []);
 
@@ -128,132 +131,96 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         localStorage.setItem(UNIVERSE_KEY, JSON.stringify(universe));
     }, [universe]);
 
-    useEffect(() => {
-        const onStorage = (e: StorageEvent) => {
-            if (e.key === MARKET_INFO_KEY) {
-                if (!e.newValue) {
-                    setMarkets([]);
-                    hasLocalMarketsRef.current = false;
-                    return;
-                }
-                try {
-                    const parsed = JSON.parse(e.newValue) as MarketInfo[];
-                    hasLocalMarketsRef.current = parsed.length > 0;
-                    setMarkets(dedupeMarkets(parsed));
-                } catch (err) {
-                    void err;
-                }
-            }
-            if (e.key === CACHED_MARKETS_KEY) {
-                if (!e.newValue) {
-                    setCachedMarkets([]);
-                    return;
-                }
-                try {
-                    setCachedMarkets(JSON.parse(e.newValue));
-                } catch (err) {
-                    void err;
-                }
-            }
-            if (e.key === UNIVERSE_KEY) {
-                if (!e.newValue) {
-                    setUniverse([]);
-                    return;
-                }
-                try {
-                    const parsed = JSON.parse(e.newValue) as assetMeta[];
-                    setUniverse(parsed);
-                } catch (err) {
-                    void err;
-                }
-            }
-        };
-        window.addEventListener("storage", onStorage);
-        return () => window.removeEventListener("storage", onStorage);
-    }, []);
-
-    /** ------------ unified message handler (stable) ------------ **/
+    /** ---------- WS message handler (STABLE) ---------- **/
     const handleMessage = useCallback(
         (event: MessageEvent) => {
             const payload = JSON.parse(event.data) as Message;
 
             if ("status" in payload) {
-                console.log("status update: ", payload);
-                setIsOffline(payload.status === "offline");
+                if (
+                    payload.status === "offline" ||
+                    payload.status === "shutdown"
+                ) {
+                    setIsOffline(true);
+                }
+
+                if (payload.status === "shutdown") {
+                    setCachedMarkets((prev) => {
+                        const next = [...prev];
+                        marketsRef.current.forEach((market) => {
+                            const cached = market_add_info(market);
+                            if (!next.some((m) => m.asset === cached.asset)) {
+                                next.push(cached);
+                            }
+                        });
+                        return next;
+                    });
+                    setMarkets([]);
+                }
                 return;
             }
 
             if ("confirmMarket" in payload) {
-                const asset = payload.confirmMarket.asset;
                 const readyMarket: MarketInfo = {
                     ...payload.confirmMarket,
                     state: "Ready",
                 };
-                setMarkets((prev) => {
-                    const has = prev.some((m) => m.asset === asset);
-                    const updated = has
-                        ? prev.map((m) => (m.asset === asset ? readyMarket : m))
-                        : [...prev, readyMarket];
-                    return dedupeMarkets(updated);
-                });
+                setMarkets((prev) =>
+                    dedupeMarkets(
+                        prev.some((m) => m.asset === readyMarket.asset)
+                            ? prev.map((m) =>
+                                  m.asset === readyMarket.asset
+                                      ? readyMarket
+                                      : m
+                              )
+                            : [...prev, readyMarket]
+                    )
+                );
                 return;
             }
 
             if ("preconfirmMarket" in payload) {
                 const asset = payload.preconfirmMarket;
-                const loadingMarket: MarketInfo = {
-                    asset,
-                    state: "Loading",
-                    price: null,
-                    prev: null,
-                    lev: null,
-                    margin: null,
-                    pnl: null,
-                    indicators: [],
-                    trades: [],
-                    params: DEFAULT_PLACEHOLDER_PARAMS,
-                    isPaused: false,
-                    position: null,
-                };
                 setMarkets((prev) =>
                     prev.some((m) => m.asset === asset)
                         ? prev
-                        : [...prev, loadingMarket]
+                        : [
+                              ...prev,
+                              {
+                                  asset,
+                                  state: "Loading",
+                                  price: null,
+                                  prev: null,
+                                  lev: null,
+                                  margin: null,
+                                  pnl: null,
+                                  indicators: [],
+                                  trades: [],
+                                  params: DEFAULT_PLACEHOLDER_PARAMS,
+                                  isPaused: false,
+                                  position: null,
+                              },
+                          ]
                 );
                 return;
             }
 
             if ("marketInfoEdit" in payload) {
-                const [asset, edit] = payload.marketInfoEdit as [
-                    string,
-                    editMarketInfo,
-                ];
+                const [asset, edit] = payload.marketInfoEdit;
                 setIsOffline(false);
                 setMarkets((prev) =>
                     prev.map((m) => {
                         if (m.asset !== asset) return m;
-
-                        if ("lev" in edit) {
-                            return { ...m, lev: edit.lev };
-                        }
-
-                        if ("price" in edit) {
-                            return { ...m, price: edit.price };
-                        }
-
-                        if ("openPosition" in edit) {
+                        if ("lev" in edit) return { ...m, lev: edit.lev };
+                        if ("price" in edit) return { ...m, price: edit.price };
+                        if ("openPosition" in edit)
                             return { ...m, position: edit.openPosition };
-                        }
-
-                        if ("trade" in edit) {
-                            const trades = [...(m.trades ?? []), edit.trade];
+                        if ("trade" in edit)
                             return {
                                 ...m,
-                                trades,
+                                trades: [...(m.trades ?? []), edit.trade],
                                 pnl: (m.pnl ?? 0) + edit.trade.pnl,
                             };
-                        }
-
                         return m;
                     })
                 );
@@ -266,8 +233,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             }
 
             if ("updateMarketMargin" in payload) {
-                const [asset, margin] =
-                    payload.updateMarketMargin as assetMargin;
+                const [asset, margin] = payload.updateMarketMargin;
                 setMarkets((prev) =>
                     prev.map((m) => (m.asset === asset ? { ...m, margin } : m))
                 );
@@ -290,7 +256,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             }
 
             if ("loadSession" in payload) {
-                console.log(payload);
                 const session = payload.loadSession;
                 if (isAssetMetaArray(session)) {
                     setUniverse(session);
@@ -305,41 +270,38 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                     hasLocalMarketsRef.current = deduped.length > 0;
                     return deduped;
                 });
-                return;
             }
         },
-        [setErrorWithTimeout, setIsOffline]
+        [setErrorWithTimeout]
     );
 
-    /** ------------ socket lifecycle (runs once) ------------ **/
+    /** ---------- WS lifecycle ---------- **/
     useEffect(() => {
         let retry = 0;
         activeRef.current = true;
 
         const connect = () => {
             if (!activeRef.current) return;
-            console.log("WS connect");
 
             const ws = new WebSocket(WS_ENDPOINT);
             wsRef.current = ws;
 
-            const onOpen = () => {
+            ws.addEventListener("open", () => {
                 retry = 0;
-                if (universe.length === 0) {
+                if (universeRef.current.length === 0) {
                     sendCommand({ getSession: null }).catch(console.error);
                 }
-            };
-            const onClose = () => {
+            });
+
+            ws.addEventListener("message", handleMessage);
+            ws.addEventListener("close", () => {
                 if (!activeRef.current) return;
                 const delay = Math.min(1000 * 2 ** retry, 15000);
                 retry++;
                 reconnectRef.current = window.setTimeout(connect, delay);
-            };
+            });
 
-            ws.addEventListener("open", onOpen);
-            ws.addEventListener("message", handleMessage);
             ws.addEventListener("error", console.error);
-            ws.addEventListener("close", onClose);
         };
 
         connect();
@@ -347,17 +309,12 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         return () => {
             activeRef.current = false;
             if (reconnectRef.current) clearTimeout(reconnectRef.current);
-            const ws = wsRef.current;
-            if (ws) {
-                ws.removeEventListener("message", handleMessage);
-                ws.close();
-            }
-            wsRef.current = null;
+            wsRef.current?.close();
             if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
         };
     }, [handleMessage, sendCommand]);
 
-    /** ------------ exposed API ------------ **/
+    /** ---------- API ---------- **/
     const cacheMarket = useCallback((market: MarketInfo) => {
         setCachedMarkets((prev) => {
             const cached = market_add_info(market);

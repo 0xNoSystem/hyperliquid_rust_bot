@@ -65,4 +65,5 @@ pub enum UpdateFrontend {
 pub enum BackendStatus {
     Online,
     Offline,
+    Shutdown,
 }

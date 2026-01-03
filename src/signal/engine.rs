@@ -381,10 +381,9 @@ pub enum EngineCommand {
 
 /*
 struct EngineContext{
-    tp_set: bool,
-    sl_set: bool,
     state: EngineState,
     active_window: Option<u64>,
+    pending_orders: [tp, sl]
 }
 
 active_window_duration = timedelta!(Hour1, 4);
@@ -396,11 +395,49 @@ short=None;
 tp=3%;
 sl=1%;
 
-
 enum EngineState{
-    Opening,
-    Open,
-    Closing,
+    Opening(time),
+    Open(OpenPosInfo),
+    Closing(time),
     Idle,
 }
+
+match state{
+    Idle{
+        if self_active_window {
+            open ?
+            Open(Long, Maker(last_price * 0.998), tp: Some(30), sl: None,margin: 90)
+        }
+
+        else check for active_window
+    }
+
+    Opening(time) =>{
+        if time > open thresh{
+            AbortTrade
+        }
+    }
+    Closing(time) => {
+        if time < close_tresh{
+            MarketClose
+        }
+    }
+    Open(OpenPosInfo) => {
+        Close ?
+}
+}
+
+----<----<----<----<-----<-----<------<-------|
+|                                             |
+|                       |-> Abort (if timeout)|
+|---> Idle -> Openining |                         |--->ForceClose(if timeout)
+                        |-> Open ----> Closing ---|
+                                                  |---> TP/SL triggered (Limit order) hit
+
+
+Open(side,Limit?(limit_px), TP, SL, margin) -> [EngineOrder::new_market(calc_size(margin, last_price, lev)), EngineOrder::new_tp(calc_exit_price(side, entry_px, delta), EngineOrder::new_sl(calc_exit_price(side, entry_px, delta))
+
+Open(Side::Long, Taker, 20, 10, 90)
+Reduce(Taker, 0.8);
+Flatten(Taker)
 */

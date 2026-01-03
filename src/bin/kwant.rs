@@ -7,10 +7,11 @@ use actix_cors::Cors;
 use actix_web::{App, Error as ActixError, HttpRequest, HttpResponse, HttpServer, Responder, web};
 use actix_web_actors::ws;
 use dotenv::dotenv;
-use hyperliquid_rust_bot::{BaseUrl, Bot, BotEvent, Error, UpdateFrontend, Wallet};
+use hyperliquid_rust_bot::{BackendStatus, BaseUrl, Bot, BotEvent, Error, UpdateFrontend, Wallet};
 use log::{error, info};
 use std::env;
 use tokio::{
+    signal,
     sync::{
         broadcast::{self, Sender as BroadcastSender},
         mpsc::{UnboundedSender, unbounded_channel},
@@ -33,7 +34,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (bot, cmd_sender) = Bot::new(wallet).await?;
     let (update_tx, mut update_rx) = unbounded_channel::<UpdateFrontend>();
-    tokio::spawn(async move { bot.start(update_tx).await });
+
+    let bot_to_ui_sender = update_tx.clone();
+    tokio::spawn(async move { bot.start(bot_to_ui_sender).await });
 
     let (bcast_tx, _) = broadcast::channel::<UpdateFrontend>(128);
     let bcast_cl = bcast_tx.clone();
@@ -56,7 +59,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cmd_data = web::Data::new(cmd_sender.clone());
     let bcast_data = web::Data::new(bcast_cl.clone());
 
-    HttpServer::new(move || {
+    let bot_shutdown_tx = cmd_sender.clone();
+    let client_shutdown_tx = update_tx.clone();
+    let server = HttpServer::new(move || {
         App::new()
             .app_data(cmd_data.clone())
             .app_data(bcast_data.clone())
@@ -71,9 +76,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/ws", web::get().to(ws_route))
     })
     .workers(2)
+    .disable_signals()
     .bind(("127.0.0.1", 8090))?
-    .run()
-    .await?;
+    .run();
+
+    let shutdown_handle = server.handle();
+    tokio::spawn(async move {
+        signal::ctrl_c().await.ok();
+
+        let _ = client_shutdown_tx.send(UpdateFrontend::Status(BackendStatus::Shutdown));
+        let _ = bot_shutdown_tx.send(BotEvent::CloseAll);
+
+        shutdown_handle.stop(true).await;
+    });
+
+    server.await?;
 
     Ok(())
 }

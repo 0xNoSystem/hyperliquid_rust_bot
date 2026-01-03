@@ -220,7 +220,7 @@ export type Message =
     | { marketInfoEdit: [string, editMarketInfo] }
     | { userError: string }
     | { loadSession: LoadSessionPayload }
-    | { status: "offline" | "online" };
+    | { status: "offline" | "online" | "shutdown" };
 
 export type assetPrice = [string, number];
 export type assetMargin = [string, number];

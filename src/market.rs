@@ -70,7 +70,7 @@ impl Market {
 
         //setup channels
         let (market_tx, market_rv) = channel::<MarketCommand>(7);
-        let (exec_tx, exec_rv) = bounded::<ExecCommand>(2);
+        let (exec_tx, exec_rv) = bounded::<ExecCommand>(3);
         let (engine_tx, engine_rv) = unbounded_channel::<EngineCommand>();
 
         let senders = MarketSenders {
