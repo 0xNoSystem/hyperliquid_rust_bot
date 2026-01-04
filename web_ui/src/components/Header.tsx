@@ -10,7 +10,7 @@ const Header: React.FC = () => {
     const { theme, toggleTheme } = useTheme();
     const isLight = theme === "light";
     return (
-        <header className="border-line-subtle bg-app-surface-1 top-0 z-40 border-b py-2">
+        <header className="border-line-subtle bg-app-surface-1/30 top-0 z-40 border-b py-2">
             <div className="mx-auto flex max-w-[2250px] items-center justify-between px-6 py-1">
                 <Link to="/">
                     <div className="flex items-center gap-3">

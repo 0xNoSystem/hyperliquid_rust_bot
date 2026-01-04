@@ -16,7 +16,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
     const { asset, marginAlloc, tradeParams, config } = market;
 
     return (
-        <div className="border-line-ink-strong bg-surface-input-soft text-ink hover:bg-surface-input-muted my-2 flex h-fit items-center justify-between rounded-lg border-2 px-3 py-1 font-semibold">
+        <div className="border-line-ink-strong bg-surface-input-soft/80 text-ink hover:bg-surface-input-soft my-2 flex h-fit min-w-fit items-center justify-between rounded-lg border-2 px-3 py-1 font-semibold">
             <div className="jusify-center flex h-full items-center space-x-12 text-sm">
                 <span className="bg-ink-50 text-app-text/80 flex h-full w-20 items-center justify-center rounded-lg text-center font-medium">
                     {asset}

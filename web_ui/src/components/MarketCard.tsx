@@ -76,7 +76,7 @@ const MarketCard = ({
     return (
         <motion.div
             whileHover={{ y: -2 }}
-            className="group border-accent-brand/10 bg-app-surface-2 hover:bg-app-surface-hover rounded-md border p-4"
+            className="group border-accent-brand/10 bg-app-surface-1/50 hover:bg-app-surface-1 rounded-md border p-4"
         >
             {/* Head */}
             <div className="mb-3 flex items-start justify-between">

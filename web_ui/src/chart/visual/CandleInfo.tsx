@@ -36,7 +36,7 @@ const CandleInfo: React.FC<CandleInfoProps> = ({ candle }) => {
               : "text-accent-danger-soft";
 
     return (
-        <div className="border-line-weak bg-ink-80 text-app-text/80 shadow-app-ink/40 pointer-events-none absolute top-3 left-4 rounded border px-3 py-2 text-xs shadow-lg">
+        <div className="border-line-weak bg-app-surface-1 text-app-text/80 shadow-app-ink/20 pointer-events-none absolute top-3 left-4 rounded border px-3 py-2 text-xs shadow-sm">
             <div className="flex gap-2">
                 <span className="text-app-text/50">H</span>
                 <span>{formatPrice(candle.high)}</span>

@@ -556,7 +556,6 @@ const Chart: React.FC<ChartProps> = ({ asset, tf, settingInterval }) => {
     // Wheel zoom / horizontal pan
     // ------------------------------------------------------------
     const onWheel = (e: React.WheelEvent) => {
-        e.preventDefault();
         e.stopPropagation();
         if (wheelBusy.current) return;
         wheelBusy.current = true;

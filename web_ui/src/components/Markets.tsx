@@ -86,11 +86,11 @@ export default function MarketsPage() {
     };
 
     return (
-        <div className="bg-app-bg-soft text-app-text relative min-h-screen overflow-hidden pb-100">
+        <div className="bg-app-bg-soft/20 text-app-text relative min-h-screen overflow-hidden pb-100">
             {/* layered background */}
             <div className="max-w-8xl mx-auto mt-20 grid w-[83%] grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[280px,1fr]">
                 {/* Command Dock */}
-                <aside className="border-line-subtle bg-surface-pane shadow-panel h-fit rounded-md border p-4">
+                <aside className="border-line-subtle bg-surface-pane/30 shadow-panel h-fit rounded-md border p-4">
                     <div className="flex items-baseline justify-between">
                         <div>
                             <div className="text-app-text/50 text-[10px] uppercase">
