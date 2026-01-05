@@ -187,7 +187,9 @@ impl Executor {
 
         if let Some(resting) = self.resting_orders.get_mut(&fill.oid) {
             assert_eq!(resting.intent, fill.intent);
-            if let Some(px) = resting.limit_px {
+            if let Some(px) = resting.limit_px
+                && resting.tpsl.is_none()
+            {
                 match resting.side {
                     Side::Long => assert!(fill.price <= px),
                     Side::Short => assert!(fill.price >= px),

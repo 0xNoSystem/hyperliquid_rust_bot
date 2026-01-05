@@ -5,6 +5,7 @@ import {
     indicatorLabels,
     indicatorColors,
     indicatorParamLabels,
+    indicatorKinds,
 } from "../types";
 import type {
     TradeParams,
@@ -17,17 +18,6 @@ import type {
 
 import { strategyOptions } from "../strats.ts";
 import type { Strategy } from "../strats.ts";
-
-const indicatorKinds: IndicatorName[] = [
-    "rsi",
-    "smaOnRsi",
-    "stochRsi",
-    "adx",
-    "atr",
-    "ema",
-    "emaCross",
-    "sma",
-];
 
 type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
 type ConfigDraft = [IndicatorKind, TimeframeKey];
@@ -59,6 +49,9 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     const handleAddIndicator = () => {
         let cfg: IndicatorKind;
         switch (newKind) {
+            case "volMa":
+                cfg = { volMa: newParam };
+                break;
             case "emaCross":
                 cfg = { emaCross: { short: newParam, long: newParam2 } };
                 break;

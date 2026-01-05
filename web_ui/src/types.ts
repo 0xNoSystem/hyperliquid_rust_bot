@@ -1,5 +1,21 @@
 import type { Strategy } from "./strats.ts";
+import { formatVolume } from "./chart/utils.ts";
+
+export const indicatorKinds: IndicatorName[] = [
+    "rsi",
+    "smaOnRsi",
+    "stochRsi",
+    "adx",
+    "atr",
+    "ema",
+    "emaCross",
+    "sma",
+    "histVolatility",
+    "volMa",
+];
+
 export type IndicatorName =
+    | "volMa"
     | "rsi"
     | "smaOnRsi"
     | "stochRsi"
@@ -7,9 +23,12 @@ export type IndicatorName =
     | "atr"
     | "ema"
     | "emaCross"
-    | "sma";
+    | "sma"
+    | "histVolatility";
 
 export type IndicatorKind =
+    | { histVolatility: number }
+    | { volMa: number }
     | { rsi: number }
     | { smaOnRsi: { periods: number; smoothing_length: number } }
     | {
@@ -26,6 +45,8 @@ export type IndicatorKind =
     | { sma: number };
 
 export const indicatorParamLabels: Record<IndicatorName, string[]> = {
+    histVolatility: ["Periods"],
+    volMa: ["Periods"],
     rsi: ["Periods"],
     smaOnRsi: ["Periods", "Smoothing"],
     stochRsi: ["Periods", "kSmoothing", "dSmoothing"],
@@ -64,10 +85,15 @@ export type Value =
     | { smaValue: number }
     | { smaRsiValue: number }
     | { adxValue: number }
-    | { atrValue: number };
+    | { atrValue: number }
+    | { histVolatilityValue: number }
+    | { volumeMaValue: number };
 
 export function get_value(v: Value, decimals: number): string {
     if (!v) return "No value";
+    if ("histVolatilityValue" in v)
+        return `${v.histVolatilityValue.toFixed(2)}`;
+    if ("volumeMaValue" in v) return formatVolume(v.volumeMaValue);
     if ("rsiValue" in v) return `${v.rsiValue.toFixed(2)}`;
     if ("stochRsiValue" in v)
         return `K=${v.stochRsiValue.k.toFixed(2)}, D=${v.stochRsiValue.d.toFixed(2)}`;
@@ -82,6 +108,13 @@ export function get_value(v: Value, decimals: number): string {
 }
 
 export function get_params(k: IndicatorKind): string {
+    if ("histVolatility" in k) {
+        return `Periods: ${k.histVolatility}`;
+    }
+
+    if ("volMa" in k) {
+        return `Periods: ${k.volMa}`;
+    }
     if ("rsi" in k) {
         return `Periods: ${k.rsi}`;
     }
@@ -276,6 +309,8 @@ export interface OpenPositionLocal {
 }
 
 export const indicatorLabels: Record<IndicatorName, string> = {
+    histVolatility: "Historical Volatility",
+    volMa: "Volume MA",
     rsi: "RSI",
     smaOnRsi: "SMA on RSI",
     stochRsi: "Stoch RSI",
@@ -287,6 +322,8 @@ export const indicatorLabels: Record<IndicatorName, string> = {
 };
 
 export const indicatorColors: Record<IndicatorName, string> = {
+    histVolatility: "bg-indicator-hist-vol-bg text-indicator-hist-vol-text",
+    volMa: "bg-indicator-vol-ma-bg text-indicator-vol-ma-text",
     rsi: "bg-indicator-rsi-bg text-indicator-rsi-text",
     smaOnRsi: "bg-indicator-sma-on-rsi-bg text-indicator-sma-on-rsi-text",
     stochRsi: "bg-indicator-stoch-rsi-bg text-indicator-stoch-rsi-text",
@@ -298,6 +335,8 @@ export const indicatorColors: Record<IndicatorName, string> = {
 };
 
 export const indicatorValueColors: Record<IndicatorName, string> = {
+    histVolatility: "text-indicator-hist-vol-text",
+    volMa: "text-indicator-vol-ma-text",
     rsi: "text-indicator-rsi-text",
     smaOnRsi: "text-indicator-sma-on-rsi-text",
     stochRsi: "text-indicator-stoch-rsi-text",

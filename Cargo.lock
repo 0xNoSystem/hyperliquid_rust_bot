@@ -3411,7 +3411,7 @@ dependencies = [
 [[package]]
 name = "kwant"
 version = "0.1.0"
-source = "git+https://github.com/0xNoSystem/Indicators_rs.git?branch=main#87c7896d271892e3be15af36eeb123b851972ca6"
+source = "git+https://github.com/0xNoSystem/Indicators_rs.git?branch=main#d0253f9ccb8e477c8d902e5a8175a7b7ab6d78c0"
 dependencies = [
  "serde",
 ]

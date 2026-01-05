@@ -86,7 +86,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let _ = client_shutdown_tx.send(UpdateFrontend::Status(BackendStatus::Shutdown));
         let _ = bot_shutdown_tx.send(BotEvent::CloseAll);
-
         shutdown_handle.stop(true).await;
     });
 

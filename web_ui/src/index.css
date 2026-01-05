@@ -202,6 +202,12 @@
     --line-panel-strong: 64 64 64;
     --line-panel-soft: 82 82 82;
 
+    --indicator-hist-vol-bg: 38 97 156;
+    --indicator-hist-vol-alpha: 0.3;
+    --indicator-hist-vol-text: 190 215 245;
+    --indicator-vol-ma-bg: 50 61 24;
+    --indicator-vol-ma-alpha: 0.3;
+    --indicator-vol-ma-text: 200 220 90;
     --indicator-rsi-bg: 1 102 48;
     --indicator-rsi-bg-alpha: 0.3;
     --indicator-rsi-text: 185 248 207;

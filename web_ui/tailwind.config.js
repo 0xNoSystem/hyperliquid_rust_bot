@@ -144,6 +144,11 @@ export default {
                 "line-panel": withAlpha("line-panel"),
                 "line-panel-strong": withAlpha("line-panel-strong"),
                 "line-panel-soft": withAlpha("line-panel-soft"),
+
+                "indicator-hist-vol-bg": withAlpha("indicator-hist-vol-bg"),
+                "indicator-hist-vol-text": withAlpha("indicator-hist-vol-text"),
+                "indicator-vol-ma-bg": withAlpha("indicator-vol-ma-bg"),
+                "indicator-vol-ma-text": withAlpha("indicator-vol-ma-text"),
                 "indicator-rsi-bg": withAlpha("indicator-rsi-bg"),
                 "indicator-rsi-text": withAlpha("indicator-rsi-text"),
                 "indicator-sma-on-rsi-bg": withAlpha("indicator-sma-on-rsi-bg"),

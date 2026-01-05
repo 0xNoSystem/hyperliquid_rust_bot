@@ -157,6 +157,10 @@ export default function MarketDetail() {
 
     const buildKind = useCallback((): IndicatorKind => {
         switch (kindKey) {
+            case "histVolatility":
+                return { histVolatility: p1 };
+            case "volMa":
+                return { volMa: p1 };
             case "emaCross":
                 return { emaCross: { short: p1, long: p2 } };
             case "smaOnRsi":

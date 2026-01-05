@@ -5,9 +5,7 @@ use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 
 use arraydeque::{ArrayDeque, behavior::Wrapping};
-use kwant::indicators::{
-    Adx, Atr, Ema, EmaCross, Indicator, Price, Rsi, Sma, SmaRsi, StochasticRsi, Value,
-};
+use kwant::indicators::*;
 
 use crate::{IndicatorData, MAX_HISTORY, Side, TimeFrame};
 use log::warn;
@@ -81,6 +79,8 @@ pub enum IndicatorKind {
         long: u32,
     },
     Sma(u32),
+    VolMa(u32),
+    HistVolatility(u32),
 }
 
 type IndicatorBuffer = Box<ArrayDeque<ArchivedValue, { MAX_HISTORY }, Wrapping>>;
@@ -172,6 +172,8 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
         IndicatorKind::Ema(periods) => Box::new(Ema::new(periods)),
         IndicatorKind::EmaCross { short, long } => Box::new(EmaCross::new(short, long)),
         IndicatorKind::Sma(periods) => Box::new(Sma::new(periods)),
+        IndicatorKind::VolMa(periods) => Box::new(VolumeMa::new(periods)),
+        IndicatorKind::HistVolatility(periods) => Box::new(HistVolatility::new(periods)),
     }
 }
 

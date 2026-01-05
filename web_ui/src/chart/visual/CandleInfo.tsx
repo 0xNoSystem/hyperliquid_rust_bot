@@ -1,5 +1,5 @@
 import React from "react";
-import type { CandleData } from "../utils";
+import { formatVolume, type CandleData } from "../utils";
 
 interface CandleInfoProps {
     candle: CandleData;
@@ -10,20 +10,6 @@ const formatPrice = (n: number) => {
     if (n < 1) return n.toFixed(6);
     return n.toFixed(2);
 };
-
-function formatVolume(n: number): string {
-    const abs = Math.abs(n);
-
-    if (abs >= 1_000_000_000)
-        return (n / 1_000_000_000).toFixed(1).replace(/\.0$/, "") + "B";
-
-    if (abs >= 1_000_000)
-        return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
-
-    if (abs >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
-
-    return String(n);
-}
 
 const CandleInfo: React.FC<CandleInfoProps> = ({ candle }) => {
     const diff = candle.close - candle.open;
