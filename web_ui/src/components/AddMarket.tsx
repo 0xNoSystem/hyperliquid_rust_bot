@@ -49,6 +49,9 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     const handleAddIndicator = () => {
         let cfg: IndicatorKind;
         switch (newKind) {
+            case "histVolatility":
+                cfg = { histVolatility: newParam };
+                break;
             case "volMa":
                 cfg = { volMa: newParam };
                 break;

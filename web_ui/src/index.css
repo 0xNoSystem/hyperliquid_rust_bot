@@ -420,6 +420,13 @@
     --line-panel: 62 52 44;
     --line-panel-alpha: 0.25;
 
+    --indicator-hist-vol-bg: 120 170 215;
+    --indicator-hist-vol-alpha: 0.35;
+    --indicator-hist-vol-text: 30 60 100;
+
+    --indicator-vol-ma-bg: 210 220 150;
+    --indicator-vol-ma-alpha: 0.4;
+    --indicator-vol-ma-text: 70 85 25;
     --indicator-rsi-bg: 21 128 61;
     --indicator-rsi-bg-alpha: 0.18;
     --indicator-rsi-text: 21 128 61;

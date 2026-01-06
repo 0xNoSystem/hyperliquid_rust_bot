@@ -1,6 +1,6 @@
 import React from "react";
 import type { AddMarketInfo, IndicatorName } from "../types";
-import { indicatorColors, indicatorLabels } from "../types";
+import { indicatorColors, get_params, indicatorLabels } from "../types";
 
 interface CachedMarketProps {
     market: AddMarketInfo;
@@ -35,6 +35,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                         return (
                             <div
                                 key={i}
+                                title={get_params(ind)}
                                 className="mb-3 ml-2 flex items-center"
                             >
                                 <span

@@ -13,6 +13,7 @@ import PositionTable from "./Position";
 
 import {
     decompose,
+    get_params,
     indicatorLabels,
     indicatorParamLabels,
     indicatorColors,
@@ -612,14 +613,21 @@ export default function MarketDetail() {
                                     <div className="group border-line-subtle flex flex-col items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px]">
                                         <div
                                             key={`${kindKey}-${fromTimeFrame(timeframe)}-${i}`}
-                                            className={`group border-line-subtle flex items-center gap-4 rounded-lg border px-2.5 py-1 text-[13px] ${indicatorColors[kindKey]}`}
-                                            title={JSON.stringify(kind)}
+                                            className={`group border-line-subtle relative flex items-center gap-4 rounded-lg border px-2.5 py-1 text-[13px] ${indicatorColors[kindKey]}`}
                                         >
+                                            {/* Tooltip */}
+                                            <div
+                                                className={`pointer-events-none absolute -top-1 left-1/2 z-50 hidden -translate-x-1/2 -translate-y-full rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap shadow group-hover:block ${indicatorColors[kindKey]} `}
+                                            >
+                                                {get_params(kind)}
+                                            </div>
+
                                             <span className="font-medium">
                                                 {indicatorLabels[kindKey] ||
                                                     kindKey}{" "}
                                                 — {fromTimeFrame(timeframe)}
                                             </span>
+
                                             <button
                                                 className="hover:bg-glow-10 rounded p-0.5"
                                                 onClick={() =>
@@ -628,7 +636,6 @@ export default function MarketDetail() {
                                                         timeframe,
                                                     ])
                                                 }
-                                                title="Queue remove"
                                             >
                                                 <X className="h-3.5 w-3.5" />
                                             </button>
@@ -811,6 +818,7 @@ export default function MarketDetail() {
                                 </label>
                                 <input
                                     type="number"
+                                    min="2"
                                     className={Input}
                                     value={p1}
                                     onChange={(e) => setP1(+e.target.value)}
@@ -827,6 +835,7 @@ export default function MarketDetail() {
                                     </label>
                                     <input
                                         type="number"
+                                        min="2"
                                         className={Input}
                                         value={p2}
                                         onChange={(e) => setP2(+e.target.value)}
@@ -911,6 +920,7 @@ export default function MarketDetail() {
                                             return (
                                                 <div
                                                     key={idx}
+                                                    title={get_params(kind)}
                                                     className={`border-line-subtle flex items-center gap-2 rounded-md border px-2 py-0.5 text-[11px] ${
                                                         e.edit === "add"
                                                             ? "bg-accent-profit-darker/35"
