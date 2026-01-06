@@ -591,12 +591,12 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                     </h2>
 
                     {/* TF SELECTOR */}
-                    <div className="border-line-ink-muted bg-app-surface-5 flex flex-1 flex-col rounded-b-lg border-2">
+                    <div className="bg-app-surface-5 flex flex-1 flex-col">
                         <div className="bg-ink-70 z-5 grid w-full grid-cols-13 text-center tracking-normal">
                             {Object.entries(TIMEFRAME_CAMELCASE).map(
                                 ([short, tf]) => (
                                     <div
-                                        className="border-line-ink text-app-text/70 hover:bg-ink-hover cursor-pointer border-b-2 py-2"
+                                        className="text-app-text/70 hover:bg-ink-hover cursor-pointer py-2"
                                         key={short}
                                         onClick={() => {
                                             setTimeframe(tf);

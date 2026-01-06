@@ -24,6 +24,7 @@ alloy = { version = "1.0", default-features = false, features = [
   "signer-local",
 ] }
 reqwest = "0.12.24"
+tokio-util = "0.7.18"
 
 [profile.release]
 panic = "abort"

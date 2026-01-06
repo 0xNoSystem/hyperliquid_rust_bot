@@ -14,7 +14,7 @@ use tokio::{
     signal,
     sync::{
         broadcast::{self, Sender as BroadcastSender},
-        mpsc::{UnboundedSender, unbounded_channel},
+        mpsc::{Sender, channel},
     },
     time::Duration,
 };
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wallet = load_wallet(url).await?;
 
     let (bot, cmd_sender) = Bot::new(wallet).await?;
-    let (update_tx, mut update_rx) = unbounded_channel::<UpdateFrontend>();
+    let (update_tx, mut update_rx) = channel::<UpdateFrontend>(256);
 
     let bot_to_ui_sender = update_tx.clone();
     tokio::spawn(async move { bot.start(bot_to_ui_sender).await });
@@ -84,9 +84,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         signal::ctrl_c().await.ok();
 
-        let _ = client_shutdown_tx.send(UpdateFrontend::Status(BackendStatus::Shutdown));
-        let _ = bot_shutdown_tx.send(BotEvent::CloseAll);
-        shutdown_handle.stop(true).await;
+        let _ = client_shutdown_tx
+            .send(UpdateFrontend::Status(BackendStatus::Shutdown))
+            .await;
+        let _ = bot_shutdown_tx.send(BotEvent::Kill).await;
+        shutdown_handle.stop(false).await;
     });
 
     server.await?;
@@ -94,19 +96,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn execute(raw: web::Bytes, sender: web::Data<UnboundedSender<BotEvent>>) -> impl Responder {
+async fn execute(raw: web::Bytes, sender: web::Data<Sender<BotEvent>>) -> impl Responder {
     //log
     let body_str = String::from_utf8_lossy(&raw);
     println!("Incoming raw body: {}", body_str);
 
     match serde_json::from_slice::<BotEvent>(&raw) {
-        Ok(event) => {
-            if let Err(err) = sender.send(event) {
-                error!("failed to send command: {}", err);
-                return HttpResponse::InternalServerError().finish();
+        Ok(event) => match sender.try_send(event) {
+            Ok(()) => HttpResponse::Ok().finish(),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                HttpResponse::TooManyRequests().finish()
             }
-            HttpResponse::Ok().finish()
-        }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                HttpResponse::ServiceUnavailable().finish()
+            }
+        },
         Err(err) => {
             error!("Failed to deserialize BotEvent: {}", err);
             HttpResponse::BadRequest().body(format!("Invalid BotEvent: {}", err))

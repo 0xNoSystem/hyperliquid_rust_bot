@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use tokio::time::{Duration, interval};
 
 use crate::helper::*;
-use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
+};
 
 use crate::helper::address;
 use crate::margin::{AssetMargin, MarginBook};
@@ -20,6 +22,7 @@ use tokio::sync::Mutex;
 use rustc_hash::FxHasher;
 use serde::Deserialize;
 use std::hash::BuildHasherDefault;
+use tokio_util::sync::CancellationToken;
 
 pub struct Bot {
     info_client: InfoClient,
@@ -29,22 +32,22 @@ pub struct Bot {
     session: Arc<Mutex<HashMap<String, MarketInfo, BuildHasherDefault<FxHasher>>>>,
     #[allow(unused)]
     fees: (f64, f64),
-    _bot_tx: UnboundedSender<BotEvent>,
-    bot_rv: UnboundedReceiver<BotEvent>,
+    _bot_tx: Sender<BotEvent>,
+    bot_rv: Receiver<BotEvent>,
     update_rv: Option<UnboundedReceiver<MarketUpdate>>,
     update_tx: UnboundedSender<MarketUpdate>,
-    app_tx: Option<UnboundedSender<UpdateFrontend>>,
+    app_tx: Option<Sender<UpdateFrontend>>,
     chain_open_positions: Vec<AssetPosition>,
     universe: Vec<AssetMeta>,
 }
 
 impl Bot {
-    pub async fn new(wallet: Wallet) -> Result<(Self, UnboundedSender<BotEvent>), Error> {
+    pub async fn new(wallet: Wallet) -> Result<(Self, Sender<BotEvent>), Error> {
         let info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
         let fees = wallet.get_user_fees().await?;
         let universe = get_all_assets(&info_client).await?;
 
-        let (bot_tx, bot_rv) = unbounded_channel::<BotEvent>();
+        let (bot_tx, bot_rv) = channel::<BotEvent>(64);
         let (update_tx, update_rv) = unbounded_channel::<MarketUpdate>();
 
         Ok((
@@ -83,7 +86,7 @@ impl Bot {
 
         if self.markets.contains_key(&asset) {
             if let Some(tx) = &self.app_tx {
-                let _ = tx.send(UpdateFrontend::UserError(format!(
+                let _ = tx.try_send(UpdateFrontend::UserError(format!(
                     "{} market is already added.",
                     &asset
                 )));
@@ -99,7 +102,7 @@ impl Bot {
             .any(|p| p.position.coin == asset)
         {
             if let Some(tx) = &self.app_tx {
-                let _ = tx.send(UpdateFrontend::UserError(format!(
+                let _ = tx.try_send(UpdateFrontend::UserError(format!(
                     "Cannot add a market with open on-chain position({})",
                     &asset
                 )));
@@ -111,7 +114,9 @@ impl Bot {
         drop(book);
 
         if let Some(tx) = &self.app_tx {
-            let _ = tx.send(UpdateFrontend::PreconfirmMarket(asset.clone()));
+            let _ = tx
+                .send(UpdateFrontend::PreconfirmMarket(asset.clone()))
+                .await;
         }
 
         let meta = if let Some(cached) = self.universe.iter().find(|a| a.name == asset_str).cloned()
@@ -142,12 +147,16 @@ impl Bot {
         tokio::spawn(async move {
             if let Err(e) = market.start().await {
                 if let Some(tx) = app_tx {
-                    let _ = tx.send(UpdateFrontend::UserError(format!(
-                        "Market {} exited with error: {:?}",
-                        &asset, e
-                    )));
+                    let _ = tx
+                        .send(UpdateFrontend::UserError(format!(
+                            "Market {} exited with error: {:?}",
+                            &asset, e
+                        )))
+                        .await;
                 }
-                let _ = remove_market_tx.send(BotEvent::RemoveMarket(asset.clone()));
+                let _ = remove_market_tx
+                    .send(BotEvent::RemoveMarket(asset.clone()))
+                    .await;
             }
         });
 
@@ -229,11 +238,9 @@ impl Bot {
     pub async fn send_cmd(&self, asset: String, cmd: MarketCommand) {
         if let Some(tx) = self.markets.get(&asset) {
             let tx = tx.clone();
-            tokio::spawn(async move {
-                if let Err(e) = tx.send(cmd).await {
-                    log::warn!("Failed to send Market command: {:?}", e);
-                }
-            });
+            if let Err(e) = tx.send(cmd).await {
+                log::warn!("Failed to send Market command: {:?}", e);
+            }
         }
     }
 
@@ -259,7 +266,7 @@ impl Bot {
         Ok((session, universe))
     }
 
-    pub async fn start(mut self, app_tx: UnboundedSender<UpdateFrontend>) -> Result<(), Error> {
+    pub async fn start(mut self, app_tx: Sender<UpdateFrontend>) -> Result<(), Error> {
         use BotEvent::*;
         use MarketUpdate as M;
         use UpdateFrontend::*;
@@ -274,35 +281,38 @@ impl Bot {
         let margin_sync = margin_arc.clone();
         let margin_user_edit = margin_arc.clone();
         let margin_market_edit = margin_arc.clone();
+        let cancel_token = CancellationToken::new();
 
         let app_tx_margin = app_tx.clone();
         let err_tx = app_tx.clone();
 
         //keep marginbook in sync for DEX <=> BOT overlap
-        tokio::spawn(async move {
+        let margin_token = cancel_token.clone();
+        let margin_book_handle = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(2));
             loop {
-                ticker.tick().await;
-                let result = {
-                    let mut book = margin_sync.lock().await;
-                    book.sync().await
-                };
+                tokio::select! {
+                _ = margin_token.cancelled() =>{
+                    break;
+                }
 
-                match result {
-                    Ok(_) => {
-                        let total = {
-                            let book = margin_sync.lock().await;
-                            book.total_on_chain - book.used()
-                        };
-                        let _ = app_tx_margin.send(UpdateTotalMargin(total));
+                _ = ticker.tick() => {
+                    let mut book = margin_sync.lock().await;
+                    let result = book.sync().await;
+
+                    match result {
+                        Ok(_) => {
+                            let total = book.total_on_chain - book.used();
+                            let _ = app_tx_margin.try_send(UpdateTotalMargin(total));
+                        }
+                        Err(e) => {
+                            warn!("Failed to fetch User Margin");
+                            let _ = app_tx_margin.try_send(UserError(format!(
+                                "Failed to fetch user margin, check your connection: {e}"
+                            )));
+                        }
                     }
-                    Err(e) => {
-                        warn!("Failed to fetch User Margin");
-                        let _ = app_tx_margin.send(UserError(format!(
-                            "Failed to fetch user margin, check your connection: {e}"
-                        )));
-                        continue;
-                    }
+                }
                 }
             }
         });
@@ -315,7 +325,7 @@ impl Bot {
                     M::InitMarket(info) => {
                         let mut session_guard = session_adder.lock().await;
                         session_guard.insert(info.asset.clone(), info.clone());
-                        let _ = app_tx.send(ConfirmMarket(info));
+                        let _ = app_tx.try_send(ConfirmMarket(info));
                     }
                     M::MarginUpdate(asset_margin) => {
                         let result = {
@@ -325,15 +335,15 @@ impl Bot {
 
                         match result {
                             Ok(_) => {
-                                let _ = app_tx.send(UpdateMarketMargin(asset_margin));
+                                let _ = app_tx.try_send(UpdateMarketMargin(asset_margin));
                             }
                             Err(e) => {
-                                let _ = app_tx.send(UserError(e.to_string()));
+                                let _ = app_tx.try_send(UserError(e.to_string()));
                             }
                         }
                     }
                     M::RelayToFrontend(cmd) => {
-                        let _ = app_tx.send(cmd);
+                        let _ = app_tx.try_send(cmd);
                     }
                 }
             }
@@ -410,7 +420,7 @@ impl Bot {
                     }
                 }else if let Message::NoData = msg{
                     info!("Received Message::NoData from WS, check connection");
-                        let _ = err_tx.send(Status(BackendStatus::Offline));
+                        let _ = err_tx.send(Status(BackendStatus::Offline)).await;
                 }
             },
 
@@ -420,7 +430,7 @@ impl Bot {
                         match event{
                             AddMarket(add_market_info) => {
                                 if let Err(e) = self.add_market(add_market_info, &margin_user_edit).await{
-                                    let _ = err_tx.send(UserError(e.to_string()));
+                                    let _ = err_tx.try_send(UserError(e.to_string()));
                             }
                         },
                             ResumeMarket(asset) => {
@@ -451,7 +461,7 @@ impl Bot {
                                 },
 
                                 Err(e) => {
-                                    let _ = err_tx.send(UserError(e.to_string()));
+                                    let _ = err_tx.try_send(UserError(e.to_string()));
                                 },
                                 }
 
@@ -467,10 +477,19 @@ impl Bot {
                             GetSession =>{
                                 let session = self.get_session().await;
                                 if let Ok(session) = session{
-                                    let _ = err_tx.send(LoadSession(session));
+                                    let _ = err_tx.try_send(LoadSession(session));
                                 }else{
-                                    let _ = err_tx.send(UserError("Failed to load session from server.".to_string()));
+                                    let _ = err_tx.try_send(UserError("Failed to load session from server.".to_string()));
                                 }
+                            },
+                            Kill => {
+                                self.close_all().await;
+                                let mut book = margin_user_edit.lock().await;
+                                book.reset();
+                                let _ = self.info_client.shutdown_ws().await;
+                                cancel_token.cancel();
+                                let _ = margin_book_handle.await;
+                                return Ok(());
                             },
                         }
                 },
@@ -500,6 +519,7 @@ pub enum BotEvent {
     PauseAll,
     CloseAll,
     GetSession,
+    Kill,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -18,7 +18,7 @@
         "@visx/shape": "^3.12.0",
         "@visx/xychart": "^3.12.0",
         "framer-motion": "^12.23.26",
-        "kwant": "^1.0.3",
+        "kwant": "^1.0.5",
         "lucide-react": "^0.539.0",
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
