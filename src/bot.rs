@@ -147,9 +147,10 @@ impl Bot {
         tokio::spawn(async move {
             if let Err(e) = market.start().await {
                 if let Some(tx) = app_tx {
+                    let _ = tx.send(UpdateFrontend::CancelMarket(asset.clone())).await;
                     let _ = tx
                         .send(UpdateFrontend::UserError(format!(
-                            "Market {} exited with error: {:?}",
+                            "Market {} exited with error:\n {:?}",
                             &asset, e
                         )))
                         .await;
@@ -429,8 +430,10 @@ impl Bot {
 
                         match event{
                             AddMarket(add_market_info) => {
+                                let asset = add_market_info.asset.clone();
                                 if let Err(e) = self.add_market(add_market_info, &margin_user_edit).await{
-                                    let _ = err_tx.try_send(UserError(e.to_string()));
+                                    let _ = err_tx.try_send(UserError(format!("FAILED TO ADD MARKET: {}", e)));
+                                    let _ = err_tx.send(CancelMarket(asset)).await;
                             }
                         },
                             ResumeMarket(asset) => {

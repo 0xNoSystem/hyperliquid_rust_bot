@@ -245,6 +245,7 @@ export type LoadSessionPayload = [MarketInfo[], assetMeta[]] | assetMeta[];
 export type Message =
     | { preconfirmMarket: string }
     | { confirmMarket: MarketInfo }
+    | { cancelMarket: string }
     | { updatePrice: assetPrice }
     | { newTradeInfo: MarketTradeInfo }
     | { updateTotalMargin: number }

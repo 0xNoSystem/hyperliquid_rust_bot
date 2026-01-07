@@ -48,6 +48,7 @@ pub enum EditMarketInfo {
 pub enum UpdateFrontend {
     PreconfirmMarket(String),
     ConfirmMarket(MarketInfo),
+    CancelMarket(String),
     UpdateTotalMargin(f64),
     UpdateMarketMargin(AssetMargin),
     UpdateIndicatorValues {

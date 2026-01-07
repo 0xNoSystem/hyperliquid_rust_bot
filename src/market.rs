@@ -53,7 +53,6 @@ impl Market {
         trade_params: TradeParams,
         config: Option<Vec<IndexId>>,
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
-        info!("{:?}", &asset);
         let info_client = InfoClient::new(None, Some(wallet.url)).await?;
         let exchange_client =
             ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
@@ -120,14 +119,13 @@ impl Market {
     async fn init(&mut self) -> Result<(), Error> {
         //check if lev > max_lev
         let lev = self.trade_params.lev.min(self.asset.max_leverage);
-        let upd = self
+        let lev_upd = self
             .trade_params
             .update_lev(lev, &self.exchange_client, self.asset.name.as_str(), true)
-            .await;
-        if let Ok(lev) = upd {
-            let engine_tx = self.senders.engine_tx.clone();
-            let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
-        };
+            .await?;
+
+        let engine_tx = self.senders.engine_tx.clone();
+        let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev_upd)));
 
         self.load_engine(5000).await?;
         println!(

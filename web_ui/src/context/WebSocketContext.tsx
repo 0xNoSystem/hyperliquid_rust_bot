@@ -200,6 +200,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 return;
             }
 
+            if ("cancelMarket" in payload) {
+                const asset = payload.cancelMarket;
+                setMarkets((p) => p.filter((m) => m.asset !== asset));
+            }
+
             if ("marketInfoEdit" in payload) {
                 const [asset, edit] = payload.marketInfoEdit;
                 setIsOffline(false);

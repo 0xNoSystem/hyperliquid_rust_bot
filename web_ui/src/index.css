@@ -117,9 +117,9 @@
     --accent-info-link: 83 234 253;
     --accent-highlight: 240 177 0;
 
-    --gradient-start: 0 211 242;
-    --gradient-mid: 237 106 255;
-    --gradient-end: 0 212 146;
+    --gradient-start: 200 211 20;
+    --gradient-mid: 250 106 20;
+    --gradient-end: 200 211 20;
 
     --action-add-bg: 0 184 219;
     --action-add-bg-alpha: 0.1;

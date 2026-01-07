@@ -71,7 +71,6 @@ impl Strat for RsiEmaScalp {
         };
         let order = (|| {
             if let Some(open) = open_pos {
-                println!("HEREEEE");
                 if !self.limit_close_set
                     && (rsi_15m_value >= 50.0
                         || ((tick_time - open.open_time > timedelta!(Min15, 1))
