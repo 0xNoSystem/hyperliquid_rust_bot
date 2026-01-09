@@ -65,7 +65,7 @@ pub enum TimeFrame {
 }
 
 impl TimeFrame {
-    pub fn to_secs(&self) -> u64 {
+    pub const fn to_secs(&self) -> u64 {
         match *self {
             TimeFrame::Min1 => 60,
             TimeFrame::Min3 => 3 * 60,
@@ -83,7 +83,7 @@ impl TimeFrame {
         }
     }
 
-    pub fn to_millis(&self) -> u64 {
+    pub const fn to_millis(&self) -> u64 {
         self.to_secs() * 1000
     }
 }

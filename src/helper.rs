@@ -194,16 +194,30 @@ pub fn round_ndp(value: f64, dp: u32) -> f64 {
     }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
+pub struct TimeDelta(u64);
+
 #[macro_export]
 macro_rules! timedelta {
     ($tf:path, $count:expr) => {
-        $crate::helper::_time_delta($tf, $count)
+        $crate::helper::TimeDelta::from_tf($tf, $count)
     };
 }
 
-pub fn _time_delta(tf: TimeFrame, count: u64) -> u64 {
-    tf.to_millis()
-        .checked_mul(count)
-        .expect("time delta overflow")
-        * count
+impl TimeDelta {
+    pub(crate) const fn from_tf(tf: TimeFrame, count: u64) -> TimeDelta {
+        let ms = tf
+            .to_millis()
+            .checked_mul(count)
+            .expect("time delta overflow");
+        TimeDelta(ms)
+    }
+
+    pub fn as_ms(&self) -> u64 {
+        self.0
+    }
+
+    pub fn as_secs(&self) -> u64 {
+        self.0 / 1000
+    }
 }

@@ -1,5 +1,6 @@
+#![allow(unused_variables)]
 use rustc_hash::FxHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::BuildHasherDefault;
 
 use log::info;
@@ -9,8 +10,9 @@ use kwant::indicators::Price;
 use crate::strategy::{Strat, StratContext};
 use crate::trade_setup::{TimeFrame, TradeParams};
 use crate::{
-    EngineOrder, ExecCommand, IndicatorData, MIN_ORDER_VALUE, MarketCommand, PositionOp, Side,
-    Strategy, get_time_now,
+    BusyType, EngineOrder, ExecCommand, ExecControl, IndicatorData, Intent, LiqSide,
+    LiveTimeoutInfo, MIN_ORDER_VALUE, MarketCommand, OnTimeout, PositionOp, Side, Strategy,
+    TimeoutInfo, TriggerKind,
 };
 
 use flume::{Sender, bounded};
@@ -28,9 +30,10 @@ pub struct SignalEngine {
     trackers: TrackersMap,
     strategy: Box<dyn Strat>,
     exec_params: ExecParams,
+    state: EngineState,
+    order_queue: VecDeque<EngineOrder>,
 }
 
-unsafe impl Send for SignalEngine {}
 impl SignalEngine {
     pub async fn new(
         config: Option<Vec<IndexId>>,
@@ -68,6 +71,8 @@ impl SignalEngine {
             trackers,
             strategy,
             exec_params,
+            state: EngineState::Idle,
+            order_queue: VecDeque::with_capacity(3),
         }
     }
 
@@ -148,16 +153,22 @@ impl SignalEngine {
         }
     }
 
-    fn get_signal(&mut self, price: f64, values: ValuesMap) -> Option<EngineOrder> {
+    fn strat_tick(&mut self, price: Price, values: ValuesMap) -> Option<Intent> {
+        use EngineState as E;
         let ctx = StratContext {
             free_margin: self.exec_params.free_margin(),
             lev: self.exec_params.lev,
             last_price: price,
             indicators: &values,
-            tick_time: get_time_now(),
-            open_pos: self.exec_params.open_pos.as_ref(),
         };
-        self.strategy.on_tick(ctx)
+
+        match self.state {
+            E::Idle => self.strategy.on_idle(ctx, None),
+            E::Armed(expiry) => self.strategy.on_idle(ctx, Some(expiry)),
+            E::Opening(timeout) => self.strategy.on_busy(ctx, BusyType::Opening(timeout)),
+            E::Closing(timeout) => self.strategy.on_busy(ctx, BusyType::Closing(timeout)),
+            E::Open(open_pos) => self.strategy.on_open(ctx, &open_pos),
+        }
     }
 
     fn digest(&mut self, price: Price) {
@@ -174,6 +185,152 @@ impl SignalEngine {
         }
     }
 
+    fn translate_intent(
+        &mut self,
+        intent: &Intent,
+        last_price: &Price,
+    ) -> Option<VecDeque<EngineOrder>> {
+        use Intent as I;
+
+        let mut new_engine_orders: VecDeque<EngineOrder> = VecDeque::with_capacity(3);
+
+        match intent {
+            I::Open(order) => match &order.liq_side {
+                LiqSide::Taker => {
+                    let size = order.size.get_size(
+                        self.exec_params.lev as f64,
+                        self.exec_params.free_margin(),
+                        last_price.close,
+                    );
+                    new_engine_orders.push_back(EngineOrder::new_market_open(order.side, size));
+                    if let Some(tp_delta) = order.tp {
+                        let trigger_px = calc_trigger_px(
+                            order.side,
+                            TriggerKind::Tp,
+                            tp_delta,
+                            last_price.close,
+                            self.exec_params.lev,
+                        );
+                        new_engine_orders.push_back(EngineOrder::new_tp(size, trigger_px));
+                    }
+                    if let Some(sl_delta) = order.sl {
+                        let trigger_px = calc_trigger_px(
+                            order.side,
+                            TriggerKind::Sl,
+                            sl_delta,
+                            last_price.close,
+                            self.exec_params.lev,
+                        );
+                        new_engine_orders.push_back(EngineOrder::new_sl(size, trigger_px));
+                    }
+                }
+                LiqSide::Maker(limit) => {
+                    let size = order.size.get_size(
+                        self.exec_params.lev as f64,
+                        self.exec_params.free_margin(),
+                        limit.limit_px,
+                    );
+                    new_engine_orders.push_back(EngineOrder::new_limit_open(
+                        order.side,
+                        size,
+                        limit.limit_px,
+                        None,
+                    ));
+
+                    if let Some(tp_delta) = order.tp {
+                        let trigger_px = calc_trigger_px(
+                            order.side,
+                            TriggerKind::Tp,
+                            tp_delta,
+                            limit.limit_px,
+                            self.exec_params.lev,
+                        );
+                        new_engine_orders.push_back(EngineOrder::new_tp(size, trigger_px));
+                    }
+                    if let Some(sl_delta) = order.sl {
+                        let trigger_px = calc_trigger_px(
+                            order.side,
+                            TriggerKind::Sl,
+                            sl_delta,
+                            limit.limit_px,
+                            self.exec_params.lev,
+                        );
+                        new_engine_orders.push_back(EngineOrder::new_sl(size, trigger_px));
+                    }
+                }
+            },
+
+            I::Reduce(reduce_order) => match &reduce_order.liq_side {
+                LiqSide::Taker => {
+                    let size = reduce_order.size.get_size(
+                        self.exec_params.lev as f64,
+                        self.exec_params.free_margin(),
+                        last_price.close,
+                    );
+                    new_engine_orders.push_back(EngineOrder::market_close(size));
+                }
+                LiqSide::Maker(limit) => {
+                    let size = reduce_order.size.get_size(
+                        self.exec_params.lev as f64,
+                        self.exec_params.free_margin(),
+                        limit.limit_px,
+                    );
+                    new_engine_orders.push_back(EngineOrder::new_limit_close(
+                        size,
+                        limit.limit_px,
+                        None,
+                    ));
+                }
+            },
+
+            I::Flatten(liq_side) => {
+                let size = self.exec_params.open_pos?.size;
+                match liq_side {
+                    LiqSide::Taker => {
+                        new_engine_orders.push_back(EngineOrder::market_close(size));
+                    }
+
+                    LiqSide::Maker(limit) => {
+                        new_engine_orders.push_back(EngineOrder::new_limit_close(
+                            size,
+                            limit.limit_px,
+                            None,
+                        ));
+                    }
+                }
+            }
+
+            I::Arm(duration) => {
+                if self.state == EngineState::Idle {
+                    self.state = EngineState::Armed(last_price.open_time + duration.as_ms());
+                } else {
+                    log::warn!(
+                        "Intent::Arm failed, Engine is not in Idle state: {:?}",
+                        self.state
+                    );
+                }
+            }
+
+            I::Disarm => {
+                if let EngineState::Armed(_exp) = self.state {
+                    self.state = EngineState::Idle;
+                } else {
+                    log::warn!(
+                        "Intent::Disarm failed, Engine is not Armed: {:?}",
+                        self.state
+                    );
+                }
+            }
+
+            _ => {
+                return None;
+            }
+        }
+        if !new_engine_orders.is_empty() {
+            return Some(new_engine_orders);
+        }
+        None
+    }
     fn validate_trade(&self, trade: &EngineOrder, last_price: f64) -> Result<(), String> {
         let side = match (trade.action, self.exec_params.open_pos) {
             (PositionOp::Close, None) => {
@@ -223,7 +380,7 @@ impl SignalEngine {
                     //MARKET CLOSE DOESN'T HAVE TO BE LESS THAN MIN_ORDER_VALUE IFF we're closing
                     //non-partial closes only
                     if let Some(pos) = self.exec_params.open_pos {
-                        if trade.size < pos.size && trade.size * last_price > MIN_ORDER_VALUE {
+                        if trade.size < pos.size && trade.size * last_price < MIN_ORDER_VALUE {
                             return Err(format!(
                                 "INVALID ORDER: notional value is below the minimum order value of {}$",
                                 MIN_ORDER_VALUE
@@ -237,6 +394,120 @@ impl SignalEngine {
         }
 
         Ok(())
+    }
+
+    pub fn force_as_taker_order(&self, intent: &Intent, last_price: &Price) -> Option<EngineOrder> {
+        match intent {
+            Intent::Open(order) => {
+                let size = order.size.get_size(
+                    self.exec_params.lev as f64,
+                    self.exec_params.free_margin(),
+                    last_price.close,
+                );
+                Some(EngineOrder::new_market_open(order.side, size))
+            }
+
+            Intent::Reduce(order) => {
+                let size = order.size.get_size(
+                    self.exec_params.lev as f64,
+                    self.exec_params.free_margin(),
+                    last_price.close,
+                );
+                Some(EngineOrder::market_close(size))
+            }
+
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn force_close_exec(&self) {
+        let _ = self
+            .trade_tx
+            .send(ExecCommand::Control(ExecControl::ForceClose));
+    }
+
+    pub fn refresh_state(&mut self, price: &Price) {
+        match self.state {
+            //check for timeouts
+            EngineState::Opening(timeout) => {
+                if let Some(open_pos) = self.exec_params.open_pos {
+                    self.state = EngineState::Open(open_pos);
+                    return;
+                }
+                if timeout.expire_at <= price.open_time {
+                    match timeout.timeout_info.action {
+                        OnTimeout::Force => {
+                            //translate to market order
+                            if let Intent::Flatten(_) = timeout.intent {
+                                self.force_close_exec();
+                            } else if let Some(order) =
+                                self.force_as_taker_order(&timeout.intent, price)
+                            {
+                                let _ = self.trade_tx.send(ExecCommand::Order(order));
+                            }
+                        }
+                        OnTimeout::Cancel => {
+                            self.force_close_exec();
+                        }
+                    }
+                    self.state = EngineState::Idle;
+                    self.order_queue.clear();
+                }
+            }
+
+            EngineState::Closing(timeout) => {
+                if self.exec_params.open_pos.is_none() {
+                    self.state = EngineState::Idle;
+                    return;
+                }
+                if timeout.expire_at <= price.open_time {
+                    match timeout.timeout_info.action {
+                        OnTimeout::Force => {
+                            //translate to market order
+                            if let Intent::Flatten(_) = timeout.intent {
+                                self.force_close_exec();
+                            } else if let Some(order) =
+                                self.force_as_taker_order(&timeout.intent, price)
+                            {
+                                let _ = self.trade_tx.send(ExecCommand::Order(order));
+                            }
+                        }
+                        OnTimeout::Cancel => {
+                            self.force_close_exec();
+                        }
+                    }
+                    self.state = EngineState::Idle;
+                    self.order_queue.clear();
+                }
+            }
+
+            EngineState::Armed(expire_at) => {
+                if price.open_time >= expire_at {
+                    self.state = EngineState::Idle;
+                }
+            }
+
+            EngineState::Idle => {
+                if let Some(open_pos) = self.exec_params.open_pos {
+                    self.state = EngineState::Open(open_pos);
+                    if let Some(order) = self.order_queue.pop_front() {
+                        let _ = self.trade_tx.send(ExecCommand::Order(order));
+                    }
+                }
+            }
+
+            EngineState::Open(_) => {
+                if let Some(open_pos) = self.exec_params.open_pos {
+                    self.state = EngineState::Open(open_pos);
+                    if let Some(order) = self.order_queue.pop_front() {
+                        let _ = self.trade_tx.send(ExecCommand::Order(order));
+                    }
+                } else {
+                    self.state = EngineState::Idle;
+                }
+            }
+        }
     }
 }
 
@@ -258,12 +529,72 @@ impl SignalEngine {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
 
-                        if let Some(trade) = self.get_signal(price.close, values) {
-                            if let Err(e) = self.validate_trade(&trade, price.close) {
-                                eprintln!("\x1b[31m[{}]\x1b[0m", e);
-                            } else {
-                                //send to executor
-                                let _ = self.trade_tx.try_send(ExecCommand::Order(trade));
+                        self.refresh_state(&price);
+
+                        if let Some(intent) = self.strat_tick(price, values) {
+                            let busy = matches!(
+                                self.state,
+                                EngineState::Opening(_) | EngineState::Closing(_)
+                            );
+
+                            if busy && intent != Intent::Abort {
+                                log::warn!("Intent ignored while busy: {:?}", intent);
+                                continue;
+                            }
+
+                            if intent == Intent::Abort {
+                                self.force_close_exec();
+                                self.order_queue.clear();
+                                self.state = EngineState::Idle;
+                            } else if let Some(mut new_orders) =
+                                self.translate_intent(&intent, &price)
+                            {
+                                let mut reject = false;
+                                for order in new_orders.iter() {
+                                    if let Err(e) = self.validate_trade(order, price.close) {
+                                        reject = true;
+                                        log::warn!("Trade rejected: {}", e);
+                                    }
+                                }
+
+                                if !reject {
+                                    let order = new_orders.pop_front().unwrap();
+                                    let _ = self.trade_tx.send(ExecCommand::Order(order));
+
+                                    if let Some(ttl) = intent.get_ttl() {
+                                        let timeout = LiveTimeoutInfo {
+                                            expire_at: price.open_time + ttl.duration.as_ms(),
+                                            timeout_info: ttl,
+                                            intent,
+                                        };
+                                        match intent {
+                                            Intent::Reduce(_) | Intent::Flatten(_) => {
+                                                self.state = EngineState::Closing(timeout)
+                                            }
+                                            Intent::Open(_) => {
+                                                self.state = EngineState::Opening(timeout)
+                                            }
+                                            _ => {}
+                                        }
+                                    } else {
+                                        let ttl = TimeoutInfo::default();
+                                        let timeout = LiveTimeoutInfo {
+                                            expire_at: price.open_time + ttl.duration.as_ms(),
+                                            timeout_info: ttl,
+                                            intent,
+                                        };
+                                        match intent {
+                                            Intent::Reduce(_) | Intent::Flatten(_) => {
+                                                self.state = EngineState::Closing(timeout)
+                                            }
+                                            Intent::Open(_) => {
+                                                self.state = EngineState::Opening(timeout)
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    self.order_queue.extend(new_orders);
+                                }
                             }
                         }
                     }
@@ -363,6 +694,8 @@ impl SignalEngine {
             trackers,
             strategy,
             exec_params: trade_params,
+            state: EngineState::Idle,
+            order_queue: VecDeque::new(),
         }
     }
 }
@@ -379,65 +712,11 @@ pub enum EngineCommand {
     Stop,
 }
 
-/*
-struct EngineContext{
-    state: EngineState,
-    active_window: Option<u64>,
-    pending_orders: [tp, sl]
-}
-
-active_window_duration = timedelta!(Hour1, 4);
-activate_on=ema_cross(9,21) == down && rsi < 30;
-long_on = ema_cross(9, 21) == up;
-close_on = rsi_5m(14) < 58 || trade_duration > timedelta!(Hour1, 2) && rsi_1h(14) < 40;
-short=None;
-
-tp=3%;
-sl=1%;
-
-enum EngineState{
-    Opening(time),
-    Open(OpenPosInfo),
-    Closing(time),
+#[derive(Debug, PartialEq)]
+pub enum EngineState {
     Idle,
+    Armed(u64), //expiry_time
+    Open(OpenPosInfo),
+    Opening(LiveTimeoutInfo),
+    Closing(LiveTimeoutInfo),
 }
-
-match state{
-    Idle{
-        if self_active_window {
-            open ?
-            Open(Long, Maker(last_price * 0.998), tp: Some(30), sl: None,margin: 90)
-        }
-
-        else check for active_window
-    }
-
-    Opening(time) =>{
-        if time > open thresh{
-            AbortTrade
-        }
-    }
-    Closing(time) => {
-        if time < close_tresh{
-            MarketClose
-        }
-    }
-    Open(OpenPosInfo) => {
-        Close ?
-}
-}
-
-----<----<----<----<-----<-----<------<-------|
-|                                             |
-|                       |-> Abort (if timeout)|
-|---> Idle -> Openining |                         |--->ForceClose(if timeout)
-                        |-> Open ----> Closing ---|
-                                                  |---> TP/SL triggered (Limit order) hit
-
-
-Open(side,Limit?(limit_px), TP, SL, margin) -> [EngineOrder::new_market(calc_size(margin, last_price, lev)), EngineOrder::new_tp(calc_exit_price(side, entry_px, delta), EngineOrder::new_sl(calc_exit_price(side, entry_px, delta))
-
-Open(Side::Long, Taker, 20, 10, 90)
-Reduce(Taker, 0.8);
-Flatten(Taker)
-*/

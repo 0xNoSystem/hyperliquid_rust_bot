@@ -30,6 +30,14 @@ impl EngineOrder {
         }
     }
 
+    pub fn new_market_open(side: Side, size: f64) -> Self {
+        if side == Side::Long {
+            Self::market_open_long(size)
+        } else {
+            Self::market_open_short(size)
+        }
+    }
+
     pub fn market_open_long(size: f64) -> Self {
         Self::new_market(PositionOp::OpenLong, size)
     }

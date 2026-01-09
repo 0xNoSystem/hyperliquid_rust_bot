@@ -59,3 +59,32 @@ pub(super) fn validate_limit(limit: &Limit, side: Side, last_price: f64) -> Resu
 
     Ok(())
 }
+
+pub(super) fn calc_trigger_px(
+    side: Side,
+    trigger: TriggerKind,
+    delta: f64,
+    ref_px: f64,
+    lev: usize,
+) -> f64 {
+    if lev == 0 || ref_px <= 0.0 {
+        // Let engine validation handle this properly
+        return ref_px;
+    }
+
+    if delta < 0.0 {
+        log::warn!(
+            "calc_trigger_px called with negative delta: {} (will likely be rejected)",
+            delta
+        );
+    }
+
+    let price_delta = delta / lev as f64;
+
+    match (side, trigger) {
+        (Side::Long, TriggerKind::Tp) => ref_px * (1.0 + price_delta),
+        (Side::Short, TriggerKind::Tp) => ref_px * (1.0 - price_delta),
+        (Side::Long, TriggerKind::Sl) => ref_px * (1.0 - price_delta),
+        (Side::Short, TriggerKind::Sl) => ref_px * (1.0 + price_delta),
+    }
+}

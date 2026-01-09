@@ -1,3 +1,4 @@
+#![allow(unused_variables)]
 use super::*;
 use TimeFrame::*;
 use Value::*;
@@ -7,22 +8,16 @@ pub struct SrsiAdxScalp {
     sma_rsi_1h: IndexId,
     adx_15m: IndexId,
     prev_rsi_above_sma: Option<bool>,
-    active_window_start: Option<u64>,
-    sl_set: bool,
-    closing: bool,
 }
 
 impl SrsiAdxScalp {
     pub fn init() -> Self {
         let inds = Self::required_indicators_static();
-        SrsiAdxScalp {
+        Self {
             rsi_1h: inds[0],
             sma_rsi_1h: inds[1],
             adx_15m: inds[2],
             prev_rsi_above_sma: None,
-            active_window_start: None,
-            sl_set: false,
-            closing: false,
         }
     }
 }
@@ -54,92 +49,134 @@ impl Strat for SrsiAdxScalp {
         Self::required_indicators_static()
     }
 
-    fn on_tick(&mut self, ctx: StratContext) -> Option<EngineOrder> {
+    // =========================
+    // IDLE: setup + trigger
+    // =========================
+    fn on_idle(&mut self, ctx: StratContext, armed: Armed) -> Option<Intent> {
         let StratContext {
             free_margin,
             lev,
             last_price,
             indicators,
-            tick_time,
-            open_pos,
         } = ctx;
-        //Continue on ADX_15M close only (if no position is yet open)
-        if open_pos.is_none() && !indicators.get(&self.adx_15m)?.on_close {
+
+        // ADX logic only evaluated on ADX close when flat (same as vanilla)
+        let adx_val = indicators.get(&self.adx_15m)?;
+        if !adx_val.on_close {
             return None;
         }
 
-        let max_size = (free_margin * lev as f64) / last_price;
-
-        let rsi_1h_value = match indicators.get(&self.rsi_1h)?.value {
+        let rsi_1h = match indicators.get(&self.rsi_1h)?.value {
             RsiValue(v) => v,
             _ => return None,
         };
 
-        let sma_rsi_1h_value = match indicators.get(&self.sma_rsi_1h)?.value {
+        let sma_rsi_1h = match indicators.get(&self.sma_rsi_1h)?.value {
             SmaRsiValue(v) => v,
             _ => return None,
         };
 
-        let adx_15m_value = match indicators.get(&self.adx_15m)?.value {
+        let adx_15m = match adx_val.value {
             AdxValue(v) => v,
             _ => return None,
         };
 
-        let rsi_above_sma = rsi_1h_value > sma_rsi_1h_value;
+        let rsi_above_sma = rsi_1h > sma_rsi_1h;
 
-        let order = (|| {
-            if self.closing {
-                return None;
-            };
+        // -------------------------
+        // Trigger while armed
+        // -------------------------
+        if armed.is_some() {
+            if let Some(prev) = self.prev_rsi_above_sma
+                && !prev && rsi_above_sma {
+                    let size = SizeSpec::MarginPct(95.0);
+                    let limit_px = calc_entry_px(
+                        Side::Long,
+                        0.3,
+                        last_price.close,
+                        lev,
+                    );
 
-            if let Some(open) = open_pos {
-                if !self.sl_set {
-                    let trigger_px =
-                        calc_exit_px(open.side, TriggerKind::Sl, 0.3, open.entry_px, lev);
-                    self.sl_set = true;
-                    return Some(EngineOrder::new_sl(open.size, trigger_px));
-                }
-                if rsi_1h_value > 60.0 && (rsi_1h_value - sma_rsi_1h_value < (rsi_1h_value * 0.1)) {
-                    let limit_px =
-                        calc_exit_px(open.side, TriggerKind::Tp, 0.003, open.entry_px, lev);
-                    self.closing = true;
-                    return Some(EngineOrder::new_limit_close(open.size, limit_px, None));
-                }
+                    return Some(Intent::open_limit(
+                        Side::Long,
+                        size,
+                        limit_px,
+                        None,
+                        None,
+                    ));
             }
-            let start = self.active_window_start?;
-
-            if tick_time - start >= timedelta!(Hour1, 3) {
-                self.active_window_start = None;
-                return None;
-            }
-
-            let prev_rsi_above_sma = self.prev_rsi_above_sma?;
-            if prev_rsi_above_sma || !rsi_above_sma {
-                return None;
-            }
-
-            if open_pos.is_none() {
-                let size = max_size * 0.95;
-                if size * last_price < MIN_ORDER_VALUE {
-                    return None;
-                }
-                self.active_window_start = None;
-                let limit_px = calc_entry_px(Side::Long, last_price, 0.3, lev);
-                return Some(EngineOrder::limit_open_long(size, limit_px, None));
-            }
-            None
-        })();
-
-        //activate trade window if adx > 48
-        if self.active_window_start.is_none() && open_pos.is_none() {
-            self.closing = false;
-            self.sl_set = false;
-            if adx_15m_value > 48.0 && !rsi_above_sma {
-                self.active_window_start = Some(tick_time);
+        } else {
+            // -------------------------
+            // Arm setup window
+            // -------------------------
+            if adx_15m > 48.0 && !rsi_above_sma {
+                return Some(Intent::Arm(timedelta!(Hour1, 3)));
             }
         }
+
         self.prev_rsi_above_sma = Some(rsi_above_sma);
-        order
+        None
+    }
+
+    // =========================
+    // OPEN: position management
+    // =========================
+    fn on_open(&mut self, ctx: StratContext, open_pos: &OpenPosInfo) -> Option<Intent> {
+        let StratContext {
+            lev,
+            last_price,
+            indicators,
+            ..
+        } = ctx;
+
+        let rsi_1h = match indicators.get(&self.rsi_1h)?.value {
+            RsiValue(v) => v,
+            _ => return None,
+        };
+
+        let sma_rsi_1h = match indicators.get(&self.sma_rsi_1h)?.value {
+            SmaRsiValue(v) => v,
+            _ => return None,
+        };
+
+        // -------- SL (once, engine dedups) --------
+        let sl_px = calc_exit_px(
+            open_pos.side,
+            TriggerKind::Sl,
+            open_pos.entry_px,
+            0.3,
+            lev,
+        );
+
+        if rsi_1h < 60.0 {
+            return Some(Intent::reduce_limit_order(
+                SizeSpec::RawSize(open_pos.size),
+                sl_px,
+                None,
+            ));
+        }
+
+        // -------- TP / exit --------
+        if rsi_1h > 60.0 && (rsi_1h - sma_rsi_1h) < (rsi_1h * 0.1) {
+            let tp_px = calc_exit_px(
+                open_pos.side,
+                TriggerKind::Tp,
+                open_pos.entry_px,
+                0.003,
+                lev,
+            );
+
+            return Some(Intent::flatten_limit(tp_px, None));
+        }
+
+        None
+    }
+
+    // =========================
+    // BUSY: no abort logic
+    // =========================
+    fn on_busy(&mut self, _ctx: StratContext, _busy: BusyType) -> Option<Intent> {
+        None
     }
 }
 

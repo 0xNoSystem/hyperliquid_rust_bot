@@ -19,7 +19,7 @@ pub struct ExecParams {
     pub open_pos: Option<OpenPosInfo>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct OpenPosInfo {
     pub side: Side,
     pub size: f64,
