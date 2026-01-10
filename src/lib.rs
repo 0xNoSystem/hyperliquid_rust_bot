@@ -26,12 +26,11 @@ pub use helper::*;
 pub use margin::{AssetMargin, MarginAllocation};
 pub use market::{AssetPrice, Market, MarketCommand, MarketUpdate};
 pub use signal::{
-    EditType, Entry, ExecParams, IndexId, IndicatorKind, OpenPosInfo, SignalEngine, TimedValue,
-    ValuesMap,
+    EditType, Entry, ExecParams, IndexId, OpenPosInfo, SignalEngine, TimedValue, ValuesMap,
 };
 pub use trade_setup::*;
 pub use wallet::Wallet;
 
 //exposed HL sdk types
 pub use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, Error, TradeInfo as HLTradeInfo};
-pub use kwant::indicators::{Price, Value};
+pub use kwant::indicators::{IndicatorKind, Price, Value};

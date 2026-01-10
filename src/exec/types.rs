@@ -14,7 +14,7 @@ pub enum ExecCommand {
     Event(ExecEvent),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct EngineOrder {
     pub action: PositionOp,
     pub size: f64,

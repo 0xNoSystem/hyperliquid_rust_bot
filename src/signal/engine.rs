@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 use rustc_hash::FxHasher;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 
 use log::info;
@@ -12,7 +12,7 @@ use crate::trade_setup::{TimeFrame, TradeParams};
 use crate::{
     BusyType, EngineOrder, ExecCommand, ExecControl, IndicatorData, Intent, LiqSide,
     LiveTimeoutInfo, MIN_ORDER_VALUE, MarketCommand, OnTimeout, PositionOp, Side, Strategy,
-    TimeoutInfo, TriggerKind,
+    TimeoutInfo, TriggerKind, Triggers,
 };
 
 use flume::{Sender, bounded};
@@ -31,7 +31,7 @@ pub struct SignalEngine {
     strategy: Box<dyn Strat>,
     exec_params: ExecParams,
     state: EngineState,
-    order_queue: VecDeque<EngineOrder>,
+    pending_orders: Option<PendingOpen>,
 }
 
 impl SignalEngine {
@@ -72,7 +72,7 @@ impl SignalEngine {
             strategy,
             exec_params,
             state: EngineState::Idle,
-            order_queue: VecDeque::with_capacity(3),
+            pending_orders: None,
         }
     }
 
@@ -185,154 +185,89 @@ impl SignalEngine {
         }
     }
 
-    fn translate_intent(
-        &mut self,
-        intent: &Intent,
-        last_price: &Price,
-    ) -> Option<VecDeque<EngineOrder>> {
+    fn translate_intent(&mut self, intent: &Intent, last_price: &Price) -> Option<PendingOrder> {
         use Intent as I;
 
-        let mut new_engine_orders: VecDeque<EngineOrder> = VecDeque::with_capacity(3);
-
         match intent {
-            I::Open(order) => match &order.liq_side {
-                LiqSide::Taker => {
-                    let size = order.size.get_size(
-                        self.exec_params.lev as f64,
-                        self.exec_params.free_margin(),
-                        last_price.close,
-                    );
-                    new_engine_orders.push_back(EngineOrder::new_market_open(order.side, size));
-                    if let Some(tp_delta) = order.tp {
-                        let trigger_px = calc_trigger_px(
-                            order.side,
-                            TriggerKind::Tp,
-                            tp_delta,
-                            last_price.close,
-                            self.exec_params.lev,
-                        );
-                        new_engine_orders.push_back(EngineOrder::new_tp(size, trigger_px));
-                    }
-                    if let Some(sl_delta) = order.sl {
-                        let trigger_px = calc_trigger_px(
-                            order.side,
-                            TriggerKind::Sl,
-                            sl_delta,
-                            last_price.close,
-                            self.exec_params.lev,
-                        );
-                        new_engine_orders.push_back(EngineOrder::new_sl(size, trigger_px));
-                    }
-                }
-                LiqSide::Maker(limit) => {
-                    let size = order.size.get_size(
-                        self.exec_params.lev as f64,
-                        self.exec_params.free_margin(),
-                        limit.limit_px,
-                    );
-                    new_engine_orders.push_back(EngineOrder::new_limit_open(
-                        order.side,
-                        size,
-                        limit.limit_px,
-                        None,
-                    ));
-
-                    if let Some(tp_delta) = order.tp {
-                        let trigger_px = calc_trigger_px(
-                            order.side,
-                            TriggerKind::Tp,
-                            tp_delta,
-                            limit.limit_px,
-                            self.exec_params.lev,
-                        );
-                        new_engine_orders.push_back(EngineOrder::new_tp(size, trigger_px));
-                    }
-                    if let Some(sl_delta) = order.sl {
-                        let trigger_px = calc_trigger_px(
-                            order.side,
-                            TriggerKind::Sl,
-                            sl_delta,
-                            limit.limit_px,
-                            self.exec_params.lev,
-                        );
-                        new_engine_orders.push_back(EngineOrder::new_sl(size, trigger_px));
-                    }
-                }
-            },
-
-            I::Reduce(reduce_order) => match &reduce_order.liq_side {
-                LiqSide::Taker => {
-                    let size = reduce_order.size.get_size(
-                        self.exec_params.lev as f64,
-                        self.exec_params.free_margin(),
-                        last_price.close,
-                    );
-                    new_engine_orders.push_back(EngineOrder::market_close(size));
-                }
-                LiqSide::Maker(limit) => {
-                    let size = reduce_order.size.get_size(
-                        self.exec_params.lev as f64,
-                        self.exec_params.free_margin(),
-                        limit.limit_px,
-                    );
-                    new_engine_orders.push_back(EngineOrder::new_limit_close(
-                        size,
-                        limit.limit_px,
-                        None,
-                    ));
-                }
-            },
-
-            I::Flatten(liq_side) => {
-                let size = self.exec_params.open_pos?.size;
-                match liq_side {
+            I::Open(order) => {
+                let (size, open) = match &order.liq_side {
                     LiqSide::Taker => {
-                        new_engine_orders.push_back(EngineOrder::market_close(size));
+                        let size = order.size.get_size(
+                            self.exec_params.lev as f64,
+                            self.exec_params.free_margin(),
+                            last_price.close,
+                        );
+                        (size, EngineOrder::new_market_open(order.side, size))
                     }
-
                     LiqSide::Maker(limit) => {
-                        new_engine_orders.push_back(EngineOrder::new_limit_close(
-                            size,
+                        let size = order.size.get_size(
+                            self.exec_params.lev as f64,
+                            self.exec_params.free_margin(),
                             limit.limit_px,
-                            None,
-                        ));
+                        );
+                        (
+                            size,
+                            EngineOrder::new_limit_open(order.side, size, limit.limit_px, None),
+                        )
                     }
-                }
-            }
+                };
 
-            I::Arm(duration) => {
-                if self.state == EngineState::Idle {
-                    self.state = EngineState::Armed(last_price.open_time + duration.as_ms());
+                let tpsl = if order.tp.is_some() || order.sl.is_some() {
+                    Some(Triggers {
+                        tp: order.tp,
+                        sl: order.sl,
+                    })
                 } else {
-                    log::warn!(
-                        "Intent::Arm failed, Engine is not in Idle state: {:?}",
-                        self.state
-                    );
-                }
+                    None
+                };
+
+                Some(PendingOrder::Open(PendingOpen { open, tpsl }))
             }
 
-            I::Disarm => {
-                if let EngineState::Armed(_exp) = self.state {
-                    self.state = EngineState::Idle;
-                } else {
-                    log::warn!(
-                        "Intent::Disarm failed, Engine is not Armed: {:?}",
-                        self.state
-                    );
-                }
+            I::Reduce(reduce) => {
+                let close = match &reduce.liq_side {
+                    LiqSide::Taker => {
+                        let size = reduce.size.get_size(
+                            self.exec_params.lev as f64,
+                            self.exec_params.free_margin(),
+                            last_price.close,
+                        );
+                        EngineOrder::market_close(size)
+                    }
+                    LiqSide::Maker(limit) => {
+                        let size = reduce.size.get_size(
+                            self.exec_params.lev as f64,
+                            self.exec_params.free_margin(),
+                            limit.limit_px,
+                        );
+                        EngineOrder::new_limit_close(size, limit.limit_px, None)
+                    }
+                };
+                Some(PendingOrder::Close(close))
             }
 
-            _ => {
-                return None;
+            I::Flatten(liq) => {
+                let size = self.exec_params.open_pos?.size;
+                let close = match liq {
+                    LiqSide::Taker => EngineOrder::market_close(size),
+                    LiqSide::Maker(limit) => {
+                        EngineOrder::new_limit_close(size, limit.limit_px, None)
+                    }
+                };
+                Some(PendingOrder::Close(close))
             }
+
+            _ => None,
         }
-        if !new_engine_orders.is_empty() {
-            return Some(new_engine_orders);
-        }
-        None
     }
-    fn validate_trade(&self, trade: &EngineOrder, last_price: f64) -> Result<(), String> {
-        let side = match (trade.action, self.exec_params.open_pos) {
+
+    fn validate_trade(&self, trade: PendingOrder, last_price: f64) -> Result<(), String> {
+        let action = match trade {
+            PendingOrder::Close(order) => order.action,
+            PendingOrder::Open(open_order) => open_order.open.action,
+        };
+
+        let side = match (action, self.exec_params.open_pos) {
             (PositionOp::Close, None) => {
                 return Err("INVALID STATE: Close with no open position".into());
             }
@@ -349,26 +284,39 @@ impl SignalEngine {
             (PositionOp::OpenShort, _) => Side::Short,
         };
 
-        if trade.action != PositionOp::Close
-            && trade.size > self.exec_params.get_max_open_size(last_price)
-        {
-            return Err(
-                "EXCEEDED MAX_SIZE: Trade size exceeded maximum available (free_margin * lev / last_price)".into()
-            );
+        match trade {
+            PendingOrder::Close(ref order) => {
+                self.validate_engine_order(order, last_price)?;
+            }
+            PendingOrder::Open(ref order) => {
+                if order.open.size > self.exec_params.get_max_open_size(last_price) {
+                    return Err(
+                        "EXCEEDED MAX_SIZE: Trade size exceeded maximum available (free_margin * lev / last_price)".into()
+                    );
+                }
+                self.validate_engine_order(&order.open, last_price)?;
+                if order.has_trigger() {
+                    validate_tpsl(&order.tpsl.unwrap())?;
+                }
+            }
         }
 
-        if let Some(limit) = trade.limit {
-            validate_limit(&limit, side, last_price)?;
-            if trade.size * limit.limit_px < MIN_ORDER_VALUE {
+        Ok(())
+    }
+
+    fn validate_engine_order(&self, order: &EngineOrder, ref_px: f64) -> Result<(), String> {
+        if let Some(limit) = order.limit {
+            validate_limit(&limit, ref_px)?;
+            if order.size * limit.limit_px < MIN_ORDER_VALUE {
                 return Err(format!(
                     "INVALID ORDER: notional value is below the minimum order value of {}$",
                     MIN_ORDER_VALUE
                 ));
             }
         } else {
-            match trade.action {
+            match order.action {
                 PositionOp::OpenLong | PositionOp::OpenShort => {
-                    if trade.size * last_price < MIN_ORDER_VALUE {
+                    if order.size * ref_px < MIN_ORDER_VALUE {
                         return Err(format!(
                             "INVALID ORDER: notional value is below the minimum order value of {}$",
                             MIN_ORDER_VALUE
@@ -380,19 +328,21 @@ impl SignalEngine {
                     //MARKET CLOSE DOESN'T HAVE TO BE LESS THAN MIN_ORDER_VALUE IFF we're closing
                     //non-partial closes only
                     if let Some(pos) = self.exec_params.open_pos {
-                        if trade.size < pos.size && trade.size * last_price < MIN_ORDER_VALUE {
+                        if order.size < pos.size && order.size * ref_px < MIN_ORDER_VALUE {
                             return Err(format!(
                                 "INVALID ORDER: notional value is below the minimum order value of {}$",
                                 MIN_ORDER_VALUE
                             ));
                         }
                     } else {
-                        return Err("INVALID STATE: Close order won't be processes, no open position present".to_string());
+                        return Err(
+                        "INVALID STATE: Close order won't be processed, no open position present"
+                            .to_string(),
+                    );
                     }
                 }
             }
         }
-
         Ok(())
     }
 
@@ -452,7 +402,7 @@ impl SignalEngine {
                         }
                     }
                     self.state = EngineState::Idle;
-                    self.order_queue.clear();
+                    let _ = self.pending_orders.take();
                 }
             }
 
@@ -478,7 +428,7 @@ impl SignalEngine {
                         }
                     }
                     self.state = EngineState::Idle;
-                    self.order_queue.clear();
+                    let _ = self.pending_orders.take();
                 }
             }
 
@@ -491,17 +441,45 @@ impl SignalEngine {
             EngineState::Idle => {
                 if let Some(open_pos) = self.exec_params.open_pos {
                     self.state = EngineState::Open(open_pos);
-                    if let Some(order) = self.order_queue.pop_front() {
-                        let _ = self.trade_tx.send(ExecCommand::Order(order));
-                    }
                 }
             }
 
             EngineState::Open(_) => {
                 if let Some(open_pos) = self.exec_params.open_pos {
                     self.state = EngineState::Open(open_pos);
-                    if let Some(order) = self.order_queue.pop_front() {
-                        let _ = self.trade_tx.send(ExecCommand::Order(order));
+
+                    if let Some(pending) = self.pending_orders.take()
+                        && let Some(Triggers { tp, sl }) = pending.tpsl
+                    {
+                        let size = pending.open.size;
+                        let side = open_pos.side;
+                        let ref_px = open_pos.entry_px;
+
+                        if let Some(tp_delta) = tp {
+                            let trigger_px = calc_trigger_px(
+                                side,
+                                TriggerKind::Tp,
+                                tp_delta,
+                                ref_px,
+                                self.exec_params.lev,
+                            );
+                            let _ = self
+                                .trade_tx
+                                .send(ExecCommand::Order(EngineOrder::new_tp(size, trigger_px)));
+                        }
+
+                        if let Some(sl_delta) = sl {
+                            let trigger_px = calc_trigger_px(
+                                side,
+                                TriggerKind::Sl,
+                                sl_delta,
+                                ref_px,
+                                self.exec_params.lev,
+                            );
+                            let _ = self
+                                .trade_tx
+                                .send(ExecCommand::Order(EngineOrder::new_sl(size, trigger_px)));
+                        }
                     }
                 } else {
                     self.state = EngineState::Idle;
@@ -544,22 +522,41 @@ impl SignalEngine {
 
                             if intent == Intent::Abort {
                                 self.force_close_exec();
-                                self.order_queue.clear();
+                                let _ = self.pending_orders.take();
                                 self.state = EngineState::Idle;
-                            } else if let Some(mut new_orders) =
-                                self.translate_intent(&intent, &price)
-                            {
-                                let mut reject = false;
-                                for order in new_orders.iter() {
-                                    if let Err(e) = self.validate_trade(order, price.close) {
-                                        reject = true;
-                                        log::warn!("Trade rejected: {}", e);
-                                    }
+                            } else if let Intent::Arm(duration) = intent {
+                                if self.state == EngineState::Idle {
+                                    self.state =
+                                        EngineState::Armed(price.open_time + duration.as_ms());
+                                } else {
+                                    log::warn!(
+                                        "Intent::Arm failed, Engine is not in Idle state: {:?}",
+                                        self.state
+                                    );
                                 }
-
-                                if !reject {
-                                    let order = new_orders.pop_front().unwrap();
-                                    let _ = self.trade_tx.send(ExecCommand::Order(order));
+                            } else if intent == Intent::Disarm {
+                                if let EngineState::Armed(_exp) = self.state {
+                                    self.state = EngineState::Idle;
+                                } else {
+                                    log::warn!(
+                                        "Intent::Disarm failed, Engine is not Armed: {:?}",
+                                        self.state
+                                    );
+                                }
+                            } else if let Some(pending) = self.translate_intent(&intent, &price) {
+                                if let Err(e) = self.validate_trade(pending, price.close) {
+                                    log::warn!("Trade rejected: {}", e);
+                                } else {
+                                    let main_order = match pending {
+                                        PendingOrder::Open(p) => {
+                                            if p.has_trigger() {
+                                                self.pending_orders = Some(p);
+                                            }
+                                            p.open
+                                        }
+                                        PendingOrder::Close(p) => p,
+                                    };
+                                    let _ = self.trade_tx.send(ExecCommand::Order(main_order));
 
                                     if let Some(ttl) = intent.get_ttl() {
                                         let timeout = LiveTimeoutInfo {
@@ -593,7 +590,6 @@ impl SignalEngine {
                                             _ => {}
                                         }
                                     }
-                                    self.order_queue.extend(new_orders);
                                 }
                             }
                         }
@@ -695,7 +691,7 @@ impl SignalEngine {
             strategy,
             exec_params: trade_params,
             state: EngineState::Idle,
-            order_queue: VecDeque::new(),
+            pending_orders: None,
         }
     }
 }
@@ -719,4 +715,25 @@ pub enum EngineState {
     Open(OpenPosInfo),
     Opening(LiveTimeoutInfo),
     Closing(LiveTimeoutInfo),
+}
+
+#[derive(Copy, Clone, Debug)]
+enum PendingOrder {
+    Open(PendingOpen),
+    Close(EngineOrder),
+}
+
+#[derive(Copy, Clone, Debug)]
+struct PendingOpen {
+    open: EngineOrder,
+    tpsl: Option<Triggers>,
+}
+
+impl PendingOpen {
+    fn has_trigger(&self) -> bool {
+        self.tpsl
+            .as_ref()
+            .map(|t| t.tp.is_some() || t.sl.is_some())
+            .unwrap_or(false)
+    }
 }

@@ -1,59 +1,35 @@
-use crate::{Limit, Side, TriggerKind};
+use crate::{Limit, Side, TriggerKind, Triggers};
 
 const MIN_LIMIT_MULT: f64 = 0.05;
 const MAX_LIMIT_MULT: f64 = 15.0;
 
-pub(super) fn validate_tpsl(
-    trigger: TriggerKind,
-    side: Side,
-    limit_px: f64,
-    last_price: f64,
-) -> Result<(), String> {
-    match (side, trigger) {
-        (Side::Short, TriggerKind::Tp) if limit_px <= last_price => Err(
-            "TPSL ERROR (Long TP): TP must be strictly above last_price.\n\
-                            Conditional orders must refer to future price movement.\n\
-                            Remove TP/SL semantics and submit a non-conditional order."
-                .into(),
-        ),
-
-        (Side::Short, TriggerKind::Sl) if limit_px >= last_price => Err(
-            "TPSL ERROR (Long SL): SL must be strictly below last_price.\n\
-                            Conditional orders must refer to future price movement.\n\
-                            Remove TP/SL semantics and submit a non-conditional order."
-                .into(),
-        ),
-
-        (Side::Long, TriggerKind::Tp) if limit_px >= last_price => Err(
-            "TPSL ERROR (Short TP): TP must be strictly below last_price.\n\
-                            Conditional orders must refer to future price movement.\n\
-                            Remove TP/SL semantics and submit a non-conditional order."
-                .into(),
-        ),
-
-        (Side::Long, TriggerKind::Sl) if limit_px <= last_price => Err(
-            "TPSL ERROR (Short SL): SL must be strictly above last_price.\n\
-                            Conditional orders must refer to future price movement.\n\
-                            Remove TP/SL semantics and submit a non-conditional order."
-                .into(),
-        ),
-
-        _ => Ok(()),
+pub(super) fn validate_tpsl(tpsl: &Triggers) -> Result<(), String> {
+    if let Some(tp) = tpsl.tp
+        && tp <= 0.0
+    {
+        return Err("Invalid Trigger: TP must be positive".into());
     }
+
+    if let Some(sl) = tpsl.sl {
+        if sl <= 0.0 {
+            return Err("Invalid Trigger: SL must be positive".into());
+        }
+        if sl >= 100.0 {
+            return Err(
+                "Invalid Trigger: SL must be < 100 (cannot exceed full margin loss)".into(),
+            );
+        }
+    }
+
+    Ok(())
 }
 
-pub(super) fn validate_limit(limit: &Limit, side: Side, last_price: f64) -> Result<(), String> {
-    if let Some(trigger) = limit.is_tpsl() {
-        validate_tpsl(trigger, side, limit.limit_px, last_price)?;
-    }
-
+pub(super) fn validate_limit(limit: &Limit, ref_px: f64) -> Result<(), String> {
     if limit.limit_px <= 0f64 {
         return Err("Invalid limit price: must be positive".into());
     }
 
-    if limit.limit_px < (MIN_LIMIT_MULT * last_price)
-        || limit.limit_px > (MAX_LIMIT_MULT * last_price)
-    {
+    if limit.limit_px < (MIN_LIMIT_MULT * ref_px) || limit.limit_px > (MAX_LIMIT_MULT * ref_px) {
         return Err("Unreasonable limit price".into());
     }
 

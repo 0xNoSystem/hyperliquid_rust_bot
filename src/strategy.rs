@@ -119,6 +119,7 @@ pub enum Intent {
     Abort, //Force close at market
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct Triggers {
     pub tp: Option<f64>,
     pub sl: Option<f64>,
