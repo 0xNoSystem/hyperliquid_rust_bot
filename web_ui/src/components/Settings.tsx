@@ -20,7 +20,7 @@ export default function Settings() {
     };
 
     return (
-        <div className="bg-app-bg text-app-text relative min-h-screen overflow-hidden px-6 py-10 pb-50">
+        <div className="bg-app-bg/50 text-app-text relative min-h-screen overflow-hidden px-6 py-10 pb-50">
             <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}

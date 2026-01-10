@@ -47,7 +47,6 @@ impl Strat for RsiChopSwing {
             indicators,
         } = ctx;
 
-        // NOTE: last_price is a 1m candle (Price). Use close as "current price".
         let px = last_price.close;
         if px <= 0.0 {
             return None;

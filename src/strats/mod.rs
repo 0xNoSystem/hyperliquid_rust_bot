@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 pub(super) use crate::{
     Armed, BusyType, IndexId, IndicatorKind, Intent, NeedsIndicators, OnTimeout, OpenPosInfo, Side,
     SizeSpec, Strat, StratContext, TimeFrame, TimeoutInfo, TriggerKind, Triggers, Value, timedelta,
