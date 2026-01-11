@@ -1,49 +1,4 @@
-use hyperliquid_rust_sdk::{Error, ExchangeClient, ExchangeResponseStatus};
-use log::info;
-use std::fmt;
-
-use crate::Strategy;
 use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TradeParams {
-    pub strategy: Strategy,
-    pub lev: usize,
-}
-
-impl TradeParams {
-    pub async fn update_lev(
-        &mut self,
-        lev: usize,
-        client: &ExchangeClient,
-        asset: &str,
-        first_time: bool,
-    ) -> Result<usize, Error> {
-        if !first_time && self.lev == lev {
-            return Err(Error::Custom("Leverage is unchanged".to_string()));
-        }
-
-        let response = client
-            .update_leverage(lev as u32, asset, false, None)
-            .await?;
-
-        info!("Update leverage response: {response:?}");
-        match response {
-            ExchangeResponseStatus::Ok(_) => {
-                self.lev = lev;
-                Ok(lev)
-            }
-            ExchangeResponseStatus::Err(e) => Err(Error::Custom(e)),
-        }
-    }
-}
-
-impl fmt::Display for TradeParams {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "leverage: {}\nStrategy: {:?}\n", self.lev, self.strategy,)
-    }
-}
 
 //TIME FRAME
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Hash)]

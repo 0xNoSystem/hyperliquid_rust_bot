@@ -181,7 +181,7 @@ pub enum ExecControl {
     ForceClose,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum ExecEvent {
     Fill(TradeFillInfo),
     Funding(f64),
@@ -251,7 +251,7 @@ impl fmt::Display for TriggerKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TradeFillInfo {
     pub price: f64,
@@ -289,7 +289,7 @@ pub enum FillType {
     Liquidation,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FillInfo {
     pub time: u64,
@@ -297,7 +297,7 @@ pub struct FillInfo {
     pub fill_type: FillType,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TradeInfo {
     pub side: Side,
@@ -324,8 +324,7 @@ pub struct RestingOrderLocal {
     pub intent: PositionOp,
     pub tpsl: Option<TriggerKind>,
 }
-
-#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenPositionLocal {
     pub open_time: u64,

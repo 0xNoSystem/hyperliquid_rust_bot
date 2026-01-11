@@ -6,19 +6,22 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use hyperliquid_rust_sdk::{AssetMeta, Error, ExchangeClient, InfoClient, Message};
+use hyperliquid_rust_sdk::{
+    AssetMeta, Error, ExchangeClient, ExchangeResponseStatus, InfoClient, Message,
+};
 
 use crate::signal::{
-    EditType, EngineCommand, Entry, ExecParam, ExecParams, IndexId, SignalEngine, TimeFrameData,
+    EditType, EngineCommand, EngineView, Entry, ExecParam, ExecParams, IndexId, SignalEngine,
+    TimeFrameData,
 };
-use crate::{AssetMargin, EditMarketInfo, IndicatorData, UpdateFrontend};
 use crate::{
     ExecCommand, ExecControl, ExecEvent, Executor, candles_snapshot, get_time_now, load_candles,
     parse_candle,
 };
 use crate::{MAX_DISCONNECTION_WINDOW, MAX_HISTORY, MarketInfo, Strategy, Wallet};
 
-use crate::{OpenPositionLocal, TimeFrame, TradeInfo, TradeParams};
+use crate::{AssetMargin, EditMarketInfo, IndicatorData, MarketStream, UpdateFrontend};
+use crate::{OpenPositionLocal, TimeFrame, TradeInfo};
 
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -32,7 +35,8 @@ pub struct Market {
     exchange_client: ExchangeClient,
     pub trade_history: Vec<TradeInfo>,
     pub pnl: f64,
-    pub trade_params: TradeParams,
+    pub lev: usize,
+    pub strategy: Strategy,
     pub asset: AssetMeta,
     signal_engine: SignalEngine,
     executor: Executor,
@@ -44,13 +48,15 @@ pub struct Market {
 }
 
 impl Market {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         wallet: Arc<Wallet>,
         bot_tx: UnboundedSender<MarketUpdate>,
         price_rv: UnboundedReceiver<Message>,
         asset: AssetMeta,
         margin: f64,
-        trade_params: TradeParams,
+        lev: usize,
+        strategy: Strategy,
         config: Option<Vec<IndexId>>,
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
         let info_client = InfoClient::new(None, Some(wallet.url)).await?;
@@ -58,7 +64,7 @@ impl Market {
             ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
 
         //Look up needed tfs for loading
-        let strat_indicators = trade_params.strategy.indicators();
+        let strat_indicators = strategy.indicators();
         let mut active_tfs: HashSet<TimeFrame> =
             strat_indicators.into_iter().map(|id| id.1).collect();
         if let Some(ref cfg) = config {
@@ -84,7 +90,7 @@ impl Market {
             market_rv,
         };
 
-        let lev = trade_params.lev.min(asset.max_leverage);
+        let lev = lev.min(asset.max_leverage);
         let exec_params = ExecParams::new(margin, lev);
 
         Ok((
@@ -94,11 +100,12 @@ impl Market {
                 margin,
                 trade_history: Vec::with_capacity(MAX_HISTORY),
                 pnl: 0_f64,
-                trade_params: trade_params.clone(),
+                lev,
+                strategy,
                 asset: asset.clone(),
                 signal_engine: SignalEngine::new(
                     config,
-                    trade_params,
+                    strategy,
                     engine_rv,
                     Some(market_tx.clone()),
                     exec_tx,
@@ -116,27 +123,40 @@ impl Market {
         ))
     }
 
-    async fn init(&mut self) -> Result<(), Error> {
+    async fn init(&mut self) -> Result<Option<f64>, Error> {
         //check if lev > max_lev
-        let lev = self.trade_params.lev.min(self.asset.max_leverage);
-        let lev_upd = self
-            .trade_params
-            .update_lev(lev, &self.exchange_client, self.asset.name.as_str(), true)
-            .await?;
+        let lev = self.lev.min(self.asset.max_leverage);
+        if lev != self.lev {
+            Self::update_lev(&self.exchange_client, self.asset.name.as_str(), lev).await?;
+            self.lev = lev;
+        }
 
         let engine_tx = self.senders.engine_tx.clone();
-        let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev_upd)));
+        let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(self.lev)));
 
-        self.load_engine(5000).await?;
+        let last_price = self.load_engine(5000).await?;
         println!(
-            "\nMarket initialized for {} {:?}\n",
-            self.asset.name, self.trade_params
+            "\nMarket initialized for {} (lev: {}, strategy: {:?})\n",
+            self.asset.name, self.lev, self.strategy
         );
-        Ok(())
+        Ok(last_price)
     }
 
-    async fn load_engine(&mut self, candle_count: u64) -> Result<(), Error> {
+    async fn update_lev(client: &ExchangeClient, asset: &str, lev: usize) -> Result<usize, Error> {
+        let response = client
+            .update_leverage(lev as u32, asset, false, None)
+            .await?;
+
+        info!("Update leverage response: {response:?}");
+        match response {
+            ExchangeResponseStatus::Ok(_) => Ok(lev),
+            ExchangeResponseStatus::Err(e) => Err(Error::Custom(e)),
+        }
+    }
+
+    async fn load_engine(&mut self, candle_count: u64) -> Result<Option<f64>, Error> {
         info!("---------------Loading Engine---------------");
+        let mut last_price: Option<f64> = None;
         for tf in &self.active_tfs {
             let price_data = load_candles(
                 &self.info_client,
@@ -145,10 +165,11 @@ impl Market {
                 candle_count,
             )
             .await?;
+            last_price = price_data.last().map(|p| p.close);
             self.signal_engine.load(*tf, price_data).await;
         }
 
-        Ok(())
+        Ok(last_price)
     }
 
     pub fn get_trade_history(&self) -> &Vec<TradeInfo> {
@@ -159,18 +180,19 @@ impl Market {
 impl Market {
     pub async fn start(mut self) -> Result<(), Error> {
         use ExecCommand::*;
-        self.init().await?;
+        let last_price = self.init().await?;
 
         let info = MarketInfo {
             asset: self.asset.name.clone(),
-            lev: self.trade_params.lev,
-            price: 0.0,
-            params: self.trade_params.clone(),
+            lev: self.lev,
+            price: last_price.unwrap_or(0.0),
+            strategy: self.strategy,
             margin: self.margin,
             pnl: 0.0,
             is_paused: false,
             indicators: self.signal_engine.get_indicators_data(),
             position: None,
+            engine_state: EngineView::Idle,
         };
         let _ = self.senders.bot_tx.send(MarketUpdate::InitMarket(info));
 
@@ -202,10 +224,10 @@ impl Market {
                     Message::Candle(candle) => {
                         let price = parse_candle(candle.data)?;
                         let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
-                            UpdateFrontend::MarketInfoEdit((
-                                asset_name.clone().to_string(),
-                                EditMarketInfo::Price(price.close),
-                            )),
+                            UpdateFrontend::MarketStream(MarketStream::Price {
+                                asset: asset_name.clone().to_string(),
+                                price: price.close,
+                            }),
                         ));
                         if disconnected {
                             if disconnected_price_stream_flag.load(Ordering::Relaxed) {
@@ -275,20 +297,21 @@ impl Market {
             match cmd {
                 MarketCommand::UpdateLeverage(lev) => {
                     let lev = lev.min(asset.max_leverage);
-                    let upd = self
-                        .trade_params
-                        .update_lev(lev, &self.exchange_client, asset.name.as_str(), false)
-                        .await;
+                    if lev == self.lev {
+                        continue;
+                    }
+                    let upd =
+                        Self::update_lev(&self.exchange_client, asset.name.as_str(), lev).await;
                     match upd {
                         Ok(lev) => {
+                            self.lev = lev;
                             let _ = engine_update_tx
                                 .send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
-                            let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                UpdateFrontend::MarketInfoEdit((
-                                    asset.name.clone(),
-                                    EditMarketInfo::Lev(lev),
-                                )),
-                            ));
+
+                            let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
+                                asset.name.clone(),
+                                EditMarketInfo::Lev(lev),
+                            )));
                         }
                         Err(e) => {
                             let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
@@ -299,10 +322,10 @@ impl Market {
                 }
 
                 MarketCommand::UpdateStrategy(strat) => {
-                    if strat == self.trade_params.strategy {
+                    if strat == self.strategy {
                         continue;
                     }
-                    self.trade_params.strategy = strat;
+                    self.strategy = strat;
 
                     let mut map: TimeFrameData = HashMap::default();
                     let required_indicators = strat.indicators();
@@ -354,7 +377,7 @@ impl Market {
 
                 MarketCommand::EditIndicators(mut entry_vec) => {
                     let mut map: TimeFrameData = HashMap::default();
-                    let strategy_indicators = self.trade_params.strategy.indicators();
+                    let strategy_indicators = self.strategy.indicators();
                     let mut failed_removes = Vec::with_capacity(strategy_indicators.len());
                     entry_vec.retain(|entry| {
                         if strategy_indicators.contains(&entry.id) && entry.edit == EditType::Remove
@@ -414,34 +437,21 @@ impl Market {
                 }
 
                 MarketCommand::UpdateOpenPosition(pos) => {
-                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                        UpdateFrontend::MarketInfoEdit((
-                            asset.name.clone(),
-                            EditMarketInfo::OpenPosition(pos),
-                        )),
-                    ));
+                    let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
+                        asset.name.clone(),
+                        EditMarketInfo::OpenPosition(pos),
+                    )));
                     let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(
                         ExecParam::OpenPosition(pos.map(|p| p.sse())),
                     ));
                 }
 
                 MarketCommand::ReceiveTrade(trade_info) => {
-                    self.pnl += trade_info.pnl;
-                    self.margin += trade_info.pnl;
                     self.trade_history.push(trade_info);
-                    let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(
-                        ExecParam::Margin(self.margin),
-                    ));
-                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                        UpdateFrontend::MarketInfoEdit((
-                            asset.name.clone(),
-                            EditMarketInfo::Trade(trade_info),
-                        )),
-                    ));
 
-                    let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((
+                    let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
                         asset.name.clone(),
-                        self.margin,
+                        EditMarketInfo::Trade(trade_info),
                     )));
                 }
 
@@ -462,11 +472,18 @@ impl Market {
 
                 MarketCommand::UpdateIndicatorData(data) => {
                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                        UpdateFrontend::UpdateIndicatorValues {
+                        UpdateFrontend::MarketStream(MarketStream::Indicators {
                             asset: asset.name.clone(),
                             data,
-                        },
+                        }),
                     ));
+                }
+
+                MarketCommand::EngineStateChange(new_state) => {
+                    let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
+                        asset.name.clone(),
+                        EditMarketInfo::EngineState(new_state),
+                    )));
                 }
 
                 MarketCommand::FetchMissedWindow(disc_start) => {
@@ -541,14 +558,9 @@ impl Market {
                                             "\nReceived final trade before shutdown: {:?}\n",
                                             trade_info
                                         );
-                                        self.pnl += trade_info.pnl;
-                                        self.margin += trade_info.pnl;
                                         self.trade_history.push(trade_info);
-                                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                            UpdateFrontend::MarketInfoEdit((
-                                                asset.name.clone(),
-                                                EditMarketInfo::Trade(trade_info),
-                                            )),
+                                        let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate(
+                                            (asset.name.clone(), EditMarketInfo::Trade(trade_info)),
                                         ));
                                         break;
                                     }
@@ -579,7 +591,7 @@ impl Market {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum MarketCommand {
     UpdateLeverage(usize),      //UI
@@ -590,9 +602,10 @@ pub enum MarketCommand {
     UserEvent(ExecEvent),                    //Bot
     UpdateMargin(f64),                       //UI or Exec
     UpdateIndicatorData(Vec<IndicatorData>), //Engine
-    Resume,                                  //UI/Bot
-    Pause,                                   //UI/Bot
-    Close,                                   //UI/Bot
+    EngineStateChange(EngineView),
+    Resume, //UI/Bot
+    Pause,  //UI/Bot
+    Close,  //UI/Bot
     FetchMissedWindow(u64),
 }
 
@@ -612,7 +625,37 @@ struct MarketReceivers {
 pub enum MarketUpdate {
     InitMarket(MarketInfo),
     MarginUpdate(AssetMargin),
+    MarketInfoUpdate((String, EditMarketInfo)),
     RelayToFrontend(UpdateFrontend),
 }
 
 pub type AssetPrice = (String, f64);
+
+#[derive(Clone, Debug)]
+pub struct MarketState {
+    pub asset: String,
+    pub lev: usize,
+    pub strategy: Strategy,
+    pub margin: f64,
+    pub pnl: f64,
+    pub is_paused: bool,
+    pub position: Option<OpenPositionLocal>,
+    pub engine_state: EngineView,
+    pub trades: Vec<TradeInfo>,
+}
+
+impl From<&MarketInfo> for MarketState {
+    fn from(info: &MarketInfo) -> Self {
+        MarketState {
+            asset: info.asset.clone(),
+            lev: info.lev,
+            strategy: info.strategy,
+            margin: info.margin,
+            pnl: info.pnl,
+            is_paused: info.is_paused,
+            position: info.position,
+            engine_state: info.engine_state,
+            trades: Vec::new(),
+        }
+    }
+}

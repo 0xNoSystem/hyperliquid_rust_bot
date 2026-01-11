@@ -1,5 +1,6 @@
 use crate::{
-    AssetMargin, IndexId, MarginAllocation, OpenPositionLocal, TradeInfo, TradeParams, Value,
+    AssetMargin, EngineView, IndexId, MarginAllocation, MarketState, OpenPositionLocal, Strategy,
+    TradeInfo, Value,
 };
 use hyperliquid_rust_sdk::AssetMeta;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct AddMarketInfo {
     pub asset: String,
     pub margin_alloc: MarginAllocation,
-    pub trade_params: TradeParams,
+    pub lev: usize,
+    pub strategy: Strategy,
     pub config: Option<Vec<IndexId>>,
 }
 
@@ -18,16 +20,34 @@ pub struct AddMarketInfo {
 pub struct MarketInfo {
     pub asset: String,
     pub lev: usize,
+    pub strategy: Strategy,
     pub price: f64,
-    pub params: TradeParams,
     pub margin: f64,
     pub pnl: f64,
     pub is_paused: bool,
     pub indicators: Vec<IndicatorData>,
     pub position: Option<OpenPositionLocal>,
+    pub engine_state: EngineView,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+impl From<&MarketState> for MarketInfo {
+    fn from(s: &MarketState) -> Self {
+        MarketInfo {
+            asset: s.asset.clone(),
+            lev: s.lev,
+            price: 0.0,
+            strategy: s.strategy,
+            margin: s.margin,
+            pnl: s.pnl,
+            is_paused: s.is_paused,
+            indicators: Vec::new(),
+            position: s.position,
+            engine_state: s.engine_state,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IndicatorData {
     pub id: IndexId,
@@ -40,7 +60,20 @@ pub enum EditMarketInfo {
     Lev(usize),
     Trade(TradeInfo),
     OpenPosition(Option<OpenPositionLocal>),
-    Price(f64),
+    EngineState(EngineView),
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MarketStream {
+    Price {
+        asset: String,
+        price: f64,
+    },
+    Indicators {
+        asset: String,
+        data: Vec<IndicatorData>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -51,10 +84,7 @@ pub enum UpdateFrontend {
     CancelMarket(String),
     UpdateTotalMargin(f64),
     UpdateMarketMargin(AssetMargin),
-    UpdateIndicatorValues {
-        asset: String,
-        data: Vec<IndicatorData>,
-    },
+    MarketStream(MarketStream),
     MarketInfoEdit((String, EditMarketInfo)),
     UserError(String),
     LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),

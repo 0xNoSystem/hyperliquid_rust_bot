@@ -60,13 +60,13 @@ const MarketCard = ({
         price,
         lev,
         margin,
-        params,
+        strategy,
         pnl,
         isPaused,
         indicators,
         position,
+        engineState,
     } = market;
-    const { strategy } = params;
     const szDecimals = assetMeta ? assetMeta.szDecimals : 3;
     const pxDecimals = MAX_DECIMALS - szDecimals - 1;
     const format = (n: number) => n.toFixed(pxDecimals);
@@ -232,6 +232,12 @@ const MarketCard = ({
                     </div>
                 ) : (
                     <>
+                        <p className="text-app-text text-center font-semibold">
+                            Engine:{" "}
+                            <span className="text-orange-500">
+                                {engineState}
+                            </span>
+                        </p>
                         <div className="border-line-subtle bg-surface-pane my-2 rounded-xl border">
                             <p className="py-1 text-center">OPEN POSITION</p>
 

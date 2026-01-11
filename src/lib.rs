@@ -24,9 +24,10 @@ pub use exec::*;
 pub use frontend::*;
 pub use helper::*;
 pub use margin::{AssetMargin, MarginAllocation};
-pub use market::{AssetPrice, Market, MarketCommand, MarketUpdate};
+pub use market::{AssetPrice, Market, MarketCommand, MarketState, MarketUpdate};
 pub use signal::{
-    EditType, Entry, ExecParams, IndexId, OpenPosInfo, SignalEngine, TimedValue, ValuesMap,
+    EditType, EngineView, Entry, ExecParams, IndexId, OpenPosInfo, SignalEngine, TimedValue,
+    ValuesMap,
 };
 pub use trade_setup::*;
 pub use wallet::Wallet;

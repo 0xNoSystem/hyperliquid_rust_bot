@@ -4,11 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 
 use log::info;
+use serde::{Deserialize, Serialize};
 
 use kwant::indicators::Price;
 
 use crate::strategy::{Strat, StratContext};
-use crate::trade_setup::{TimeFrame, TradeParams};
+use crate::trade_setup::TimeFrame;
 use crate::{
     BusyType, EngineOrder, ExecCommand, ExecControl, IndicatorData, Intent, LiqSide,
     LiveTimeoutInfo, MIN_ORDER_VALUE, MarketCommand, OnTimeout, PositionOp, Side, Strategy,
@@ -37,14 +38,14 @@ pub struct SignalEngine {
 impl SignalEngine {
     pub async fn new(
         config: Option<Vec<IndexId>>,
-        trade_params: TradeParams,
+        strategy: Strategy,
         engine_rv: UnboundedReceiver<EngineCommand>,
         data_tx: Option<tokioSender<MarketCommand>>,
         trade_tx: Sender<ExecCommand>,
         exec_params: ExecParams,
     ) -> Self {
-        let strategy = trade_params.strategy.init();
-        let required_indicators = strategy.required_indicators();
+        let strategy_impl = strategy.init();
+        let required_indicators = strategy_impl.required_indicators();
         let mut indicators: HashSet<IndexId> = if let Some(list) = config {
             list.into_iter().collect()
         } else {
@@ -69,7 +70,7 @@ impl SignalEngine {
             trade_tx,
             data_tx,
             trackers,
-            strategy,
+            strategy: strategy_impl,
             exec_params,
             state: EngineState::Idle,
             pending_orders: None,
@@ -494,6 +495,7 @@ impl SignalEngine {
         while let Some(cmd) = self.engine_rv.recv().await {
             match cmd {
                 EngineCommand::UpdatePrice(price) => {
+                    let init_state = self.state;
                     self.digest(price);
 
                     let ind = self.get_indicators_data();
@@ -594,6 +596,15 @@ impl SignalEngine {
                             }
                         }
                     }
+
+                    if init_state != self.state {
+                        if let Some(sender) = &self.data_tx {
+                            let _ = sender
+                                .send(MarketCommand::EngineStateChange(self.state.into()))
+                                .await;
+                        }
+                        info!("Engine transition: {:?} -->{:?}", init_state, self.state);
+                    }
                 }
 
                 EngineCommand::UpdatePriceBulk(data) => {
@@ -602,6 +613,7 @@ impl SignalEngine {
 
                 EngineCommand::UpdateStrategy(new_strat) => {
                     self.strategy = new_strat.init();
+                    self.state = EngineState::Idle;
                 }
 
                 EngineCommand::EditIndicators {
@@ -708,13 +720,34 @@ pub enum EngineCommand {
     Stop,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EngineState {
     Idle,
     Armed(u64), //expiry_time
     Open(OpenPosInfo),
     Opening(LiveTimeoutInfo),
     Closing(LiveTimeoutInfo),
+}
+
+impl From<EngineState> for EngineView {
+    fn from(state: EngineState) -> Self {
+        match state {
+            EngineState::Idle => EngineView::Idle,
+            EngineState::Armed(_) => EngineView::Armed,
+            EngineState::Opening(_) => EngineView::Opening,
+            EngineState::Closing(_) => EngineView::Closing,
+            EngineState::Open(_) => EngineView::Open,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum EngineView {
+    Idle,
+    Armed,
+    Opening,
+    Closing,
+    Open,
 }
 
 #[derive(Copy, Clone, Debug)]

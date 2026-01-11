@@ -1,35 +1,33 @@
 use crate::{
     AddMarketInfo, BackendStatus, ExecEvent, HLTradeInfo, Market, MarketCommand, MarketInfo,
-    MarketUpdate, TradeFillInfo, UpdateFrontend, Wallet,
+    MarketState, MarketUpdate, TradeFillInfo, UpdateFrontend, Wallet,
 };
 use hyperliquid_rust_sdk::{
     AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, UserData,
 };
 use log::{info, warn};
+use rustc_hash::FxHasher;
+use serde::Deserialize;
 use std::collections::HashMap;
-use tokio::time::{Duration, interval};
-
-use crate::helper::*;
+use std::hash::BuildHasherDefault;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
-
-use crate::helper::address;
-use crate::margin::{AssetMargin, MarginBook};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-use rustc_hash::FxHasher;
-use serde::Deserialize;
-use std::hash::BuildHasherDefault;
+use tokio::time::{Duration, interval};
 use tokio_util::sync::CancellationToken;
+
+use crate::helper::*;
+use crate::margin::{AssetMargin, MarginBook};
+
+pub type Session = Arc<Mutex<HashMap<String, MarketState, BuildHasherDefault<FxHasher>>>>;
 
 pub struct Bot {
     info_client: InfoClient,
     wallet: Arc<Wallet>,
     markets: HashMap<String, Sender<MarketCommand>, BuildHasherDefault<FxHasher>>,
     candle_subs: HashMap<String, u32>,
-    session: Arc<Mutex<HashMap<String, MarketInfo, BuildHasherDefault<FxHasher>>>>,
     #[allow(unused)]
     fees: (f64, f64),
     _bot_tx: Sender<BotEvent>,
@@ -56,7 +54,6 @@ impl Bot {
                 wallet: wallet.into(),
                 markets: HashMap::default(),
                 candle_subs: HashMap::new(),
-                session: Arc::new(Mutex::new(HashMap::default())),
                 fees,
                 _bot_tx: bot_tx.clone(),
                 bot_rv,
@@ -78,9 +75,11 @@ impl Bot {
         let AddMarketInfo {
             asset,
             margin_alloc,
-            trade_params,
+            lev,
+            strategy,
             config,
         } = info;
+
         let asset = asset.trim().to_string();
         let asset_str = asset.as_str();
 
@@ -134,15 +133,17 @@ impl Bot {
             receiver,
             meta,
             margin,
-            trade_params,
+            lev,
+            strategy,
             config,
         )
         .await?;
 
         self.markets.insert(asset.clone(), market_tx);
         self.candle_subs.insert(asset.clone(), sub_id);
+
         let app_tx = self.app_tx.clone();
-        let remove_market_tx = self._bot_tx.clone(); //remove subs in case of failed market init
+        let remove_market_tx = self._bot_tx.clone();
 
         tokio::spawn(async move {
             if let Err(e) = market.start().await {
@@ -193,8 +194,6 @@ impl Bot {
             .unwrap();
 
             if close {
-                let mut sess_guard = self.session.lock().await;
-                let _ = sess_guard.remove(&asset);
                 let mut book = margin_book.lock().await;
                 book.remove(&asset);
             }
@@ -210,30 +209,25 @@ impl Bot {
         for tx in self.markets.values() {
             let _ = tx.send(MarketCommand::Pause).await;
         }
-
-        let mut session = self.session.lock().await;
-        for (_asset, info) in session.iter_mut() {
-            info.is_paused = true;
-        }
     }
+
     pub async fn resume_all(&self) {
         info!("RESUMING ALL MARKETS");
         for tx in self.markets.values() {
             let _ = tx.send(MarketCommand::Resume).await;
         }
     }
+
     pub async fn close_all(&mut self) {
         info!("CLOSING ALL MARKETS");
         for (_asset, id) in self.candle_subs.drain() {
             let _ = self.info_client.unsubscribe(id).await;
         }
         self.candle_subs.clear();
+
         for (_asset, tx) in self.markets.drain() {
             let _ = tx.send(MarketCommand::Close).await;
         }
-
-        let mut session = self.session.lock().await;
-        session.clear();
     }
 
     pub async fn send_cmd(&self, asset: String, cmd: MarketCommand) {
@@ -245,28 +239,6 @@ impl Bot {
         }
     }
 
-    pub fn get_markets(&self) -> Vec<&String> {
-        let mut assets = Vec::new();
-        for asset in self.markets.keys() {
-            assets.push(asset);
-        }
-
-        assets
-    }
-
-    pub async fn get_session(&self) -> Result<(Vec<MarketInfo>, Vec<AssetMeta>), Error> {
-        let guard = self.session.lock().await;
-        let session: Vec<MarketInfo> = guard.values().cloned().collect();
-
-        let universe: Vec<AssetMeta> = if self.universe.is_empty() {
-            get_all_assets(&self.info_client).await?
-        } else {
-            self.universe.clone()
-        };
-
-        Ok((session, universe))
-    }
-
     pub async fn start(mut self, app_tx: Sender<UpdateFrontend>) -> Result<(), Error> {
         use BotEvent::*;
         use MarketUpdate as M;
@@ -275,6 +247,8 @@ impl Bot {
         self.app_tx = Some(app_tx.clone());
 
         let mut update_rv = self.update_rv.take().unwrap();
+
+        let session: Session = Arc::new(Mutex::new(HashMap::default()));
 
         let user = self.wallet.clone();
         let margin_book = MarginBook::new(user);
@@ -287,48 +261,51 @@ impl Bot {
         let app_tx_margin = app_tx.clone();
         let err_tx = app_tx.clone();
 
-        //keep marginbook in sync for DEX <=> BOT overlap
         let margin_token = cancel_token.clone();
         let margin_book_handle = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(2));
             loop {
                 tokio::select! {
-                _ = margin_token.cancelled() =>{
-                    break;
-                }
+                    _ = margin_token.cancelled() => { break; }
+                    _ = ticker.tick() => {
+                        let mut book = margin_sync.lock().await;
+                        let result = book.sync().await;
 
-                _ = ticker.tick() => {
-                    let mut book = margin_sync.lock().await;
-                    let result = book.sync().await;
-
-                    match result {
-                        Ok(_) => {
-                            let total = book.total_on_chain - book.used();
-                            let _ = app_tx_margin.try_send(UpdateTotalMargin(total));
-                        }
-                        Err(e) => {
-                            warn!("Failed to fetch User Margin");
-                            let _ = app_tx_margin.try_send(UserError(format!(
-                                "Failed to fetch user margin, check your connection: {e}"
-                            )));
+                        match result {
+                            Ok(_) => {
+                                let total = book.total_on_chain - book.used();
+                                let _ = app_tx_margin.try_send(UpdateTotalMargin(total));
+                            }
+                            Err(e) => {
+                                warn!("Failed to fetch User Margin");
+                                let _ = app_tx_margin.try_send(UserError(format!(
+                                    "Failed to fetch user margin, check your connection: {e}"
+                                )));
+                            }
                         }
                     }
-                }
                 }
             }
         });
 
-        //Market -> Bot
-        let session_adder = self.session.clone();
+        let session_upd = session.clone();
+        let app_tx_upd = app_tx.clone();
+
         tokio::spawn(async move {
             while let Some(market_update) = update_rv.recv().await {
                 match market_update {
                     M::InitMarket(info) => {
-                        let mut session_guard = session_adder.lock().await;
-                        session_guard.insert(info.asset.clone(), info.clone());
-                        let _ = app_tx.try_send(ConfirmMarket(info));
+                        let state = MarketState::from(&info);
+                        {
+                            let mut guard = session_upd.lock().await;
+                            guard.insert(info.asset.clone(), state);
+                        }
+                        let _ = app_tx_upd.try_send(ConfirmMarket(info));
                     }
+
                     M::MarginUpdate(asset_margin) => {
+                        let (asset, margin) = asset_margin.clone();
+
                         let result = {
                             let mut book = margin_market_edit.lock().await;
                             book.update_asset(asset_margin.clone()).await
@@ -336,21 +313,51 @@ impl Bot {
 
                         match result {
                             Ok(_) => {
-                                let _ = app_tx.try_send(UpdateMarketMargin(asset_margin));
+                                {
+                                    let mut guard = session_upd.lock().await;
+                                    if let Some(s) = guard.get_mut(&asset) {
+                                        s.margin = margin;
+                                    }
+                                }
+                                let _ = app_tx_upd.try_send(UpdateMarketMargin(asset_margin));
                             }
                             Err(e) => {
-                                let _ = app_tx.try_send(UserError(e.to_string()));
+                                let _ = app_tx_upd.try_send(UserError(e.to_string()));
                             }
                         }
                     }
+
+                    M::MarketInfoUpdate((asset, edit)) => {
+                        {
+                            let mut guard = session_upd.lock().await;
+                            if let Some(s) = guard.get_mut(&asset) {
+                                match edit {
+                                    crate::EditMarketInfo::Lev(lev) => {
+                                        s.lev = lev;
+                                    }
+                                    crate::EditMarketInfo::OpenPosition(pos) => {
+                                        s.position = pos;
+                                    }
+                                    crate::EditMarketInfo::EngineState(view) => {
+                                        s.engine_state = view;
+                                    }
+                                    crate::EditMarketInfo::Trade(trade) => {
+                                        s.pnl += trade.pnl;
+                                        s.trades.push(trade);
+                                    }
+                                }
+                            }
+                        }
+                        let _ = app_tx_upd.try_send(MarketInfoEdit((asset, edit)));
+                    }
+
                     M::RelayToFrontend(cmd) => {
-                        let _ = app_tx.try_send(cmd);
+                        let _ = app_tx_upd.try_send(cmd);
                     }
                 }
             }
         });
 
-        //fill events
         let (user_tx, mut user_rv) = unbounded_channel();
         let _id = self
             .info_client
@@ -361,143 +368,190 @@ impl Bot {
                 user_tx,
             )
             .await?;
+
         loop {
             tokio::select!(
-                    biased;
+                biased;
 
-                    Some(msg) = user_rv.recv() => {
+                Some(msg) = user_rv.recv() => {
+                    if let Message::User(user_event) = msg {
+                        match user_event.data {
+                            UserData::Fills(fills_vec) => {
+                                let mut fills_map: FillsMap = HashMap::default();
 
-                    if let Message::User(user_event) = msg{
+                                for trade in fills_vec.into_iter() {
+                                    let coin = trade.coin.clone();
+                                    let oid = trade.oid;
+                                    fills_map
+                                        .entry(coin)
+                                        .or_default()
+                                        .entry(oid)
+                                        .or_default()
+                                        .push(trade);
+                                }
 
-
-                    match user_event.data{
-
-                        UserData::Fills(fills_vec) =>{
-
-                        let mut fills_map: FillsMap = HashMap::default();
-
-                        for trade in fills_vec.into_iter(){
-                            let coin = trade.coin.clone();
-                            let oid = trade.oid;
-                            fills_map
-                                .entry(coin)
-                                .or_default()
-                                .entry(oid)
-                                .or_default()
-                                .push(trade);
-                        }
-                        println!("\nTRADES  |||||||||| {:?}\n\n", fills_map);
-
-                        for (coin, map) in fills_map.into_iter()
-                        {
-                            for (_oid, fills) in map.into_iter() {
-                                match TradeFillInfo::try_from(fills) {
-                                    Ok(fill) => {
-                                        let cmd = MarketCommand::UserEvent(ExecEvent::Fill(fill));
-                                        // yield once to let other executor tasks make progress
-                                        // not required for correctness
-                                        tokio::task::yield_now().await;
-                                        self.send_cmd(coin.clone(), cmd).await;
-                                    }
-                                    Err(e) => {
-                                        warn!("Failed to aggregate TradeFillInfo for {} market: {}", coin, e);
+                                for (coin, map) in fills_map.into_iter() {
+                                    for (_oid, fills) in map.into_iter() {
+                                        match TradeFillInfo::try_from(fills) {
+                                            Ok(fill) => {
+                                                let cmd = MarketCommand::UserEvent(ExecEvent::Fill(fill));
+                                                tokio::task::yield_now().await;
+                                                self.send_cmd(coin.clone(), cmd).await;
+                                            }
+                                            Err(e) => {
+                                                warn!("Failed to aggregate TradeFillInfo for {} market: {}", coin, e);
+                                            }
+                                        }
                                     }
                                 }
                             }
 
-                        }
-                    }
+                            UserData::Funding(funding_update) => {
+                                if let Ok(fd) = funding_update.usdc.parse::<f64>() {
+                                    let cmd = MarketCommand::UserEvent(ExecEvent::Funding(fd));
+                                    self.send_cmd(funding_update.coin, cmd).await;
+                                } else {
+                                    warn!("Failed to parse user funding");
+                                }
+                            }
 
-                    UserData::Funding(funding_update) => {
-                        if let Ok(fd) = funding_update.usdc.parse::<f64>(){
-                            let cmd = MarketCommand::UserEvent(ExecEvent::Funding(fd));
-                            self.send_cmd(funding_update.coin, cmd).await;
-                        }else{
-                            warn!("Failed to parse user funding");
+                            _ => { info!("{:?}", user_event) }
                         }
-                    }
-
-                    _ => {info!("{:?}", user_event)},
-                    }
-                }else if let Message::NoData = msg{
-                    info!("Received Message::NoData from WS, check connection");
+                    } else if let Message::NoData = msg {
+                        info!("Received Message::NoData from WS, check connection");
                         let _ = err_tx.send(Status(BackendStatus::Offline)).await;
-                }
-            },
+                    }
+                },
 
-
-                    Some(event) = self.bot_rv.recv() => {
-
-                        match event{
-                            AddMarket(add_market_info) => {
-                                let asset = add_market_info.asset.clone();
-                                if let Err(e) = self.add_market(add_market_info, &margin_user_edit).await{
-                                    let _ = err_tx.try_send(UserError(format!("FAILED TO ADD MARKET: {}", e)));
-                                    let _ = err_tx.send(CancelMarket(asset)).await;
+                Some(event) = self.bot_rv.recv() => {
+                    match event {
+                        AddMarket(add_market_info) => {
+                            let asset = add_market_info.asset.clone();
+                            if let Err(e) = self.add_market(add_market_info, &margin_user_edit).await {
+                                let _ = err_tx.try_send(UserError(format!("FAILED TO ADD MARKET: {}", e)));
+                                let _ = err_tx.send(CancelMarket(asset)).await;
                             }
-                        },
-                            ResumeMarket(asset) => {
-                                self.send_cmd(asset.clone(), MarketCommand::Resume).await;
-                                let mut sess_guard = self.session.lock().await;
-                                if let Some(info) = sess_guard.get_mut(&asset) {
-                                    info.is_paused = false;
+                        }
+
+                        ResumeMarket(asset) => {
+                            self.send_cmd(asset.clone(), MarketCommand::Resume).await;
+                            let mut guard = session.lock().await;
+                            if let Some(s) = guard.get_mut(&asset) {
+                                s.is_paused = false;
+                            }
+                        }
+
+                        PauseMarket(asset) => {
+                            self.send_cmd(asset.clone(), MarketCommand::Pause).await;
+                            let mut guard = session.lock().await;
+                            if let Some(s) = guard.get_mut(&asset) {
+                                s.is_paused = true;
+                            }
+                        }
+
+                        RemoveMarket(asset) => {
+                            let _ = self.remove_market(asset.as_str(), &margin_user_edit).await;
+                            let mut guard = session.lock().await;
+                            let _ = guard.remove(&asset);
+                        }
+
+                        MarketComm(command) => {
+                            if let MarketCommand::UpdateStrategy(strat) = command.cmd{
+                                let mut guard = session.lock().await;
+                                if let Some(s) = guard.get_mut(&command.asset){
+                                    s.strategy = strat;
                                 }
-                            },
-                            PauseMarket(asset) => {
-                                self.send_cmd(asset.clone(), MarketCommand::Pause).await;
-                                let mut sess_guard = self.session.lock().await;
-                                if let Some(info) = sess_guard.get_mut(&asset) {
-                                    info.is_paused = true;
-                                }
-                            },
-                            RemoveMarket(asset) => {let _ = self.remove_market(asset.as_str(), &margin_user_edit).await;},
-                            MarketComm(command) => {self.send_cmd(command.asset, command.cmd).await;},
-                            ManualUpdateMargin(asset_margin) => {
-                                let result = {
-                                    let mut book = margin_user_edit.lock().await;
-                                    book.update_asset(asset_margin.clone()).await
-                                };
-                                match result{
+                            }
+                            self.send_cmd(command.asset, command.cmd).await;
+                        }
+
+                        ManualUpdateMargin(asset_margin) => {
+                            let asset = asset_margin.0.clone();
+
+                            let result = {
+                                let mut book = margin_user_edit.lock().await;
+                                book.update_asset(asset_margin.clone()).await
+                            };
+
+                            match result {
                                 Ok(new_margin) => {
+                                    {
+                                        let mut guard = session.lock().await;
+                                        if let Some(s) = guard.get_mut(&asset) {
+                                            s.margin = new_margin;
+                                        }
+                                    }
+                                    let _ = err_tx.try_send(UpdateMarketMargin((asset.clone(), new_margin)));
                                     let cmd = MarketCommand::UpdateMargin(new_margin);
-                                    self.send_cmd(asset_margin.0, cmd).await;
-                                },
+                                    self.send_cmd(asset, cmd).await;
+                                }
 
                                 Err(e) => {
                                     let _ = err_tx.try_send(UserError(e.to_string()));
-                                },
                                 }
-
-                            },
-                            ResumeAll =>{self.resume_all().await},
-                            PauseAll => {self.pause_all().await;},
-                            CloseAll => {
-                                self.close_all().await;
-                                let mut book = margin_user_edit.lock().await;
-                                book.reset();
-                            },
-
-                            GetSession =>{
-                                let session = self.get_session().await;
-                                if let Ok(session) = session{
-                                    let _ = err_tx.try_send(LoadSession(session));
-                                }else{
-                                    let _ = err_tx.try_send(UserError("Failed to load session from server.".to_string()));
-                                }
-                            },
-                            Kill => {
-                                self.close_all().await;
-                                let mut book = margin_user_edit.lock().await;
-                                book.reset();
-                                let _ = self.info_client.shutdown_ws().await;
-                                cancel_token.cancel();
-                                let _ = margin_book_handle.await;
-                                return Ok(());
-                            },
+                            }
                         }
-                },
 
+                        ResumeAll => {
+                            self.resume_all().await;
+                            let mut guard = session.lock().await;
+                            for (_asset, s) in guard.iter_mut() {
+                                s.is_paused = false;
+                            }
+                        }
 
+                        PauseAll => {
+                            self.pause_all().await;
+                            let mut guard = session.lock().await;
+                            for (_asset, s) in guard.iter_mut() {
+                                s.is_paused = true;
+                            }
+                        }
+
+                        CloseAll => {
+                            self.close_all().await;
+                            {
+                                let mut guard = session.lock().await;
+                                guard.clear();
+                            }
+                            let mut book = margin_user_edit.lock().await;
+                            book.reset();
+                        }
+
+                        GetSession => {
+                            let guard = session.lock().await;
+                            let sess: Vec<MarketInfo> = guard.values().map(MarketInfo::from).collect();
+
+                            let universe: Vec<AssetMeta> = if self.universe.is_empty() {
+                                match get_all_assets(&self.info_client).await {
+                                    Ok(u) => u,
+                                    Err(e) => {
+                                        let _ = err_tx.try_send(UserError(format!("Failed to fetch asset universe: {}", e)));
+                                        Vec::new()
+                                    },
+                                }
+                            } else {
+                                self.universe.clone()
+                            };
+
+                            let _ = err_tx.try_send(LoadSession((sess, universe)));
+                        }
+
+                        Kill => {
+                            self.close_all().await;
+                            {
+                                let mut guard = session.lock().await;
+                                guard.clear();
+                            }
+                            let mut book = margin_user_edit.lock().await;
+                            book.reset();
+                            let _ = self.info_client.shutdown_ws().await;
+                            cancel_token.cancel();
+                            let _ = margin_book_handle.await;
+                            return Ok(());
+                        }
+                    }
+                }
             )
         }
     }

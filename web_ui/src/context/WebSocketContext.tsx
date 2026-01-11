@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { AddMarketInfo, MarketInfo, Message, assetMeta } from "../types";
+import type {
+    AddMarketInfo,
+    BackendMarketInfo,
+    MarketInfo,
+    Message,
+    assetMeta,
+} from "../types";
 import type { Strategy } from "../strats";
 import { API_URL, WS_ENDPOINT } from "../consts";
 import { market_add_info } from "../types";
@@ -10,10 +16,14 @@ const CACHED_MARKETS_KEY = "cachedMarkets.v1";
 const MARKET_INFO_KEY = "markets.v1";
 const UNIVERSE_KEY = "universe.v1";
 
-const DEFAULT_PLACEHOLDER_PARAMS: MarketInfo["params"] = {
-    lev: 1,
-    strategy: "rsiEmaScalp",
-};
+const DEFAULT_PLACEHOLDER_STRATEGY: Strategy = "rsiEmaScalp";
+
+const toMarketInfo = (market: BackendMarketInfo): MarketInfo => ({
+    ...market,
+    state: "Ready",
+    prev: market.price,
+    trades: [],
+});
 
 const dedupeMarkets = (markets: MarketInfo[]): MarketInfo[] => {
     const map = new Map<string, MarketInfo>();
@@ -156,10 +166,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             }
 
             if ("confirmMarket" in payload) {
-                const readyMarket: MarketInfo = {
-                    ...payload.confirmMarket,
-                    state: "Ready",
-                };
+                const readyMarket = toMarketInfo(payload.confirmMarket);
                 setMarkets((prev) =>
                     dedupeMarkets(
                         prev.some((m) => m.asset === readyMarket.asset)
@@ -191,9 +198,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                                   pnl: null,
                                   indicators: [],
                                   trades: [],
-                                  params: DEFAULT_PLACEHOLDER_PARAMS,
+                                  strategy: DEFAULT_PLACEHOLDER_STRATEGY,
                                   isPaused: false,
                                   position: null,
+                                  engineState: "idle",
                               },
                           ]
                 );
@@ -212,7 +220,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                     prev.map((m) => {
                         if (m.asset !== asset) return m;
                         if ("lev" in edit) return { ...m, lev: edit.lev };
-                        if ("price" in edit) return { ...m, price: edit.price };
                         if ("openPosition" in edit)
                             return { ...m, position: edit.openPosition };
                         if ("trade" in edit)
@@ -221,6 +228,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                                 trades: [...(m.trades ?? []), edit.trade],
                                 pnl: (m.pnl ?? 0) + edit.trade.pnl,
                             };
+                        if ("engineState" in edit)
+                            return { ...m, engineState: edit.engineState };
                         return m;
                     })
                 );
@@ -240,13 +249,27 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 return;
             }
 
-            if ("updateIndicatorValues" in payload) {
-                const { asset, data } = payload.updateIndicatorValues;
-                setMarkets((prev) =>
-                    prev.map((m) =>
-                        m.asset === asset ? { ...m, indicators: data } : m
-                    )
-                );
+            if ("marketStream" in payload) {
+                const stream = payload.marketStream;
+                if ("price" in stream) {
+                    const { asset, price } = stream.price;
+                    setMarkets((prev) =>
+                        prev.map((m) =>
+                            m.asset === asset
+                                ? { ...m, prev: m.price ?? m.prev, price }
+                                : m
+                        )
+                    );
+                    return;
+                }
+                if ("indicators" in stream) {
+                    const { asset, data } = stream.indicators;
+                    setMarkets((prev) =>
+                        prev.map((m) =>
+                            m.asset === asset ? { ...m, indicators: data } : m
+                        )
+                    );
+                }
                 return;
             }
 
@@ -266,7 +289,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 setMarkets((prev) => {
                     if (hasLocalMarketsRef.current && prev.length > 0)
                         return prev;
-                    const deduped = dedupeMarkets(sessionMarkets);
+                    const deduped = dedupeMarkets(
+                        sessionMarkets.map(toMarketInfo)
+                    );
                     hasLocalMarketsRef.current = deduped.length > 0;
                     return deduped;
                 });
@@ -365,11 +390,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     const updateMarketStrategy = useCallback(
         (asset: string, strategy: Strategy) => {
             setMarkets((prev) =>
-                prev.map((m) =>
-                    m.asset === asset
-                        ? { ...m, params: { ...m.params, strategy } }
-                        : m
-                )
+                prev.map((m) => (m.asset === asset ? { ...m, strategy } : m))
             );
         },
         []

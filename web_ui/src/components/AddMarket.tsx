@@ -8,7 +8,6 @@ import {
     indicatorKinds,
 } from "../types";
 import type {
-    TradeParams,
     AddMarketInfo,
     IndexId,
     IndicatorKind,
@@ -121,10 +120,8 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                 marginType === "alloc"
                     ? { alloc: marginValue / 100 }
                     : { amount: marginValue },
-            tradeParams: {
-                lev,
-                strategy,
-            } as TradeParams,
+            lev,
+            strategy,
             config: validConfig,
         };
 

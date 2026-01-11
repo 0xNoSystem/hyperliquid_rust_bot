@@ -13,7 +13,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
     onAdd,
     onRemove,
 }) => {
-    const { asset, marginAlloc, tradeParams, config } = market;
+    const { asset, marginAlloc, lev, strategy, config } = market;
 
     return (
         <div className="border-line-ink-strong bg-surface-input-soft/80 text-ink hover:bg-surface-input-soft my-2 flex h-fit min-w-fit items-center justify-between rounded-lg border-2 px-3 py-1 font-semibold">
@@ -28,7 +28,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                         : marginAlloc.amount.toFixed(2)}
                     $
                 </span>
-                <span className="w-24">Lev: {tradeParams.lev}x</span>
+                <span className="w-24">Lev: {lev}x</span>
                 <div className="flex flex-col font-normal">
                     {(config ?? []).map(([ind, tf], i) => {
                         const kind = Object.keys(ind)[0] as IndicatorName;
@@ -50,7 +50,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                 <div className="text-ink-muted ml-10 flex items-center gap-2 text-[13px] font-bold">
                     <span className="tracking-wide uppercase">Strategy</span>
                     <span className="bg-ink-50 text-app-text/70 rounded-md px-2 py-1 text-[12px] font-semibold">
-                        {tradeParams.strategy}
+                        {strategy}
                     </span>
                 </div>
             </div>

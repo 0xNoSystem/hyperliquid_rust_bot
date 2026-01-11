@@ -57,7 +57,7 @@ const Rail =
     "rounded-xl border border-line-subtle bg-surface-rail p-4 backdrop-blur";
 const Pane = "rounded-xl border border-line-subtle bg-surface-pane";
 const Head =
-    "px-4 py-3 border-b border-line-subtle text-[11px] uppercase tracking-wide text-app-text/60";
+    "px-4 py-4 border-b border-line-subtle text-[11px] uppercase tracking-wide text-app-text/60";
 const Body = "p-4";
 const Chart = "";
 const Input =
@@ -219,6 +219,30 @@ export default function MarketDetail() {
             return [...prev, { id, edit: "remove" }];
         });
 
+    const queueRemoveAll = () => {
+        if (!market || market.indicators.length === 0) return;
+        setPending((prev) => {
+            const next = prev.slice();
+            for (const data of market.indicators) {
+                const { kind, timeframe } = decompose(data);
+                const id: IndexId = [kind, timeframe];
+                const addIndex = next.findIndex(
+                    (e) => e.edit === "add" && eqIndexId(e.id, id)
+                );
+                if (addIndex !== -1) {
+                    next.splice(addIndex, 1);
+                }
+                if (
+                    next.some((e) => e.edit === "remove" && eqIndexId(e.id, id))
+                ) {
+                    continue;
+                }
+                next.push({ id, edit: "remove" });
+            }
+            return next;
+        });
+    };
+
     const discardPending = () => setPending([]);
     const applyPending = async () => {
         if (!market) return;
@@ -240,7 +264,7 @@ export default function MarketDetail() {
     };
     useEffect(() => {
         setPendingStrategy(null);
-    }, [market?.asset, market?.params.strategy]);
+    }, [market?.asset, market?.strategy]);
 
     if (!market) {
         return (
@@ -256,7 +280,7 @@ export default function MarketDetail() {
 
     const marketLev = market.lev ?? 0;
     const marketMargin = market.margin ?? 0;
-    const currentStrategy = market.params.strategy;
+    const currentStrategy = market.strategy;
     const hasPendingStrategy =
         pendingStrategy !== null && pendingStrategy !== currentStrategy;
     const showMinOrderWarning =
@@ -561,9 +585,9 @@ export default function MarketDetail() {
                 </aside>
 
                 {/* CENTER — chart area + active indicators + trades */}
-                <main className="space-y-4">
+                <main className="flex flex-col space-y-4">
                     {/* Chart placeholder with scanlines */}
-                    <section className={`${Pane}`}>
+                    <section className={`${Pane} min-h-[65vh]`}>
                         <div className={Head}>
                             Chart{" "}
                             <span className="text-accent-danger-muted/50">
@@ -579,7 +603,7 @@ export default function MarketDetail() {
                             </span>
                         </div>
                         <div
-                            className={`${Chart} kwant-theme relative h-[60vh]`}
+                            className={`${Chart} kwant-theme relative min-h-[60vh]`}
                         >
                             <KwantChart
                                 asset={routeAsset}
@@ -593,11 +617,22 @@ export default function MarketDetail() {
                     </section>
 
                     {/* Active indicators list */}
-                    <section className={`${Pane} mt-25`}>
+                    <section className={`${Pane}`}>
                         <div
                             className={`${Head} flex items-center justify-between`}
                         >
-                            <span>Active Indicators</span>
+                            <div className="flex items-center gap-2">
+                                <span>Active Indicators</span>
+                                <button
+                                    type="button"
+                                    onClick={queueRemoveAll}
+                                    disabled={market.indicators.length === 0}
+                                    className="border-action-close-border text-action-close-text hover:bg-action-close-hover rounded-md border bg-gray-500 px-2 py-0.5 text-[10px] tracking-widest disabled:cursor-not-allowed disabled:opacity-40"
+                                    title="Queue removals for all indicators"
+                                >
+                                    Purge
+                                </button>
+                            </div>
                             <span className="text-app-text/40">
                                 Count: {market.indicators.length}
                             </span>
@@ -763,24 +798,34 @@ export default function MarketDetail() {
 
                 {/* RIGHT — Indicator builder + Pending batch */}
                 <aside className="space-y-4">
-                    <div className={Pane}>
-                        <p className="border-accent-brand-deep/40 border-b py-1 text-center">
-                            OPEN POSITION
+                    <>
+                        <p className="text-app-text text-center font-semibold">
+                            Engine:{" "}
+                            <span className="text-orange-500">
+                                {market.engineState ?? "Idle"}
+                            </span>
                         </p>
-                        <div className="px-3 py-2">
-                            {market.position == null ? (
-                                <p className="text-center">No open position</p>
-                            ) : (
-                                <PositionTable
-                                    position={market.position}
-                                    price={market.price}
-                                    lev={market.lev}
-                                    szDecimals={meta?.szDecimals ?? 3}
-                                    formatPrice={formatPrice}
-                                />
-                            )}
+                        <div className={Pane}>
+                            <p className="border-accent-brand-deep/40 border-b py-1 text-center">
+                                POSITION
+                            </p>
+                            <div className="px-3 py-2">
+                                {market.position == null ? (
+                                    <p className="text-center">
+                                        No open position
+                                    </p>
+                                ) : (
+                                    <PositionTable
+                                        position={market.position}
+                                        price={market.price}
+                                        lev={market.lev}
+                                        szDecimals={meta?.szDecimals ?? 3}
+                                        formatPrice={formatPrice}
+                                    />
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    </>
                     <section className={Pane}>
                         <div className={Head}>Add Indicator</div>
                         <div className={`${Body} grid grid-cols-2 gap-3`}>

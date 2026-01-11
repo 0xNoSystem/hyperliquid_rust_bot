@@ -57,6 +57,21 @@ export const indicatorParamLabels: Record<IndicatorName, string[]> = {
     sma: ["Periods"],
 };
 
+export type EngineView = "idle" | "armed" | "opening" | "closing" | "open";
+
+export interface BackendMarketInfo {
+    asset: string;
+    lev: number;
+    price: number;
+    margin: number;
+    pnl: number;
+    strategy: Strategy;
+    isPaused: boolean;
+    indicators: indicatorData[];
+    position: OpenPositionLocal | null;
+    engineState: EngineView;
+}
+
 export interface MarketInfo {
     asset: string;
     state: "Loading" | "Ready";
@@ -65,11 +80,12 @@ export interface MarketInfo {
     prev: number | null;
     margin: number | null;
     pnl: number | null;
-    params: TradeParams;
+    strategy: Strategy;
     isPaused: boolean;
     indicators: indicatorData[];
     trades: TradeInfo[];
     position: OpenPositionLocal | null;
+    engineState: EngineView;
 }
 
 export interface indicatorData {
@@ -208,21 +224,17 @@ export function into(tf: string): TimeFrame {
     return TIMEFRAME_CAMELCASE[tf];
 }
 
-export interface TradeParams {
-    lev: number;
-    strategy: Strategy;
-}
-
 export type MarginAllocation = { alloc: number } | { amount: number };
 
 export function market_add_info(m: MarketInfo): AddMarketInfo {
-    const { asset, margin, params, indicators } = m;
+    const { asset, margin, lev, strategy, indicators } = m;
     const config = indicators.map((i) => i.id);
 
     return {
         asset,
         marginAlloc: { amount: margin ?? 0 },
-        tradeParams: params,
+        lev: lev ?? 1,
+        strategy,
         config,
     };
 }
@@ -230,7 +242,8 @@ export function market_add_info(m: MarketInfo): AddMarketInfo {
 export interface AddMarketInfo {
     asset: string;
     marginAlloc: MarginAllocation;
-    tradeParams: TradeParams;
+    lev: number;
+    strategy: Strategy;
     config?: IndexId[];
 }
 
@@ -240,30 +253,35 @@ export interface AddMarketProps {
     assets: assetMeta[];
 }
 
-export type LoadSessionPayload = [MarketInfo[], assetMeta[]] | assetMeta[];
+export type BackendLoadSessionPayload =
+    | [BackendMarketInfo[], assetMeta[]]
+    | assetMeta[];
+
+export type MarketStream =
+    | { price: { asset: string; price: number } }
+    | { indicators: { asset: string; data: indicatorData[] } };
+
+export type BackendStatus = "online" | "offline" | "shutdown";
 
 export type Message =
     | { preconfirmMarket: string }
-    | { confirmMarket: MarketInfo }
+    | { confirmMarket: BackendMarketInfo }
     | { cancelMarket: string }
-    | { updatePrice: assetPrice }
-    | { newTradeInfo: MarketTradeInfo }
+    | { marketStream: MarketStream }
     | { updateTotalMargin: number }
     | { updateMarketMargin: assetMargin }
-    | { updateIndicatorValues: { asset: string; data: indicatorData[] } }
     | { marketInfoEdit: [string, editMarketInfo] }
     | { userError: string }
-    | { loadSession: LoadSessionPayload }
-    | { status: "offline" | "online" | "shutdown" };
+    | { loadSession: BackendLoadSessionPayload }
+    | { status: BackendStatus };
 
-export type assetPrice = [string, number];
 export type assetMargin = [string, number];
 
 export type editMarketInfo =
     | { lev: number }
-    | { price: number }
-    | { openPosition: OpenPositionLocal }
-    | { trade: TradeInfo };
+    | { openPosition: OpenPositionLocal | null }
+    | { trade: TradeInfo }
+    | { engineState: EngineView };
 
 export type Side = "long" | "short";
 
@@ -291,11 +309,6 @@ export interface TradeInfo {
     funding: number;
     open: FillInfo;
     close: FillInfo;
-}
-
-export interface MarketTradeInfo {
-    asset: string;
-    info: TradeInfo;
 }
 
 export interface OpenPositionLocal {
