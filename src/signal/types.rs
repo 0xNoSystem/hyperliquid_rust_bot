@@ -302,7 +302,6 @@ pub struct Entry {
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum EditType {
-    Toggle,
     Add,
     Remove,
 }

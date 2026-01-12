@@ -628,7 +628,6 @@ impl SignalEngine {
                             EditType::Remove => {
                                 self.remove_indicator(entry.id);
                             }
-                            EditType::Toggle => self.toggle_indicator(entry.id),
                         }
                     }
                     if let Some(data) = price_data {
