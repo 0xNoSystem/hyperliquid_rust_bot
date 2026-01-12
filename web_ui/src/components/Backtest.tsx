@@ -1,15 +1,22 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import {
-    TIMEFRAME_CAMELCASE,
-    fromTimeFrame,
-    TF_TO_MS,
-    sanitizeAsset,
-} from "../types";
+import { TIMEFRAME_CAMELCASE, TF_TO_MS, sanitizeAsset } from "../types";
 import type { TimeFrame } from "../types";
 import ChartContainer from "../chart/ChartContainer";
-import { getTimeframeCache } from "../chart/candleCache";
-import { fetchCandles } from "../chart/utils";
+import { isTimeframeSupported } from "../chart/dataSources";
+import { loadCandles } from "../chart/loader";
+import {
+    DEFAULT_DATA_SOURCE,
+    DEFAULT_QUOTE_ASSET,
+    type DataSource,
+    type ExchangeId,
+    type MarketType,
+} from "../chart/types";
+import {
+    EXCHANGE_OPTIONS,
+    MARKET_OPTIONS,
+    getMarketsForExchange,
+} from "../chart/providers";
 import AssetIcon from "../chart/visual/AssetIcon";
 import type { CandleData } from "../chart/utils";
 import { useChartContext } from "../chart/ChartContextStore";
@@ -31,6 +38,8 @@ const PRESET_DEFAULT_TF: Partial<Record<RangePreset, TimeFrame>> = {
     "30D": "hour4",
     YTD: "day1",
 };
+
+const TIMEFRAME_ORDER = Object.values(TIMEFRAME_CAMELCASE) as TimeFrame[];
 
 type CustomDateParts = {
     year: number;
@@ -91,60 +100,6 @@ function normalizeParts(parts: CustomDateParts): CustomDateParts {
     return { ...parts, day, time: sanitizeTime(parts.time) };
 }
 
-function normalizeRange(
-    startMs: number,
-    endMs: number,
-    candleIntervalMs: number
-) {
-    const clampedStart = Math.max(0, startMs);
-    const normalizedStart = clampedStart - (clampedStart % candleIntervalMs);
-    const normalizedEnd = Math.max(
-        normalizedStart + candleIntervalMs,
-        Math.ceil(endMs / candleIntervalMs) * candleIntervalMs
-    );
-
-    return { normalizedStart, normalizedEnd };
-}
-
-function collectCachedCandles(
-    tfCache: Map<number, CandleData>,
-    asset: string,
-    normalizedStart: number,
-    normalizedEnd: number,
-    candleIntervalMs: number
-) {
-    const cached: CandleData[] = [];
-    const missing: { start: number; end: number }[] = [];
-
-    let gapStart: number | null = null;
-
-    for (let ts = normalizedStart; ts < normalizedEnd; ts += candleIntervalMs) {
-        const candle = tfCache.get(ts);
-
-        if (candle && candle.asset === asset) {
-            cached.push(candle);
-            if (gapStart !== null) {
-                missing.push({ start: gapStart, end: ts });
-                gapStart = null;
-            }
-        } else if (gapStart === null) {
-            gapStart = ts;
-        }
-    }
-
-    if (gapStart !== null) {
-        missing.push({ start: gapStart, end: normalizedEnd });
-    }
-
-    return { cached, missing };
-}
-
-function cacheToArray(tfCache: Map<number, CandleData>, asset: string) {
-    return Array.from(tfCache.values())
-        .filter((c) => c.asset === asset)
-        .sort((a, b) => a.start - b.start);
-}
-
 function buildCustomRangeISO(
     startParts: CustomDateParts,
     endParts: CustomDateParts
@@ -164,81 +119,6 @@ function buildCustomRangeISO(
         start: new Date(startMs).toISOString().slice(0, 16),
         end: new Date(endMs).toISOString().slice(0, 16),
     };
-}
-
-async function loadCandles(
-    tf: TimeFrame,
-    startMs: number,
-    endMs: number,
-    asset: string,
-    setCached?: (c: CandleData[]) => void
-): Promise<CandleData[]> {
-    if (!asset) return [];
-
-    const candleIntervalMs = TF_TO_MS[tf];
-    const prefetchBuffer = 200 * candleIntervalMs;
-
-    let rangeStart = Math.max(0, startMs - prefetchBuffer);
-    let rangeEnd = Math.min(Date.now(), endMs + prefetchBuffer);
-
-    // Fallback to recent window if range is invalid
-    if (!rangeStart || !rangeEnd || rangeEnd <= rangeStart) {
-        rangeEnd = Date.now();
-        rangeStart = rangeEnd - 30 * 24 * 60 * 60 * 1000;
-    }
-
-    const { normalizedStart, normalizedEnd } = normalizeRange(
-        rangeStart,
-        rangeEnd,
-        candleIntervalMs
-    );
-    const expectedCandles = Math.ceil(
-        (normalizedEnd - normalizedStart) / candleIntervalMs
-    );
-    const tfCache = getTimeframeCache(tf, asset);
-    const { cached, missing } = collectCachedCandles(
-        tfCache,
-        asset,
-        normalizedStart,
-        normalizedEnd,
-        candleIntervalMs
-    );
-    const fullCache = cacheToArray(tfCache, asset);
-    if (setCached) {
-        setCached(fullCache);
-    }
-
-    console.log(
-        `%c[LOAD CANDLES] TF=${tf}, Expected=${expectedCandles}, Cached=${cached.length}`,
-        "color: orange; font-weight: bold;"
-    );
-
-    // Serve straight from cache when we already have full coverage
-    if (missing.length === 0 && cached.length > 0) {
-        return fullCache;
-    }
-
-    try {
-        for (const segment of missing) {
-            const data = await fetchCandles(
-                asset,
-                segment.start,
-                segment.end,
-                fromTimeFrame(tf)
-            );
-
-            for (const candle of data) {
-                tfCache.set(candle.start, candle);
-            }
-        }
-    } catch (err) {
-        console.error("Failed to fetch candles", err);
-        return fullCache;
-    }
-
-    const merged = cacheToArray(tfCache, asset);
-
-    return merged;
 }
 
 type BacktestContentProps = {
@@ -263,6 +143,14 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     const [intervalOn, setIntervalOn] = useState(false);
     const [candleData, setCandleData] = useState<CandleData[]>([]);
     const [showDatePicker, setShowDatePicker] = useState(true);
+    const [selectedExchange, setSelectedExchange] = useState<ExchangeId>(
+        DEFAULT_DATA_SOURCE.exchange
+    );
+    const [selectedMarket, setSelectedMarket] = useState<MarketType>(
+        DEFAULT_DATA_SOURCE.market
+    );
+    const requestIdRef = useRef(0);
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     const [rangePreset, setRangePreset] = useState<RangePreset>("30D");
     const [customStartParts, setCustomStartParts] =
@@ -335,6 +223,53 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         }
     };
 
+    useEffect(() => {
+        const markets = getMarketsForExchange(selectedExchange);
+        if (!markets.includes(selectedMarket)) {
+            setSelectedMarket(markets[0] ?? DEFAULT_DATA_SOURCE.market);
+        }
+    }, [selectedExchange, selectedMarket]);
+
+    const selectedDataSource = useMemo<DataSource>(
+        () => ({
+            exchange: selectedExchange,
+            market: selectedMarket,
+        }),
+        [selectedExchange, selectedMarket]
+    );
+
+    const supportedTimeframes = useMemo(
+        () =>
+            TIMEFRAME_ORDER.filter((tf) =>
+                isTimeframeSupported(selectedDataSource, tf)
+            ),
+        [selectedDataSource]
+    );
+
+    const selectedExchangeMarkets = useMemo(
+        () => getMarketsForExchange(selectedExchange),
+        [selectedExchange]
+    );
+
+    useEffect(() => {
+        if (supportedTimeframes.length === 0) return;
+        if (supportedTimeframes.includes(timeframe)) return;
+
+        const currentMs = TF_TO_MS[timeframe];
+        let closest = supportedTimeframes[0];
+        let bestDiff = Math.abs(TF_TO_MS[closest] - currentMs);
+        for (const candidate of supportedTimeframes) {
+            const diff = Math.abs(TF_TO_MS[candidate] - currentMs);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                closest = candidate;
+            }
+        }
+        if (closest !== timeframe) {
+            setTimeframe(closest);
+        }
+    }, [supportedTimeframes, timeframe]);
+
     const startDayOptions = getDaysInMonth(
         customStartParts.year,
         customStartParts.month
@@ -387,22 +322,41 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     useEffect(() => {
         if (!routeAsset) return;
         if (startTime <= 0 || endTime <= startTime) return;
+        if (!isTimeframeSupported(selectedDataSource, timeframe)) return;
+
+        const requestId = ++requestIdRef.current;
+        abortControllerRef.current?.abort();
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
 
         const timer = setTimeout(() => {
             (async () => {
-                const data = await loadCandles(
-                    timeframe,
-                    startTime,
-                    endTime,
-                    routeAsset,
-                    setCandleData
-                );
-                setCandleData(data);
+                try {
+                    const data = await loadCandles(
+                        selectedDataSource,
+                        timeframe,
+                        startTime,
+                        endTime,
+                        routeAsset,
+                        DEFAULT_QUOTE_ASSET,
+                        setCandleData,
+                        controller.signal
+                    );
+                    if (requestIdRef.current === requestId) {
+                        setCandleData(data);
+                    }
+                } catch (err) {
+                    if (controller.signal.aborted) return;
+                    console.error("Failed to fetch candles", err);
+                }
             })();
         }, 200);
 
-        return () => clearTimeout(timer);
-    }, [startTime, endTime, timeframe, routeAsset]);
+        return () => {
+            clearTimeout(timer);
+            controller.abort();
+        };
+    }, [startTime, endTime, timeframe, routeAsset, selectedDataSource]);
 
     return (
         <div className="bg-ink-10 flex flex-1 flex-col pb-50">
@@ -558,7 +512,41 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                 </button>
                             </div>
                         )}
-                        <div className="ml-auto">
+                        <div className="ml-auto flex flex-wrap items-center gap-2">
+                            <select
+                                value={selectedExchange}
+                                onChange={(e) =>
+                                    setSelectedExchange(
+                                        e.target.value as ExchangeId
+                                    )
+                                }
+                                className="border-line-muted bg-ink-80 text-app-text/80 rounded border px-2 py-1 text-sm"
+                            >
+                                {EXCHANGE_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>
+                                        {opt.label}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <select
+                                value={selectedMarket}
+                                onChange={(e) =>
+                                    setSelectedMarket(
+                                        e.target.value as MarketType
+                                    )
+                                }
+                                className="border-line-muted bg-ink-80 text-app-text/80 rounded border px-2 py-1 text-sm"
+                            >
+                                {MARKET_OPTIONS.filter((opt) =>
+                                    selectedExchangeMarkets.includes(opt.value)
+                                ).map((opt) => (
+                                    <option key={opt.value} value={opt.value}>
+                                        {opt.label}
+                                    </option>
+                                ))}
+                            </select>
+
                             <select
                                 value={activeAsset}
                                 onChange={(e) =>
@@ -594,25 +582,39 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                     <div className="bg-app-surface-5 flex flex-1 flex-col">
                         <div className="bg-ink-70 z-5 grid w-full grid-cols-13 text-center tracking-normal">
                             {Object.entries(TIMEFRAME_CAMELCASE).map(
-                                ([short, tf]) => (
-                                    <div
-                                        className="text-app-text/70 hover:bg-ink-hover cursor-pointer py-2"
-                                        key={short}
-                                        onClick={() => {
-                                            setTimeframe(tf);
-                                        }}
-                                    >
-                                        <span
-                                            className={`px-2 text-center text-sm ${
-                                                timeframe === tf
-                                                    ? "text-timeframe-active font-bold"
-                                                    : ""
+                                ([short, tf]) => {
+                                    const supported =
+                                        supportedTimeframes.includes(tf);
+                                    return (
+                                        <div
+                                            className={`py-2 ${
+                                                supported
+                                                    ? "text-app-text/70 hover:bg-ink-hover cursor-pointer"
+                                                    : "text-app-text/30 cursor-not-allowed"
                                             }`}
+                                            key={short}
+                                            onClick={() => {
+                                                if (!supported) return;
+                                                setTimeframe(tf);
+                                            }}
+                                            title={
+                                                supported
+                                                    ? undefined
+                                                    : "Not supported by selected source"
+                                            }
                                         >
-                                            {short}
-                                        </span>
-                                    </div>
-                                )
+                                            <span
+                                                className={`px-2 text-center text-sm ${
+                                                    timeframe === tf
+                                                        ? "text-timeframe-active font-bold"
+                                                        : ""
+                                                }`}
+                                            >
+                                                {short}
+                                            </span>
+                                        </div>
+                                    );
+                                }
                             )}
                         </div>
 

@@ -1,23 +1,28 @@
-import type { TimeFrame } from "../types";
-import type { CandleData } from "./utils";
+import type { CandleData, DataSource, TimeFrame } from "./types";
 
-export const candleCache = new Map<TimeFrame, Map<number, CandleData>>();
+type CacheKey = string;
 
-const cacheOwners = new Map<TimeFrame, string>();
+export const candleCache = new Map<CacheKey, Map<number, CandleData>>();
 
-export function getTimeframeCache(tf: TimeFrame, asset: string) {
-    const owner = cacheOwners.get(tf);
+const buildCacheKey = (
+    source: DataSource,
+    asset: string,
+    quoteAsset: string,
+    tf: TimeFrame
+) =>
+    `${source.exchange}:${source.market}:${asset}:${quoteAsset}:${tf}`.toUpperCase();
 
-    if (owner && owner !== asset) {
-        candleCache.set(tf, new Map());
-    }
-
-    cacheOwners.set(tf, asset);
-
-    let tfCache = candleCache.get(tf);
+export function getTimeframeCache(
+    source: DataSource,
+    asset: string,
+    quoteAsset: string,
+    tf: TimeFrame
+) {
+    const cacheKey = buildCacheKey(source, asset, quoteAsset, tf);
+    let tfCache = candleCache.get(cacheKey);
     if (!tfCache) {
         tfCache = new Map();
-        candleCache.set(tf, tfCache);
+        candleCache.set(cacheKey, tfCache);
     }
 
     return tfCache;
@@ -25,5 +30,4 @@ export function getTimeframeCache(tf: TimeFrame, asset: string) {
 
 export function clearCandleCache() {
     candleCache.clear();
-    cacheOwners.clear();
 }
