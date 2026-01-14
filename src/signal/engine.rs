@@ -33,6 +33,7 @@ pub struct SignalEngine {
     exec_params: ExecParams,
     state: EngineState,
     pending_orders: Option<PendingOpen>,
+    paused: bool,
 }
 
 impl SignalEngine {
@@ -74,6 +75,7 @@ impl SignalEngine {
             exec_params,
             state: EngineState::Idle,
             pending_orders: None,
+            paused: false,
         }
     }
 
@@ -381,12 +383,14 @@ impl SignalEngine {
     pub fn refresh_state(&mut self, price: &Price) {
         match self.state {
             //check for timeouts
-            EngineState::Opening(timeout) => {
+            EngineState::Opening(ttl_option) => {
                 if let Some(open_pos) = self.exec_params.open_pos {
                     self.state = EngineState::Open(open_pos);
                     return;
                 }
-                if timeout.expire_at <= price.open_time {
+                if let Some(timeout) = ttl_option
+                    && timeout.expire_at <= price.open_time
+                {
                     match timeout.timeout_info.action {
                         OnTimeout::Force => {
                             //translate to market order
@@ -407,12 +411,15 @@ impl SignalEngine {
                 }
             }
 
-            EngineState::Closing(timeout) => {
+            EngineState::Closing(ttl_option) => {
                 if self.exec_params.open_pos.is_none() {
                     self.state = EngineState::Idle;
                     return;
                 }
-                if timeout.expire_at <= price.open_time {
+
+                if let Some(timeout) = ttl_option
+                    && timeout.expire_at <= price.open_time
+                {
                     match timeout.timeout_info.action {
                         OnTimeout::Force => {
                             //translate to market order
@@ -508,6 +515,9 @@ impl SignalEngine {
                         {
                             let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
                         }
+                        if self.paused {
+                            continue;
+                        }
 
                         self.refresh_state(&price);
 
@@ -568,14 +578,14 @@ impl SignalEngine {
                                         };
                                         match intent {
                                             Intent::Reduce(_) | Intent::Flatten(_) => {
-                                                self.state = EngineState::Closing(timeout)
+                                                self.state = EngineState::Closing(Some(timeout))
                                             }
                                             Intent::Open(_) => {
-                                                self.state = EngineState::Opening(timeout)
+                                                self.state = EngineState::Opening(Some(timeout))
                                             }
                                             _ => {}
                                         }
-                                    } else {
+                                    } else if intent.is_market_order() {
                                         let ttl = TimeoutInfo::default();
                                         let timeout = LiveTimeoutInfo {
                                             expire_at: price.open_time + ttl.duration.as_ms(),
@@ -584,10 +594,20 @@ impl SignalEngine {
                                         };
                                         match intent {
                                             Intent::Reduce(_) | Intent::Flatten(_) => {
-                                                self.state = EngineState::Closing(timeout)
+                                                self.state = EngineState::Closing(Some(timeout))
                                             }
                                             Intent::Open(_) => {
-                                                self.state = EngineState::Opening(timeout)
+                                                self.state = EngineState::Opening(Some(timeout))
+                                            }
+                                            _ => {}
+                                        }
+                                    } else {
+                                        match intent {
+                                            Intent::Reduce(_) | Intent::Flatten(_) => {
+                                                self.state = EngineState::Closing(None)
+                                            }
+                                            Intent::Open(_) => {
+                                                self.state = EngineState::Opening(None)
                                             }
                                             _ => {}
                                         }
@@ -660,6 +680,22 @@ impl SignalEngine {
                     }
                 }
 
+                EngineCommand::ExecToggle => {
+                    if !self.paused {
+                        self.paused = true;
+                        self.state = EngineState::Idle;
+                        self.pending_orders = None;
+
+                        if let Some(sender) = &self.data_tx {
+                            let _ = sender
+                                .send(MarketCommand::EngineStateChange(self.state.into()))
+                                .await;
+                        }
+                    } else {
+                        self.paused = false;
+                    }
+                }
+
                 EngineCommand::Stop => {
                     return;
                 }
@@ -703,6 +739,7 @@ impl SignalEngine {
             exec_params: trade_params,
             state: EngineState::Idle,
             pending_orders: None,
+            paused: false,
         }
     }
 }
@@ -716,6 +753,7 @@ pub enum EngineCommand {
         price_data: Option<TimeFrameData>,
     },
     UpdateExecParams(ExecParam),
+    ExecToggle,
     Stop,
 }
 
@@ -724,8 +762,8 @@ pub enum EngineState {
     Idle,
     Armed(u64), //expiry_time
     Open(OpenPosInfo),
-    Opening(LiveTimeoutInfo),
-    Closing(LiveTimeoutInfo),
+    Opening(Option<LiveTimeoutInfo>),
+    Closing(Option<LiveTimeoutInfo>),
 }
 
 impl From<EngineState> for EngineView {

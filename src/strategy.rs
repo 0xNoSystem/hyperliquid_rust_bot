@@ -34,10 +34,16 @@ pub struct LiveTimeoutInfo {
     pub intent: Intent,
 }
 
+impl LiveTimeoutInfo {
+    pub fn expires_in(&self) -> TimeDelta {
+        self.timeout_info.duration
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum BusyType {
-    Opening(LiveTimeoutInfo),
-    Closing(LiveTimeoutInfo),
+    Opening(Option<LiveTimeoutInfo>),
+    Closing(Option<LiveTimeoutInfo>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -222,5 +228,38 @@ impl Intent {
 
             _ => None,
         }
+    }
+
+    pub fn is_order(&self) -> bool {
+        matches!(
+            self,
+            Intent::Open(_) | Intent::Reduce(_) | Intent::Flatten(_)
+        )
+    }
+
+    pub fn is_market_order(&self) -> bool {
+        match self {
+            Intent::Open(order) => match &order.liq_side {
+                LiqSide::Maker(_) => false,
+                LiqSide::Taker => true,
+            },
+
+            Intent::Reduce(order) => match &order.liq_side {
+                LiqSide::Maker(_) => false,
+                LiqSide::Taker => true,
+            },
+
+            Intent::Flatten(liq_side) => match liq_side {
+                LiqSide::Maker(_) => false,
+                LiqSide::Taker => true,
+            },
+
+            Intent::Abort => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_limit_order(&self) -> bool {
+        !self.is_market_order()
     }
 }

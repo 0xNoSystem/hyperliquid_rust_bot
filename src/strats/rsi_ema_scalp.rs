@@ -3,6 +3,8 @@ use super::*;
 use TimeFrame::*;
 use Value::*;
 
+const RSI_OVERSOLD: f64 = 33.0;
+
 pub struct RsiEmaScalp {
     rsi_1h: IndexId,
     rsi_15m: IndexId,
@@ -67,7 +69,7 @@ impl Strat for RsiEmaScalp {
             if  !prev_uptrend && uptrend{
                 return Some(Intent::open_market(Side::Long, SizeSpec::MarginPct(50.0), None));
             }
-        }else if rsi_1h_value < 30.0 && !uptrend{
+        }else if rsi_1h_value < RSI_OVERSOLD && !uptrend{
             return Some(Intent::Arm(timedelta!(Min15, 1)));
         }
         self.prev_fast_above = Some(uptrend);
@@ -98,10 +100,10 @@ impl Strat for RsiEmaScalp {
         };
 
 
-        if rsi_15m_value >= 50.0|| ((last_price.open_time - open_pos.open_time > timedelta!(Min15, 1).as_ms()) && rsi_1h_value < 35.0){
+        if rsi_15m_value >= 55.0|| ((last_price.open_time - open_pos.open_time > timedelta!(Min15, 1).as_ms()) && rsi_1h_value < 35.0){
             let ttl = TimeoutInfo{
                 action: OnTimeout::Force,
-                duration: timedelta!(Min15, 1),
+                duration: timedelta!(Min5, 1),
             };
             let order = Intent::flatten_limit(last_price.close * 1.003, Some(ttl));
             return Some(order);
@@ -112,7 +114,19 @@ impl Strat for RsiEmaScalp {
     }
 
     fn on_busy(&mut self, ctx: StratContext, busy: BusyType) -> Option<Intent>{
-        //ONLY ABORT IF NEEDED
+        if let BusyType::Closing(close_ttl) = busy
+            && let Some(ttl) = close_ttl{
+                if ttl.expires_in() > timedelta!(Min1, 1){
+                
+                let rsi_15m_value = match ctx.indicators.get(&self.rsi_15m)?.value {
+                    RsiValue(v) => v,
+                    _ => return None,
+                    };
+                if rsi_15m_value < 50.0{
+                    return Some(Intent::Abort);
+                }
+                } 
+        }
         None
     }
 

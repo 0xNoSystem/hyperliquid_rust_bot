@@ -534,6 +534,7 @@ impl Market {
                         .exec_tx
                         .send_async(Control(ExecControl::Pause))
                         .await;
+                    let _ = self.senders.engine_tx.send(EngineCommand::ExecToggle);
                 }
 
                 MarketCommand::Resume => {

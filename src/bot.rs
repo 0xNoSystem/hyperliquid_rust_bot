@@ -1,6 +1,6 @@
 use crate::{
-    AddMarketInfo, BackendStatus, ExecEvent, HLTradeInfo, Market, MarketCommand, MarketInfo,
-    MarketState, MarketUpdate, TradeFillInfo, UpdateFrontend, Wallet,
+    AddMarketInfo, BackendStatus, EngineView, ExecEvent, HLTradeInfo, Market, MarketCommand,
+    MarketInfo, MarketState, MarketUpdate, TradeFillInfo, UpdateFrontend, Wallet,
 };
 use hyperliquid_rust_sdk::{
     AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, UserData,
@@ -468,6 +468,15 @@ impl Bot {
                         ManualUpdateMargin(asset_margin) => {
                             let asset = asset_margin.0.clone();
 
+                            let mut guard = session.lock().await;
+                            if let Some(s) = guard.get_mut(&asset) {
+                                if matches!(s.engine_state, EngineView::Open | EngineView::Opening | EngineView::Closing){
+                                    let _ = err_tx.try_send(
+                                        UserError(format!(
+                                            "Margin update failed: {} market has open order(s)", &asset)
+                                            ));
+                                    continue;
+                                }
                             let result = {
                                 let mut book = margin_user_edit.lock().await;
                                 book.update_asset(asset_margin.clone()).await
@@ -490,6 +499,11 @@ impl Bot {
                                     let _ = err_tx.try_send(UserError(e.to_string()));
                                 }
                             }
+
+
+                            }
+
+
                         }
 
                         ResumeAll => {

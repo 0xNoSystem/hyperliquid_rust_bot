@@ -55,7 +55,7 @@ pub(super) fn calc_trigger_px(
         );
     }
 
-    let price_delta = delta / lev as f64;
+    let price_delta = (delta / lev as f64) / 100.0;
 
     match (side, trigger) {
         (Side::Long, TriggerKind::Tp) => ref_px * (1.0 + price_delta),
