@@ -461,7 +461,19 @@ impl Bot {
                                 if let Some(s) = guard.get_mut(&command.asset){
                                     s.strategy = strat;
                                 }
+                            }else if let MarketCommand::UpdateLeverage(_lev) = command.cmd{
+                                let mut guard = session.lock().await;
+                                if let Some(s) = guard.get_mut(&command.asset)
+                                    && s.position.is_some()
+                                {
+                                    let _ = err_tx.try_send(
+                                        UserError(format!(
+                                            "Leverage update failed: {} market has open order(s)", &command.asset)
+                                            ));
+                                    continue;
+                                }
                             }
+
                             self.send_cmd(command.asset, command.cmd).await;
                         }
 

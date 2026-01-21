@@ -18,7 +18,7 @@ use hyperliquid_rust_sdk::{
 };
 
 use super::*;
-use crate::{MAX_DECIMALS, MarketCommand, roundf};
+use crate::{MAX_DECIMALS, MarketCommand, PX_DECIMAL_ANOMALY, roundf};
 
 pub struct Executor {
     trade_rv: Receiver<ExecCommand>,
@@ -41,7 +41,11 @@ impl Executor {
         let exchange_client =
             Arc::new(ExchangeClient::new(None, wallet, Some(BaseUrl::Mainnet), None, None).await?);
 
-        let px_dec_fix = if asset.name == "SOL" { 2 } else { 1 };
+        let px_dec_fix = if PX_DECIMAL_ANOMALY.contains(&asset.name.as_str()) {
+            2
+        } else {
+            1
+        };
         let decimals = Decimals {
             sz: asset.sz_decimals,
             px: MAX_DECIMALS - asset.sz_decimals - px_dec_fix,
