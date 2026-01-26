@@ -497,7 +497,6 @@ impl Bot {
                             match result {
                                 Ok(new_margin) => {
                                     {
-                                        let mut guard = session.lock().await;
                                         if let Some(s) = guard.get_mut(&asset) {
                                             s.margin = new_margin;
                                         }
