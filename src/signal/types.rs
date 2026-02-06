@@ -151,7 +151,7 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
 
 type History = Box<ArrayDeque<Price, { MAX_HISTORY }, Wrapping>>;
 #[derive(Debug)]
-pub(super) struct Tracker {
+pub struct Tracker {
     pub price_data: History,
     pub indicators: HashMap<IndicatorKind, Handler, BuildHasherDefault<FxHasher>>,
     tf: TimeFrame,

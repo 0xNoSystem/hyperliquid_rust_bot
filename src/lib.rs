@@ -1,5 +1,5 @@
 mod assets;
-//mod backtest;
+pub mod backtest;
 mod consts;
 mod frontend;
 mod helper;
@@ -17,7 +17,7 @@ pub mod signal;
 pub use assets::MARKETS;
 pub use strategy::*;
 pub use strats::Strategy;
-//pub use backtest::BackTester;
+pub use backtest::Backtester;
 pub use bot::{Bot, BotEvent, BotToMarket};
 pub use consts::*;
 pub use exec::*;

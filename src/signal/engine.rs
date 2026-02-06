@@ -709,8 +709,9 @@ impl SignalEngine {
         self.display_values();
         //Update
     }
-
-    pub fn new_backtest(trade_params: ExecParams, strategy: Strategy) -> Self {
+}
+impl SignalEngine {
+    pub fn new_backtest(margin: f64, lev: usize, strategy: Strategy) -> Self {
         let strategy = strategy.init();
         let required_indicators = strategy.required_indicators();
 
@@ -726,21 +727,118 @@ impl SignalEngine {
             }
         }
 
-        //channels won't be used in backtesting, these are placeholders
         let (_tx, dummy_rv) = unbounded_channel::<EngineCommand>();
-        let (dummy_tx, _rx) = bounded::<ExecCommand>(0);
+        let (trade_tx, _rx) = bounded::<ExecCommand>(0);
+
+        let exec_params = ExecParams::new(margin, lev);
 
         SignalEngine {
             engine_rv: dummy_rv,
-            trade_tx: dummy_tx,
+            trade_tx: trade_tx,
             data_tx: None,
             trackers,
             strategy,
-            exec_params: trade_params,
+            exec_params,
             state: EngineState::Idle,
             pending_orders: None,
             paused: false,
         }
+    }
+
+    pub fn tick(&mut self, price: Price) -> Option<EngineOrder> {
+        self.digest(price);
+        self.refresh_state(&price);
+
+        let values = self.get_active_values();
+        let mut emitted: Option<EngineOrder> = None;
+
+        if let Some(intent) = self.strat_tick(price, values) {
+            let busy = matches!(
+                self.state,
+                EngineState::Opening(_) | EngineState::Closing(_)
+            );
+
+            if busy && intent != Intent::Abort {
+                log::warn!("Intent ignored while busy: {:?}", intent);
+            }
+
+            if intent == Intent::Abort {
+                self.force_close_exec();
+                let _ = self.pending_orders.take();
+                self.state = EngineState::Idle;
+            } else if let Intent::Arm(duration) = intent {
+                if self.state == EngineState::Idle {
+                    self.state = EngineState::Armed(price.open_time + duration.as_ms());
+                } else {
+                    log::warn!(
+                        "Intent::Arm failed, Engine is not in Idle state: {:?}",
+                        self.state
+                    );
+                }
+            } else if intent == Intent::Disarm {
+                if let EngineState::Armed(_exp) = self.state {
+                    self.state = EngineState::Idle;
+                } else {
+                    log::warn!(
+                        "Intent::Disarm failed, Engine is not Armed: {:?}",
+                        self.state
+                    );
+                }
+            } else if let Some(pending) = self.translate_intent(&intent, &price) {
+                if let Err(e) = self.validate_trade(pending, price.close) {
+                    log::warn!("Trade rejected: {}", e);
+                } else {
+                    let main_order = match pending {
+                        PendingOrder::Open(p) => {
+                            if p.has_trigger() {
+                                self.pending_orders = Some(p);
+                            }
+                            p.open
+                        }
+                        PendingOrder::Close(p) => p,
+                    };
+                    emitted = Some(main_order);
+
+                    if let Some(ttl) = intent.get_ttl() {
+                        let timeout = LiveTimeoutInfo {
+                            expire_at: price.open_time + ttl.duration.as_ms(),
+                            timeout_info: ttl,
+                            intent,
+                        };
+                        match intent {
+                            Intent::Reduce(_) | Intent::Flatten(_) => {
+                                self.state = EngineState::Closing(Some(timeout))
+                            }
+                            Intent::Open(_) => self.state = EngineState::Opening(Some(timeout)),
+                            _ => {}
+                        }
+                    } else if intent.is_market_order() {
+                        let ttl = TimeoutInfo::default();
+                        let timeout = LiveTimeoutInfo {
+                            expire_at: price.open_time + ttl.duration.as_ms(),
+                            timeout_info: ttl,
+                            intent,
+                        };
+                        match intent {
+                            Intent::Reduce(_) | Intent::Flatten(_) => {
+                                self.state = EngineState::Closing(Some(timeout))
+                            }
+                            Intent::Open(_) => self.state = EngineState::Opening(Some(timeout)),
+                            _ => {}
+                        }
+                    } else {
+                        match intent {
+                            Intent::Reduce(_) | Intent::Flatten(_) => {
+                                self.state = EngineState::Closing(None)
+                            }
+                            Intent::Open(_) => self.state = EngineState::Opening(None),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        emitted
     }
 }
 
