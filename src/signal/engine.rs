@@ -156,6 +156,33 @@ impl SignalEngine {
         }
     }
 
+    pub fn apply_exec_param(&mut self, param: ExecParam) {
+        use ExecParam::*;
+        match param {
+            Margin(m) => {
+                self.exec_params.margin = m;
+            }
+            Lev(l) => {
+                self.exec_params.lev = l;
+            }
+            OpenPosition(pos) => {
+                self.exec_params.open_pos = pos;
+            }
+        }
+    }
+
+    pub fn set_backtest_open_position(&mut self, pos: Option<OpenPosInfo>) {
+        self.exec_params.open_pos = pos;
+    }
+
+    pub fn set_backtest_margin(&mut self, margin: f64) {
+        self.exec_params.margin = margin;
+    }
+
+    pub fn view(&self) -> EngineView {
+        self.state.into()
+    }
+
     fn strat_tick(&mut self, price: Price, values: ValuesMap) -> Option<Intent> {
         use EngineState as E;
         let ctx = StratContext {
@@ -665,19 +692,7 @@ impl SignalEngine {
                 }
 
                 EngineCommand::UpdateExecParams(param) => {
-                    use ExecParam::*;
-                    match param {
-                        Margin(m) => {
-                            self.exec_params.margin = m;
-                        }
-                        Lev(l) => {
-                            self.exec_params.lev = l;
-                        }
-
-                        OpenPosition(pos) => {
-                            self.exec_params.open_pos = pos;
-                        }
-                    }
+                    self.apply_exec_param(param);
                 }
 
                 EngineCommand::ExecToggle => {
@@ -745,13 +760,135 @@ impl SignalEngine {
         }
     }
 
-    pub fn tick(&mut self, price: Price) -> Option<EngineOrder> {
+    fn bt_order_from_pending(&self, pending: PendingOrder) -> Option<BtOrder> {
+        match pending {
+            PendingOrder::Open(p) => match OpenOrder::try_new(p.open, p.tpsl) {
+                Ok(open) => Some(BtOrder::Open(open)),
+                Err(e) => {
+                    log::warn!("Failed to convert pending open order: {}", e);
+                    None
+                }
+            },
+            PendingOrder::Close(order) => match CloseOrder::try_new(order) {
+                Ok(close) => Some(BtOrder::Close(close)),
+                Err(e) => {
+                    log::warn!("Failed to convert pending close order: {}", e);
+                    None
+                }
+            },
+        }
+    }
+
+    fn bt_order_from_engine_order(&self, order: EngineOrder) -> Option<BtOrder> {
+        match order.action {
+            PositionOp::OpenLong | PositionOp::OpenShort => {
+                OpenOrder::try_new(order, None).ok().map(BtOrder::Open)
+            }
+            PositionOp::Close => CloseOrder::try_new(order).ok().map(BtOrder::Close),
+        }
+    }
+
+    fn refresh_state_backtest(&mut self, price: &Price, actions: &mut Vec<BtAction>) {
+        match self.state {
+            EngineState::Opening(ttl_option) => {
+                if let Some(open_pos) = self.exec_params.open_pos {
+                    self.state = EngineState::Open(open_pos);
+                    return;
+                }
+                if let Some(timeout) = ttl_option
+                    && timeout.expire_at <= price.open_time
+                {
+                    match timeout.timeout_info.action {
+                        OnTimeout::Force => {
+                            if let Intent::Flatten(_) = timeout.intent {
+                                actions.push(BtAction::ForceCloseMarket);
+                            } else if let Some(order) =
+                                self.force_as_taker_order(&timeout.intent, price)
+                                && let Some(bt_order) = self.bt_order_from_engine_order(order)
+                                && let Some(intent) = BtIntent::from_intent(&timeout.intent)
+                            {
+                                actions.push(BtAction::Submit {
+                                    order: bt_order,
+                                    intent,
+                                });
+                            }
+                        }
+                        OnTimeout::Cancel => {
+                            actions.push(BtAction::ForceCloseMarket);
+                        }
+                    }
+                    self.state = EngineState::Idle;
+                    let _ = self.pending_orders.take();
+                }
+            }
+
+            EngineState::Closing(ttl_option) => {
+                if self.exec_params.open_pos.is_none() {
+                    self.state = EngineState::Idle;
+                    return;
+                }
+
+                if let Some(timeout) = ttl_option
+                    && timeout.expire_at <= price.open_time
+                {
+                    match timeout.timeout_info.action {
+                        OnTimeout::Force => {
+                            if let Intent::Flatten(_) = timeout.intent {
+                                actions.push(BtAction::ForceCloseMarket);
+                            } else if let Some(order) =
+                                self.force_as_taker_order(&timeout.intent, price)
+                                && let Some(bt_order) = self.bt_order_from_engine_order(order)
+                                && let Some(intent) = BtIntent::from_intent(&timeout.intent)
+                            {
+                                actions.push(BtAction::Submit {
+                                    order: bt_order,
+                                    intent,
+                                });
+                            }
+                        }
+                        OnTimeout::Cancel => {
+                            actions.push(BtAction::ForceCloseMarket);
+                        }
+                    }
+                    self.state = EngineState::Idle;
+                    let _ = self.pending_orders.take();
+                }
+            }
+
+            EngineState::Armed(expire_at) => {
+                if price.open_time >= expire_at {
+                    self.state = EngineState::Idle;
+                }
+            }
+
+            EngineState::Idle => {
+                if let Some(open_pos) = self.exec_params.open_pos {
+                    self.state = EngineState::Open(open_pos);
+                }
+            }
+
+            EngineState::Open(_) => {
+                if let Some(open_pos) = self.exec_params.open_pos {
+                    self.state = EngineState::Open(open_pos);
+                    if self.pending_orders.is_some() {
+                        let _ = self.pending_orders.take();
+                    }
+                } else {
+                    self.state = EngineState::Idle;
+                }
+            }
+        }
+    }
+
+    pub fn tick_backtest(&mut self, price: Price) -> Vec<BtAction> {
+        let mut actions = Vec::new();
         self.digest(price);
-        self.refresh_state(&price);
+        if self.paused {
+            return actions;
+        }
+        self.refresh_state_backtest(&price, &mut actions);
 
         let values = self.get_active_values();
-        let mut emitted: Option<EngineOrder> = None;
-
         if let Some(intent) = self.strat_tick(price, values) {
             let busy = matches!(
                 self.state,
@@ -760,13 +897,17 @@ impl SignalEngine {
 
             if busy && intent != Intent::Abort {
                 log::warn!("Intent ignored while busy: {:?}", intent);
+                return actions;
             }
 
             if intent == Intent::Abort {
-                self.force_close_exec();
+                actions.push(BtAction::ForceCloseMarket);
                 let _ = self.pending_orders.take();
                 self.state = EngineState::Idle;
-            } else if let Intent::Arm(duration) = intent {
+                return actions;
+            }
+
+            if let Intent::Arm(duration) = intent {
                 if self.state == EngineState::Idle {
                     self.state = EngineState::Armed(price.open_time + duration.as_ms());
                 } else {
@@ -775,8 +916,11 @@ impl SignalEngine {
                         self.state
                     );
                 }
-            } else if intent == Intent::Disarm {
-                if let EngineState::Armed(_exp) = self.state {
+                return actions;
+            }
+
+            if intent == Intent::Disarm {
+                if let EngineState::Armed(_) = self.state {
                     self.state = EngineState::Idle;
                 } else {
                     log::warn!(
@@ -784,20 +928,29 @@ impl SignalEngine {
                         self.state
                     );
                 }
-            } else if let Some(pending) = self.translate_intent(&intent, &price) {
+                return actions;
+            }
+
+            if let Some(pending) = self.translate_intent(&intent, &price) {
                 if let Err(e) = self.validate_trade(pending, price.close) {
                     log::warn!("Trade rejected: {}", e);
                 } else {
-                    let main_order = match pending {
-                        PendingOrder::Open(p) => {
-                            if p.has_trigger() {
-                                self.pending_orders = Some(p);
-                            }
-                            p.open
+                    if let Some(bt_order) = self.bt_order_from_pending(pending)
+                        && let Some(bt_intent) = BtIntent::from_intent(&intent)
+                    {
+                        if let BtOrder::Open(open) = bt_order
+                            && open.triggers.is_some()
+                        {
+                            self.pending_orders = Some(PendingOpen {
+                                open: open.order,
+                                tpsl: open.triggers,
+                            });
                         }
-                        PendingOrder::Close(p) => p,
-                    };
-                    emitted = Some(main_order);
+                        actions.push(BtAction::Submit {
+                            order: bt_order,
+                            intent: bt_intent,
+                        });
+                    }
 
                     if let Some(ttl) = intent.get_ttl() {
                         let timeout = LiveTimeoutInfo {
@@ -838,7 +991,19 @@ impl SignalEngine {
                 }
             }
         }
-        emitted
+        actions
+    }
+
+    pub fn tick(&mut self, price: Price) -> Option<EngineOrder> {
+        self.tick_backtest(price)
+            .into_iter()
+            .find_map(|action| match action {
+                BtAction::Submit { order, .. } => Some(match order {
+                    BtOrder::Open(open) => open.order,
+                    BtOrder::Close(close) => close.order,
+                }),
+                _ => None,
+            })
     }
 }
 
@@ -883,6 +1048,68 @@ pub enum EngineView {
     Opening,
     Closing,
     Open,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BtIntent {
+    Open,
+    Reduce,
+    Flatten,
+}
+
+impl BtIntent {
+    fn from_intent(intent: &Intent) -> Option<Self> {
+        match intent {
+            Intent::Open(_) => Some(Self::Open),
+            Intent::Reduce(_) => Some(Self::Reduce),
+            Intent::Flatten(_) => Some(Self::Flatten),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct OpenOrder {
+    pub order: EngineOrder,
+    pub triggers: Option<Triggers>,
+}
+
+impl OpenOrder {
+    pub fn try_new(order: EngineOrder, triggers: Option<Triggers>) -> Result<Self, String> {
+        match order.action {
+            PositionOp::OpenLong | PositionOp::OpenShort => Ok(Self { order, triggers }),
+            PositionOp::Close => Err("OpenOrder invariant violated: order must open".to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CloseOrder {
+    pub order: EngineOrder,
+}
+
+impl CloseOrder {
+    pub fn try_new(order: EngineOrder) -> Result<Self, String> {
+        match order.action {
+            PositionOp::Close => Ok(Self { order }),
+            PositionOp::OpenLong | PositionOp::OpenShort => {
+                Err("CloseOrder invariant violated: order must close".to_string())
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BtOrder {
+    Open(OpenOrder),
+    Close(CloseOrder),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BtAction {
+    Submit { order: BtOrder, intent: BtIntent },
+    CancelAllResting,
+    ForceCloseMarket,
 }
 
 #[derive(Copy, Clone, Debug)]

@@ -280,8 +280,8 @@ impl Strat for ElderTripleScreen {
                 return None;
             }
 
-            let sl_delta = (SL_ATR_MULT * atr / ref_px) * lev as f64;
-            let tp_delta = (TP_ATR_MULT * atr / ref_px) * lev as f64;
+            let sl_delta = (SL_ATR_MULT * atr / ref_px) * lev as f64 * 100.0;
+            let tp_delta = (TP_ATR_MULT * atr / ref_px) * lev as f64 * 100.0;
             let tpsl = Some(Triggers {
                 tp: Some(tp_delta),
                 sl: Some(sl_delta),

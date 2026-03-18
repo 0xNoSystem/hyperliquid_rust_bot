@@ -1,3 +1,4 @@
+use crate::backtest::{BacktestProgress, BacktestResult};
 use crate::{
     AssetMargin, EngineView, IndexId, MarginAllocation, MarketState, OpenPositionLocal, Strategy,
     TradeInfo, Value,
@@ -78,6 +79,20 @@ pub enum MarketStream {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BacktestProgressUpdate {
+    pub run_id: String,
+    pub progress: BacktestProgress,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BacktestResultUpdate {
+    pub run_id: String,
+    pub result: BacktestResult,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum UpdateFrontend {
     PreconfirmMarket(String),
     ConfirmMarket(MarketInfo),
@@ -87,6 +102,8 @@ pub enum UpdateFrontend {
     MarketStream(MarketStream),
     MarketInfoEdit((String, EditMarketInfo)),
     UserError(String),
+    BacktestProgress(BacktestProgressUpdate),
+    BacktestResult(BacktestResultUpdate),
     LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),
     Status(BackendStatus),
 }

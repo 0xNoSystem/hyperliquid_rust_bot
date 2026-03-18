@@ -302,7 +302,9 @@ pub struct FillInfo {
 pub struct TradeInfo {
     pub side: Side,
     pub size: f64,
+    // Net trade pnl (price pnl - all fees + funding)
     pub pnl: f64,
+    pub total_pnl: f64,
     pub fees: f64,
     pub funding: f64,
     pub open: FillInfo,
@@ -344,7 +346,8 @@ impl OpenPositionLocal {
             size: fill.sz,
             entry_px: fill.price,
             side: fill.side,
-            realised_pnl: 0.0,
+            // Opening fee is immediately realized.
+            realised_pnl: -fill.fee,
             fees: fill.fee,
             funding: 0.0,
             fill_type: fill.fill_type,
@@ -361,6 +364,8 @@ impl OpenPositionLocal {
 
         self.entry_px = new_entry_px;
         self.size = new_size;
+        // Additional opening fee is immediately realized.
+        self.realised_pnl -= fill.fee;
         self.fees += fill.fee;
     }
 
@@ -395,10 +400,12 @@ impl OpenPositionLocal {
             Side::Short => self.entry_px - gross_pnl / close_sz,
         };
 
+        let total_pnl = self.realised_pnl + self.funding;
         Some(TradeInfo {
             side: self.side,
             size: close_sz,
-            pnl: self.realised_pnl + self.funding,
+            pnl: total_pnl,
+            total_pnl,
             fees: self.fees,
             funding: self.funding,
             open: FillInfo {

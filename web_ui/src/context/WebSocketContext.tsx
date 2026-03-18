@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type {
     AddMarketInfo,
+    BacktestRunState,
     BackendMarketInfo,
     MarketInfo,
     Message,
@@ -47,6 +48,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     const [markets, setMarkets] = useState<MarketInfo[]>([]);
     const [universe, setUniverse] = useState<assetMeta[]>([]);
     const [cachedMarkets, setCachedMarkets] = useState<AddMarketInfo[]>([]);
+    const [backtestRuns, setBacktestRuns] = useState<
+        Record<string, BacktestRunState>
+    >({});
     const [totalMargin, setTotalMargin] = useState(0);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [isOffline, setIsOffline] = useState(false);
@@ -236,6 +240,45 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 return;
             }
 
+            if ("backtestProgress" in payload) {
+                const { runId, progress } = payload.backtestProgress;
+                setBacktestRuns((prev) => {
+                    const current = prev[runId];
+                    const nextProgress = current
+                        ? [...current.progress, progress]
+                        : [progress];
+                    return {
+                        ...prev,
+                        [runId]: {
+                            runId,
+                            progress: nextProgress,
+                            latestProgress: progress,
+                            result: current?.result ?? null,
+                            updatedAt: Date.now(),
+                        },
+                    };
+                });
+                return;
+            }
+
+            if ("backtestResult" in payload) {
+                const { runId, result } = payload.backtestResult;
+                setBacktestRuns((prev) => {
+                    const current = prev[runId];
+                    return {
+                        ...prev,
+                        [runId]: {
+                            runId,
+                            progress: current?.progress ?? [],
+                            latestProgress: current?.latestProgress ?? null,
+                            result,
+                            updatedAt: Date.now(),
+                        },
+                    };
+                });
+                return;
+            }
+
             if ("updateTotalMargin" in payload) {
                 setTotalMargin(payload.updateTotalMargin);
                 return;
@@ -405,6 +448,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         markets,
         universe,
         cachedMarkets,
+        backtestRuns,
         totalMargin,
         isOffline,
         errorMsg,

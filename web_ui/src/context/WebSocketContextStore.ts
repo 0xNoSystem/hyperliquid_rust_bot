@@ -1,11 +1,17 @@
 import { createContext, useContext } from "react";
-import type { AddMarketInfo, MarketInfo, assetMeta } from "../types";
+import type {
+    AddMarketInfo,
+    BacktestRunState,
+    MarketInfo,
+    assetMeta,
+} from "../types";
 import type { Strategy } from "../strats.ts";
 
 export interface WebSocketContextValue {
     markets: MarketInfo[];
     universe: assetMeta[];
     cachedMarkets: AddMarketInfo[];
+    backtestRuns: Record<string, BacktestRunState>;
     totalMargin: number;
     errorMsg: string | null;
     isOffline: boolean;

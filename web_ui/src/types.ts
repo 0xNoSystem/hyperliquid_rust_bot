@@ -263,6 +263,127 @@ export type MarketStream =
 
 export type BackendStatus = "online" | "offline" | "shutdown";
 
+export type BacktestProgress =
+    | { kind: "initializing" }
+    | { kind: "loadingCandles"; loaded: number; total: number }
+    | { kind: "warmingEngine"; loaded: number; total: number }
+    | { kind: "simulating"; processed: number; total: number }
+    | { kind: "finalizing" }
+    | { kind: "done" }
+    | { kind: "failed"; message: string };
+
+export interface BacktestSource {
+    exchange: "binance" | "bybit" | "mexc" | "htx" | "coinbase";
+    market: "spot" | "futures";
+    quoteAsset: "USDT" | "USDC" | string;
+}
+
+export interface BacktestConfig {
+    asset: string;
+    source: BacktestSource;
+    strategy: Strategy;
+    resolution: TimeFrame;
+    margin: number;
+    lev: number;
+    takerFeeBps: number;
+    makerFeeBps: number;
+    fundingRateBpsPer8h: number;
+    startTime: number;
+    endTime: number;
+    snapshotIntervalCandles: number;
+}
+
+export interface CandlePoint {
+    openTime: number;
+    closeTime: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+}
+
+export interface EquityPoint {
+    ts: number;
+    equity: number;
+    balance: number;
+    upnl: number;
+}
+
+export type SnapshotReason =
+    | "open"
+    | "reduce"
+    | "flatten"
+    | "close"
+    | "forceClose"
+    | "cancelResting"
+    | "fill"
+    | "interval";
+
+export interface PositionSnapshot {
+    id: number;
+    ts: number;
+    candle: CandlePoint;
+    upnl: number;
+    balance: number;
+    equity: number;
+    reason: SnapshotReason;
+    engineState: EngineView;
+    indicators: indicatorData[];
+    position: OpenPositionLocal | null;
+}
+
+export interface BacktestSummary {
+    initialEquity: number;
+    finalEquity: number;
+    netPnl: number;
+    returnPct: number;
+    maxDrawdownAbs: number;
+    maxDrawdownPct: number;
+    totalTrades: number;
+    wins: number;
+    losses: number;
+    winRatePct: number;
+    grossProfit: number;
+    grossLoss: number;
+    avgWin: number;
+    avgLoss: number;
+    profitFactor: number | null;
+    expectancy: number;
+    sharpeRatio?: number | null;
+}
+
+export interface BacktestResult {
+    runId: string;
+    startedAt: number;
+    finishedAt: number;
+    candlesLoaded: number;
+    candlesProcessed: number;
+    config: BacktestConfig;
+    summary: BacktestSummary;
+    trades: TradeInfo[];
+    equityCurve: EquityPoint[];
+    snapshots: PositionSnapshot[];
+}
+
+export interface BacktestProgressUpdate {
+    runId: string;
+    progress: BacktestProgress;
+}
+
+export interface BacktestResultUpdate {
+    runId: string;
+    result: BacktestResult;
+}
+
+export interface BacktestRunState {
+    runId: string;
+    progress: BacktestProgress[];
+    latestProgress: BacktestProgress | null;
+    result: BacktestResult | null;
+    updatedAt: number;
+}
+
 export type Message =
     | { preconfirmMarket: string }
     | { confirmMarket: BackendMarketInfo }
@@ -272,6 +393,8 @@ export type Message =
     | { updateMarketMargin: assetMargin }
     | { marketInfoEdit: [string, editMarketInfo] }
     | { userError: string }
+    | { backtestProgress: BacktestProgressUpdate }
+    | { backtestResult: BacktestResultUpdate }
     | { loadSession: BackendLoadSessionPayload }
     | { status: BackendStatus };
 
@@ -305,6 +428,7 @@ export interface TradeInfo {
     side: Side;
     size: number;
     pnl: number;
+    totalPnl?: number;
     fees: number;
     funding: number;
     open: FillInfo;

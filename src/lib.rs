@@ -15,8 +15,6 @@ pub mod margin;
 pub mod signal;
 
 pub use assets::MARKETS;
-pub use strategy::*;
-pub use strats::Strategy;
 pub use backtest::Backtester;
 pub use bot::{Bot, BotEvent, BotToMarket};
 pub use consts::*;
@@ -26,9 +24,11 @@ pub use helper::*;
 pub use margin::{AssetMargin, MarginAllocation};
 pub use market::{AssetPrice, Market, MarketCommand, MarketState, MarketUpdate};
 pub use signal::{
-    EditType, EngineView, Entry, ExecParams, IndexId, OpenPosInfo, SignalEngine, TimedValue,
-    ValuesMap,
+    BtAction, BtIntent, BtOrder, CloseOrder, EditType, EngineView, Entry, ExecParams, IndexId,
+    OpenOrder, OpenPosInfo, SignalEngine, TimedValue, ValuesMap,
 };
+pub use strategy::*;
+pub use strats::Strategy;
 pub use trade_setup::*;
 pub use wallet::Wallet;
 

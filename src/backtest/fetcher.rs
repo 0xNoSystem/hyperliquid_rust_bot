@@ -1,10 +1,59 @@
 use crate::{Error, Price, TimeFrame};
+use log::warn;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::{Mutex, RwLock};
+use tokio::time::{Instant, sleep};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+const MAX_HTTP_RETRIES: usize = 5;
+const RETRY_BASE_DELAY_MS: u64 = 500;
+const RETRY_MAX_DELAY_MS: u64 = 20_000;
+const RETRY_JITTER_MS: u64 = 250;
+
+#[derive(Clone)]
+pub(crate) struct RequestLimiter {
+    interval: Duration,
+    next_allowed: Arc<Mutex<Instant>>,
+}
+
+impl RequestLimiter {
+    pub(crate) fn from_requests_per_second(rps: u32) -> Option<Self> {
+        if rps == 0 {
+            return None;
+        }
+        Some(Self {
+            interval: Duration::from_secs_f64(1.0 / rps as f64),
+            next_allowed: Arc::new(Mutex::new(Instant::now())),
+        })
+    }
+
+    pub(crate) async fn acquire(&self) {
+        let wait_for = {
+            let mut next = self.next_allowed.lock().await;
+            let now = Instant::now();
+            if now >= *next {
+                *next = now + self.interval;
+                None
+            } else {
+                let wait = *next - now;
+                *next += self.interval;
+                Some(wait)
+            }
+        };
+
+        if let Some(delay) = wait_for {
+            sleep(delay).await;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum MarketType {
     Spot,
     Futures,
@@ -19,7 +68,8 @@ impl MarketType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Exchange {
     Binance,
     Bybit,
@@ -40,11 +90,22 @@ impl Exchange {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DataSource {
     pub exchange: Exchange,
     pub market: MarketType,
     pub quote_asset: String,
+}
+
+impl Default for DataSource {
+    fn default() -> Self {
+        DataSource {
+            exchange: Exchange::Binance,
+            market: MarketType::Futures,
+            quote_asset: "USDT".to_string(),
+        }
+    }
 }
 
 impl DataSource {
@@ -405,23 +466,112 @@ struct IntervalPlan {
 
 type CacheKey = String;
 
+#[derive(Clone, Default)]
+pub struct CandleCache {
+    inner: Arc<RwLock<HashMap<CacheKey, BTreeMap<u64, Price>>>>,
+}
+
+impl CandleCache {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub fn session() -> Self {
+        static SESSION_CACHE: OnceLock<CandleCache> = OnceLock::new();
+        SESSION_CACHE.get_or_init(CandleCache::new).clone()
+    }
+
+    async fn lookup_range(
+        &self,
+        key: &str,
+        normalized_start: u64,
+        normalized_end: u64,
+        candle_interval_ms: u64,
+    ) -> CacheLookup {
+        let mut guard = self.inner.write().await;
+        let series = guard.entry(key.to_string()).or_insert_with(BTreeMap::new);
+
+        let cached_in_range =
+            count_cached_range(series, normalized_start, normalized_end, candle_interval_ms);
+        let (missing, has_cached) =
+            collect_missing(series, normalized_start, normalized_end, candle_interval_ms);
+        let cached = if missing.is_empty() && has_cached {
+            Some(cache_range_to_vec(series, normalized_start, normalized_end))
+        } else {
+            None
+        };
+
+        CacheLookup {
+            missing,
+            cached,
+            cached_in_range,
+        }
+    }
+
+    async fn insert_many(&self, key: &str, prices: Vec<Price>) {
+        let mut guard = self.inner.write().await;
+        let series = guard.entry(key.to_string()).or_insert_with(BTreeMap::new);
+        for price in prices {
+            series.insert(price.open_time, price);
+        }
+    }
+
+    async fn count_range(&self, key: &str, start: u64, end: u64, step: u64) -> u64 {
+        let guard = self.inner.read().await;
+        guard
+            .get(key)
+            .map(|series| count_cached_range(series, start, end, step))
+            .unwrap_or(0)
+    }
+
+    async fn range_to_vec(&self, key: &str, start: u64, end: u64) -> Vec<Price> {
+        let guard = self.inner.read().await;
+        guard
+            .get(key)
+            .map(|series| cache_range_to_vec(series, start, end))
+            .unwrap_or_default()
+    }
+}
+
+struct CacheLookup {
+    missing: Vec<MissingSegment>,
+    cached: Option<Vec<Price>>,
+    cached_in_range: u64,
+}
+
 pub struct Fetcher {
     client: Client,
     pub current_source: DataSource,
-    cache: HashMap<CacheKey, BTreeMap<u64, Price>>,
+    cache: CandleCache,
+    request_limiter: Option<RequestLimiter>,
 }
 
 impl Fetcher {
     pub fn new(current_source: DataSource) -> Self {
+        Self::with_cache(current_source, CandleCache::session())
+    }
+
+    pub fn with_cache(current_source: DataSource, cache: CandleCache) -> Self {
         Self {
             client: Client::new(),
             current_source,
-            cache: HashMap::new(),
+            cache,
+            request_limiter: None,
         }
     }
 
     pub fn set_source(&mut self, source: DataSource) {
         self.current_source = source;
+    }
+
+    pub fn set_cache(&mut self, cache: CandleCache) {
+        self.cache = cache;
+    }
+
+    pub(crate) fn set_request_limiter(&mut self, limiter: Option<RequestLimiter>) {
+        self.request_limiter = limiter;
     }
 
     pub async fn fetch(
@@ -431,6 +581,21 @@ impl Fetcher {
         start: u64,
         end: u64,
     ) -> Result<Vec<Price>, Error> {
+        self.fetch_with_progress(asset, tf, start, end, |_, _| {})
+            .await
+    }
+
+    pub async fn fetch_with_progress<F>(
+        &mut self,
+        asset: &str,
+        tf: TimeFrame,
+        start: u64,
+        end: u64,
+        mut on_progress: F,
+    ) -> Result<Vec<Price>, Error>
+    where
+        F: FnMut(u64, u64),
+    {
         let asset = asset.trim().to_uppercase();
         if asset.is_empty() {
             return Ok(Vec::new());
@@ -442,68 +607,91 @@ impl Fetcher {
         }
 
         let candle_interval_ms = tf.to_millis();
-        let prefetch_buffer = candle_interval_ms.saturating_mul(200);
-
-        let mut range_start = start.saturating_sub(prefetch_buffer);
-        let mut range_end = end.saturating_add(prefetch_buffer);
+        let range_start = start;
+        let mut range_end = end;
         let now = now_ms();
         if range_end > now {
             range_end = now;
         }
         if range_end <= range_start {
-            range_end = now;
-            range_start = now.saturating_sub(30 * 24 * 60 * 60 * 1000);
+            return Err(Error::Custom(
+                "Requested range is outside available historical data".to_string(),
+            ));
         }
 
         let (normalized_start, normalized_end) =
             normalize_range(range_start, range_end, candle_interval_ms);
+        let estimated_total =
+            estimate_points_in_range(normalized_start, normalized_end, candle_interval_ms).max(1);
+
         let cache_key = self.current_source.cache_key(&asset, tf);
-        let (missing, cached) = {
-            let cache = self
-                .cache
-                .entry(cache_key.clone())
-                .or_insert_with(BTreeMap::new);
-            let (missing, has_cached) =
-                collect_missing(cache, normalized_start, normalized_end, candle_interval_ms);
-            let cached = if missing.is_empty() && has_cached {
-                Some(cache_to_vec(cache))
-            } else {
-                None
-            };
-            (missing, cached)
-        };
+        let lookup = self
+            .cache
+            .lookup_range(
+                &cache_key,
+                normalized_start,
+                normalized_end,
+                candle_interval_ms,
+            )
+            .await;
+        let missing = lookup.missing;
+        let cached = lookup.cached;
+        let cached_in_range = lookup.cached_in_range;
+        on_progress(cached_in_range, estimated_total);
 
         if let Some(values) = cached {
+            on_progress(
+                values.len() as u64,
+                estimated_total.max(values.len() as u64),
+            );
             return Ok(values);
         }
 
+        let mut loaded = cached_in_range.min(estimated_total);
         for segment in missing {
+            let segment_total =
+                estimate_points_in_range(segment.start, segment.end, candle_interval_ms);
+            let base_loaded = loaded;
             let data = self
-                .fetch_segment(&asset, tf, segment.start, segment.end)
+                .fetch_segment(&asset, tf, segment.start, segment.end, |segment_loaded| {
+                    let progress = base_loaded
+                        .saturating_add(segment_loaded.min(segment_total))
+                        .min(estimated_total);
+                    on_progress(progress, estimated_total);
+                })
                 .await?;
-            let cache = self
+            self.cache.insert_many(&cache_key, data).await;
+            loaded = self
                 .cache
-                .get_mut(&cache_key)
-                .ok_or_else(|| Error::Custom("Cache entry missing".to_string()))?;
-            for price in data {
-                cache.insert(price.open_time, price);
-            }
+                .count_range(
+                    &cache_key,
+                    normalized_start,
+                    normalized_end,
+                    candle_interval_ms,
+                )
+                .await;
+            on_progress(loaded.min(estimated_total), estimated_total);
         }
 
-        let cache = self
+        let out = self
             .cache
-            .get(&cache_key)
-            .ok_or_else(|| Error::Custom("Cache entry missing".to_string()))?;
-        Ok(cache_to_vec(cache))
+            .range_to_vec(&cache_key, normalized_start, normalized_end)
+            .await;
+        on_progress(out.len() as u64, estimated_total.max(out.len() as u64));
+        Ok(out)
     }
 
-    async fn fetch_segment(
+    async fn fetch_segment<F>(
         &self,
         asset: &str,
         tf: TimeFrame,
         start: u64,
         end: u64,
-    ) -> Result<Vec<Price>, Error> {
+        mut on_segment_progress: F,
+    ) -> Result<Vec<Price>, Error>
+    where
+        F: FnMut(u64),
+    {
         let plan = self.current_source.interval_plan(tf)?;
         let base_interval_ms = plan.base_tf.to_millis();
 
@@ -512,8 +700,8 @@ impl Fetcher {
                 let limit = self.current_source.request_limit().unwrap_or(1000);
                 let mut cursor = start;
                 let mut out = Vec::new();
+                let mut loaded = 0_u64;
                 while cursor < end {
-                    dbg!(out.len());
                     let data = self
                         .fetch_once(asset, plan.base_tf, plan.interval, cursor, end)
                         .await?;
@@ -523,6 +711,8 @@ impl Fetcher {
                     let last_start = data.iter().map(|p| p.open_time).max().unwrap_or(cursor);
                     let count = data.len();
                     out.extend(data);
+                    loaded = loaded.saturating_add(count as u64);
+                    on_segment_progress(loaded);
                     if last_start <= cursor {
                         break;
                     }
@@ -537,6 +727,7 @@ impl Fetcher {
                 let limit = self.current_source.request_limit().unwrap_or(1000);
                 let mut cursor = start;
                 let mut out = Vec::new();
+                let mut loaded = 0_u64;
                 while cursor < end {
                     let data = self
                         .fetch_once(asset, plan.base_tf, plan.interval, cursor, end)
@@ -547,6 +738,8 @@ impl Fetcher {
                     let max_start = data.iter().map(|p| p.open_time).max().unwrap_or(cursor);
                     let count = data.len();
                     out.extend(data);
+                    loaded = loaded.saturating_add(count as u64);
+                    on_segment_progress(loaded);
                     let next = max_start.saturating_add(base_interval_ms);
                     if next <= cursor {
                         break;
@@ -563,6 +756,7 @@ impl Fetcher {
                     let limit = self.current_source.request_limit().unwrap_or(1000);
                     let mut cursor = start;
                     let mut out = Vec::new();
+                    let mut loaded = 0_u64;
                     while cursor < end {
                         let data = self
                             .fetch_once(asset, plan.base_tf, plan.interval, cursor, end)
@@ -573,6 +767,8 @@ impl Fetcher {
                         let last_start = data.iter().map(|p| p.open_time).max().unwrap_or(cursor);
                         let count = data.len();
                         out.extend(data);
+                        loaded = loaded.saturating_add(count as u64);
+                        on_segment_progress(loaded);
                         if last_start <= cursor {
                             break;
                         }
@@ -583,13 +779,19 @@ impl Fetcher {
                     }
                     out
                 } else {
-                    self.fetch_once(asset, plan.base_tf, plan.interval, start, end)
-                        .await?
+                    let out = self
+                        .fetch_once(asset, plan.base_tf, plan.interval, start, end)
+                        .await?;
+                    on_segment_progress(out.len() as u64);
+                    out
                 }
             }
             Exchange::Htx | Exchange::Coinbase => {
-                self.fetch_once(asset, plan.base_tf, plan.interval, start, end)
-                    .await?
+                let out = self
+                    .fetch_once(asset, plan.base_tf, plan.interval, start, end)
+                    .await?;
+                on_segment_progress(out.len() as u64);
+                out
             }
         };
 
@@ -625,23 +827,92 @@ impl Fetcher {
     }
 
     async fn request_body(&self, url: &str) -> Result<String, Error> {
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| Error::Custom(format!("Request failed: {e}")))?;
-        if !response.status().is_success() {
+        for attempt in 0..=MAX_HTTP_RETRIES {
+            if let Some(limiter) = &self.request_limiter {
+                limiter.acquire().await;
+            }
+
+            let response = match self.client.get(url).send().await {
+                Ok(response) => response,
+                Err(e) => {
+                    if attempt < MAX_HTTP_RETRIES {
+                        let delay = retry_delay_for_attempt(attempt, None);
+                        warn!(
+                            "HTTP transport error for {} (attempt {}/{}): {}. Retrying in {}ms",
+                            url,
+                            attempt + 1,
+                            MAX_HTTP_RETRIES + 1,
+                            e,
+                            delay.as_millis()
+                        );
+                        sleep(delay).await;
+                        continue;
+                    }
+                    warn!(
+                        "HTTP transport error for {} after {} attempts: {}",
+                        url,
+                        MAX_HTTP_RETRIES + 1,
+                        e
+                    );
+                    return Err(Error::Custom(format!("Request failed: {e}")));
+                }
+            };
+
+            let status = response.status();
+            if status.is_success() {
+                return response.text().await.map_err(|e| {
+                    warn!("Failed to read HTTP response body for {url}: {e}");
+                    Error::Custom(format!("Failed to read response: {e}"))
+                });
+            }
+
+            let retry_after = parse_retry_after_header(response.headers());
+            let should_retry =
+                status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
+            let body = response.text().await.unwrap_or_default();
+            let body_preview = truncate_for_log(&body, 240);
+
+            if should_retry && attempt < MAX_HTTP_RETRIES {
+                let delay = retry_delay_for_attempt(attempt, retry_after);
+                warn!(
+                    "HTTP {} for {} (attempt {}/{}). Retrying in {}ms{}{}",
+                    status,
+                    url,
+                    attempt + 1,
+                    MAX_HTTP_RETRIES + 1,
+                    delay.as_millis(),
+                    retry_after
+                        .map(|d| format!(" (Retry-After={}s)", d.as_secs()))
+                        .unwrap_or_default(),
+                    if body_preview.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" body={}", body_preview)
+                    }
+                );
+                sleep(delay).await;
+                continue;
+            }
+
+            warn!(
+                "HTTP request returned non-success status {} for {}{}",
+                status,
+                url,
+                if body_preview.is_empty() {
+                    String::new()
+                } else {
+                    format!(" body={}", body_preview)
+                }
+            );
             return Err(Error::Custom(format!(
                 "Request failed with status {}",
-                response.status()
+                status
             )));
         }
 
-        response
-            .text()
-            .await
-            .map_err(|e| Error::Custom(format!("Failed to read response: {e}")))
+        Err(Error::Custom(
+            "Request failed after retries with unknown error".to_string(),
+        ))
     }
 }
 
@@ -694,8 +965,32 @@ fn collect_missing(
     (missing, has_cached)
 }
 
+#[cfg(test)]
 fn cache_to_vec(cache: &BTreeMap<u64, Price>) -> Vec<Price> {
     cache.values().copied().collect()
+}
+
+fn cache_range_to_vec(cache: &BTreeMap<u64, Price>, start: u64, end: u64) -> Vec<Price> {
+    cache.range(start..end).map(|(_, p)| *p).collect()
+}
+
+fn count_cached_range(cache: &BTreeMap<u64, Price>, start: u64, end: u64, step: u64) -> u64 {
+    let mut count = 0_u64;
+    let mut ts = start;
+    while ts < end {
+        if cache.contains_key(&ts) {
+            count += 1;
+        }
+        ts = ts.saturating_add(step);
+    }
+    count
+}
+
+fn estimate_points_in_range(start: u64, end: u64, step: u64) -> u64 {
+    if end <= start {
+        return 0;
+    }
+    std::cmp::max(1, div_ceil(end - start, step))
 }
 
 fn aggregate_prices(prices: &[Price], target_ms: u64) -> Vec<Price> {
@@ -740,6 +1035,49 @@ fn aggregate_prices(prices: &[Price], target_ms: u64) -> Vec<Price> {
     }
 
     out
+}
+
+fn parse_retry_after_header(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let value = headers.get(reqwest::header::RETRY_AFTER)?;
+    let raw = value.to_str().ok()?.trim();
+    let secs = raw.parse::<u64>().ok()?;
+    Some(Duration::from_secs(secs.clamp(1, 120)))
+}
+
+fn retry_delay_for_attempt(attempt: usize, retry_after: Option<Duration>) -> Duration {
+    if let Some(delay) = retry_after {
+        return delay;
+    }
+
+    let factor = 1_u64 << attempt.min(8);
+    let exp = RETRY_BASE_DELAY_MS.saturating_mul(factor);
+    let capped = exp.min(RETRY_MAX_DELAY_MS);
+    let jitter = jitter_ms(RETRY_JITTER_MS);
+    Duration::from_millis(capped.saturating_add(jitter))
+}
+
+fn jitter_ms(max_ms: u64) -> u64 {
+    if max_ms == 0 {
+        return 0;
+    }
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => (d.subsec_nanos() as u64) % max_ms,
+        Err(_) => 0,
+    }
+}
+
+fn truncate_for_log(input: &str, max_chars: usize) -> String {
+    if max_chars == 0 || input.is_empty() {
+        return String::new();
+    }
+    let normalized = input.replace('\n', " ").replace('\r', " ");
+    if normalized.chars().count() <= max_chars {
+        normalized
+    } else {
+        let mut out: String = normalized.chars().take(max_chars).collect();
+        out.push_str("...");
+        out
+    }
 }
 
 fn parse_binance_like(json: &Value, interval_ms: u64) -> Result<Vec<Price>, Error> {

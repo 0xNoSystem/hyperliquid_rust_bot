@@ -67,7 +67,7 @@ impl Strat for RsiEmaScalp {
 
         if let Some(_expiry) = armed && let Some(prev_uptrend) = self.prev_fast_above.take(){
             if  !prev_uptrend && uptrend{
-                return Some(Intent::open_market(Side::Long, SizeSpec::MarginPct(50.0), None));
+                return Some(Intent::open_market(Side::Long, SizeSpec::MarginPct(90.0), None));
             }
         }else if rsi_1h_value < RSI_OVERSOLD && !uptrend{
             return Some(Intent::Arm(timedelta!(Min15, 1)));
@@ -100,7 +100,7 @@ impl Strat for RsiEmaScalp {
         };
 
 
-        if rsi_15m_value >= 55.0|| ((last_price.open_time - open_pos.open_time > timedelta!(Min15, 1).as_ms()) && rsi_1h_value < 35.0){
+        if rsi_15m_value >= 60.0|| ((last_price.open_time - open_pos.open_time > timedelta!(Min15, 1).as_ms()) && rsi_1h_value < 35.0){
             let ttl = TimeoutInfo{
                 action: OnTimeout::Force,
                 duration: timedelta!(Min5, 1),

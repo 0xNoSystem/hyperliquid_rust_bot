@@ -1,13 +1,24 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { TIMEFRAME_CAMELCASE, TF_TO_MS, sanitizeAsset } from "../types";
-import type { TimeFrame } from "../types";
+import {
+    TIMEFRAME_CAMELCASE,
+    TF_TO_MS,
+    fromTimeFrame,
+    formatPrice,
+    num,
+    sanitizeAsset,
+} from "../types";
+import type {
+    BacktestProgress,
+    BacktestResult,
+    TimeFrame,
+} from "../types";
 import ChartContainer from "../chart/ChartContainer";
 import { isTimeframeSupported } from "../chart/dataSources";
 import { loadCandles } from "../chart/loader";
+import { API_URL } from "../consts";
 import {
     DEFAULT_DATA_SOURCE,
-    DEFAULT_QUOTE_ASSET,
     type DataSource,
     type ExchangeId,
     type MarketType,
@@ -18,9 +29,12 @@ import {
     getMarketsForExchange,
 } from "../chart/providers";
 import AssetIcon from "../chart/visual/AssetIcon";
+import { formatUTC } from "../chart/utils";
 import type { CandleData } from "../chart/utils";
 import { useChartContext } from "../chart/ChartContextStore";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
+import { strategyOptions } from "../strats";
+import type { Strategy } from "../strats";
 
 type RangePreset = "24H" | "7D" | "30D" | "YTD" | "CUSTOM";
 
@@ -67,6 +81,64 @@ const MONTHS = [
     { value: 11, label: "Nov" },
     { value: 12, label: "Dec" },
 ];
+
+const QUOTE_ASSET_OPTIONS = ["USDT", "USDC"] as const;
+type QuoteAsset = (typeof QUOTE_ASSET_OPTIONS)[number];
+const BACKTEST_RESOLUTION: TimeFrame = "min1";
+
+type BacktestExchange = "binance" | "bybit" | "mexc" | "htx" | "coinbase";
+
+type BacktestRunRequestPayload = {
+    runId: string;
+    config: {
+        asset: string;
+        source: {
+            exchange: BacktestExchange;
+            market: MarketType;
+            quoteAsset: QuoteAsset;
+        };
+        strategy: Strategy;
+        resolution: TimeFrame;
+        margin: number;
+        lev: number;
+        takerFeeBps: number;
+        makerFeeBps: number;
+        fundingRateBpsPer8h: number;
+        startTime: number;
+        endTime: number;
+        snapshotIntervalCandles: number;
+    };
+    warmupCandles: number;
+};
+
+type BacktestRunResponsePayload = {
+    runId: string;
+    result: BacktestResult;
+    progress: BacktestProgress[];
+};
+
+type BacktestRunErrorPayload = {
+    runId?: string;
+    message?: string;
+    progress?: BacktestProgress[];
+};
+
+function toBacktestExchange(exchange: ExchangeId): BacktestExchange | null {
+    switch (exchange) {
+        case "binance":
+        case "bybit":
+        case "mexc":
+        case "htx":
+        case "coinbase":
+            return exchange;
+        default:
+            return null;
+    }
+}
+
+function formatUtcMinute(ts: number): string {
+    return new Date(ts).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
 
 function getDaysInMonth(year: number, month: number): number {
     return new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -130,8 +202,14 @@ type BacktestContentProps = {
 // -----------------------
 function BacktestContent({ routeAsset }: BacktestContentProps) {
     const nav = useNavigate();
-    const { startTime, endTime, setTimeRange } = useChartContext();
-    const { universe } = useWebSocketContext();
+    const {
+        startTime,
+        endTime,
+        setTimeRange,
+        intervalStartX,
+        intervalEndX,
+    } = useChartContext();
+    const { universe, backtestRuns } = useWebSocketContext();
     const activeAsset = routeAsset ?? "";
     const defaultStartParts = useMemo(
         () => dateToParts(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
@@ -139,7 +217,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     );
     const defaultEndParts = useMemo(() => dateToParts(new Date()), []);
 
-    const [timeframe, setTimeframe] = useState<TimeFrame>("hour4");
+    const [timeframe, setTimeframe] = useState<TimeFrame>("day1");
     const [intervalOn, setIntervalOn] = useState(false);
     const [candleData, setCandleData] = useState<CandleData[]>([]);
     const [showDatePicker, setShowDatePicker] = useState(true);
@@ -149,8 +227,22 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     const [selectedMarket, setSelectedMarket] = useState<MarketType>(
         DEFAULT_DATA_SOURCE.market
     );
+    const [strategy, setStrategy] = useState<Strategy>(strategyOptions[0]);
+    const [quoteAsset, setQuoteAsset] = useState<QuoteAsset>("USDT");
+    const [margin, setMargin] = useState(10_000);
+    const [lev, setLev] = useState(8);
+    const [warmupCandles, setWarmupCandles] = useState(5_000);
+    const [takerFeeBps, setTakerFeeBps] = useState(3);
+    const [makerFeeBps, setMakerFeeBps] = useState(1);
+    const [fundingRateBpsPer8h, setFundingRateBpsPer8h] = useState(0);
+    const [isSubmittingBacktest, setIsSubmittingBacktest] = useState(false);
+    const [backtestError, setBacktestError] = useState<string | null>(null);
+    const [activeRunId, setActiveRunId] = useState<string | null>(null);
+    const [httpBacktestResult, setHttpBacktestResult] =
+        useState<BacktestResult | null>(null);
     const requestIdRef = useRef(0);
     const abortControllerRef = useRef<AbortController | null>(null);
+    const backtestAbortRef = useRef<AbortController | null>(null);
 
     const [rangePreset, setRangePreset] = useState<RangePreset>("30D");
     const [customStartParts, setCustomStartParts] =
@@ -251,6 +343,205 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         [selectedExchange]
     );
 
+    const selectedBacktestExchange = useMemo(
+        () => toBacktestExchange(selectedExchange),
+        [selectedExchange]
+    );
+
+    const backtestWindow = useMemo(() => {
+        const rawStart =
+            intervalOn && intervalStartX !== null ? intervalStartX : startTime;
+        const rawEnd =
+            intervalOn && intervalEndX !== null ? intervalEndX : endTime;
+
+        if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) {
+            return null;
+        }
+
+        const start = Math.floor(Math.min(rawStart, rawEnd));
+        const end = Math.floor(Math.max(rawStart, rawEnd));
+        if (start <= 0 || end <= start) {
+            return null;
+        }
+
+        return { start, end };
+    }, [intervalOn, intervalStartX, intervalEndX, startTime, endTime]);
+
+    const backtestWindowLabel = useMemo(() => {
+        if (!backtestWindow) return "Invalid interval";
+        return `${formatUtcMinute(backtestWindow.start)} -> ${formatUtcMinute(backtestWindow.end)}`;
+    }, [backtestWindow]);
+
+    const canRunBacktest = useMemo(() => {
+        if (!routeAsset) return false;
+        if (!selectedBacktestExchange) return false;
+        if (!backtestWindow) return false;
+        if (!Number.isFinite(margin) || margin <= 0) return false;
+        if (!Number.isFinite(lev) || lev < 1) return false;
+        if (!Number.isFinite(warmupCandles) || warmupCandles < 0) return false;
+        if (isSubmittingBacktest) return false;
+        return true;
+    }, [
+        routeAsset,
+        selectedBacktestExchange,
+        backtestWindow,
+        margin,
+        lev,
+        warmupCandles,
+        isSubmittingBacktest,
+    ]);
+
+    const activeRun = useMemo(
+        () => (activeRunId ? backtestRuns[activeRunId] ?? null : null),
+        [activeRunId, backtestRuns]
+    );
+
+    const resultToRender = activeRun?.result ?? httpBacktestResult;
+    const latestProgress = activeRun?.latestProgress ?? null;
+    const resultViewState = useMemo<"nothing" | "loading" | "result">(() => {
+        if (resultToRender) return "result";
+        if (isSubmittingBacktest) return "loading";
+        if (
+            activeRunId &&
+            latestProgress &&
+            latestProgress.kind !== "done" &&
+            latestProgress.kind !== "failed"
+        ) {
+            return "loading";
+        }
+        return "nothing";
+    }, [resultToRender, isSubmittingBacktest, activeRunId, latestProgress]);
+
+    const progressLabel = useMemo(() => {
+        if (!latestProgress) return null;
+        switch (latestProgress.kind) {
+            case "loadingCandles":
+                return `Loading candles: ${latestProgress.loaded}/${latestProgress.total}`;
+            case "warmingEngine":
+                return `Warming engine: ${latestProgress.loaded}/${latestProgress.total}`;
+            case "simulating":
+                return `Simulating: ${latestProgress.processed}/${latestProgress.total}`;
+            case "initializing":
+                return "Initializing backtest...";
+            case "finalizing":
+                return "Finalizing result...";
+            case "done":
+                return "Backtest done.";
+            case "failed":
+                return `Backtest failed: ${latestProgress.message}`;
+            default:
+                return null;
+        }
+    }, [latestProgress]);
+
+    const runBacktest = useCallback(async () => {
+        setBacktestError(null);
+        setHttpBacktestResult(null);
+
+        if (!routeAsset) {
+            setBacktestError("Select an asset before running the backtest.");
+            return;
+        }
+        if (!selectedBacktestExchange) {
+            setBacktestError(
+                "Selected exchange is not supported by backend backtesting yet."
+            );
+            return;
+        }
+        if (!backtestWindow) {
+            setBacktestError("Backtest interval is invalid.");
+            return;
+        }
+
+        const clampedLev = Math.max(1, Math.min(100, Math.floor(lev)));
+        const clampedWarmup = Math.max(0, Math.floor(warmupCandles));
+        const runId = `bt-${sanitizeAsset(routeAsset).toLowerCase()}-${Date.now()}`;
+        setActiveRunId(runId);
+
+        const payload: BacktestRunRequestPayload = {
+            runId,
+            config: {
+                asset: sanitizeAsset(routeAsset).toUpperCase(),
+                source: {
+                    exchange: selectedBacktestExchange,
+                    market: selectedMarket,
+                    quoteAsset: quoteAsset,
+                },
+                strategy,
+                resolution: BACKTEST_RESOLUTION,
+                margin,
+                lev: clampedLev,
+                takerFeeBps: Math.max(0, Math.floor(takerFeeBps)),
+                makerFeeBps: Math.max(0, Math.floor(makerFeeBps)),
+                fundingRateBpsPer8h,
+                startTime: backtestWindow.start,
+                endTime: backtestWindow.end,
+                snapshotIntervalCandles: 10,
+            },
+            warmupCandles: clampedWarmup,
+        };
+
+        backtestAbortRef.current?.abort();
+        const controller = new AbortController();
+        backtestAbortRef.current = controller;
+        setIsSubmittingBacktest(true);
+
+        try {
+            const res = await fetch(`${API_URL}/backtest`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+                signal: controller.signal,
+            });
+
+            if (!res.ok) {
+                let message = `Backtest request failed (${res.status})`;
+                try {
+                    const err = (await res.json()) as BacktestRunErrorPayload;
+                    if (err?.message) {
+                        message = err.message;
+                    }
+                    if (err?.runId) {
+                        setActiveRunId(err.runId);
+                    }
+                } catch {
+                    // no-op, fallback status message
+                }
+                throw new Error(message);
+            }
+
+            const data = (await res.json()) as BacktestRunResponsePayload;
+            setActiveRunId(data.runId || runId);
+            setHttpBacktestResult(data.result);
+            console.info("Backtest completed", data);
+        } catch (err) {
+            if (controller.signal.aborted) return;
+            setBacktestError(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to run backtest request."
+            );
+        } finally {
+            if (backtestAbortRef.current === controller) {
+                backtestAbortRef.current = null;
+            }
+            setIsSubmittingBacktest(false);
+        }
+    }, [
+        routeAsset,
+        selectedBacktestExchange,
+        backtestWindow,
+        lev,
+        warmupCandles,
+        selectedMarket,
+        quoteAsset,
+        strategy,
+        margin,
+        takerFeeBps,
+        makerFeeBps,
+        fundingRateBpsPer8h,
+    ]);
+
     useEffect(() => {
         if (supportedTimeframes.length === 0) return;
         if (supportedTimeframes.includes(timeframe)) return;
@@ -338,7 +629,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         startTime,
                         endTime,
                         routeAsset,
-                        DEFAULT_QUOTE_ASSET,
+                        quoteAsset,
                         setCandleData,
                         controller.signal
                     );
@@ -356,7 +647,13 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
             clearTimeout(timer);
             controller.abort();
         };
-    }, [startTime, endTime, timeframe, routeAsset, selectedDataSource]);
+    }, [startTime, endTime, timeframe, routeAsset, selectedDataSource, quoteAsset]);
+
+    useEffect(() => {
+        return () => {
+            backtestAbortRef.current?.abort();
+        };
+    }, []);
 
     return (
         <div className="bg-ink-10 flex flex-1 flex-col pb-50">
@@ -368,12 +665,174 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
             {/* Layout */}
             <div className="z-1 flex flex-grow flex-col items-center justify-between py-8">
                 {/* STRATEGY (top) */}
-                <div className="border-line-stronger bg-ink-60 mb-6 mb-30 w-[60%] border-2 p-4 text-center tracking-widest">
-                    <h2 className="p-2 text-xl font-semibold">Strategy</h2>
+                <div className="border-line-stronger bg-ink-60 mb-6 mb-30 w-[90%] border-2 p-4 tracking-widest">
+                    <h2 className="p-2 text-center text-xl font-semibold">
+                        Strategy
+                    </h2>
+                    <div className="grid grid-cols-1 gap-3 p-2 text-sm md:grid-cols-4">
+                        <label className="text-app-text/75 flex flex-col gap-1">
+                            Strategy
+                            <select
+                                value={strategy}
+                                onChange={(e) =>
+                                    setStrategy(e.target.value as Strategy)
+                                }
+                                className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                            >
+                                {strategyOptions.map((opt) => (
+                                    <option key={opt} value={opt}>
+                                        {opt}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <label className="text-app-text/75 flex flex-col gap-1">
+                            Quote Asset
+                            <select
+                                value={quoteAsset}
+                                onChange={(e) =>
+                                    setQuoteAsset(e.target.value as QuoteAsset)
+                                }
+                                className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                            >
+                                {QUOTE_ASSET_OPTIONS.map((opt) => (
+                                    <option key={opt} value={opt}>
+                                        {opt}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <label className="text-app-text/75 flex flex-col gap-1">
+                            Margin
+                            <input
+                                type="number"
+                                min={0}
+                                step="any"
+                                value={margin}
+                                onChange={(e) =>
+                                    setMargin(Number(e.target.value))
+                                }
+                                className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                            />
+                        </label>
+
+                        <label className="text-app-text/75 flex flex-col gap-1">
+                            Leverage (max 100)
+                            <input
+                                type="number"
+                                min={1}
+                                max={100}
+                                step={1}
+                                value={lev}
+                                onChange={(e) => setLev(Number(e.target.value))}
+                                className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                            />
+                        </label>
+
+                        <label className="text-app-text/75 flex flex-col gap-1">
+                            Warmup Candles
+                            <input
+                                type="number"
+                                min={0}
+                                step={100}
+                                value={warmupCandles}
+                                onChange={(e) =>
+                                    setWarmupCandles(Number(e.target.value))
+                                }
+                                className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                            />
+                        </label>
+
+                        <label className="text-app-text/75 flex flex-col gap-1">
+                            Taker Fee (bps)
+                            <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={takerFeeBps}
+                                onChange={(e) =>
+                                    setTakerFeeBps(Number(e.target.value))
+                                }
+                                className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                            />
+                        </label>
+
+                        <label className="text-app-text/75 flex flex-col gap-1">
+                            Maker Fee (bps)
+                            <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={makerFeeBps}
+                                onChange={(e) =>
+                                    setMakerFeeBps(Number(e.target.value))
+                                }
+                                className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                            />
+                        </label>
+
+                        <label className="text-app-text/75 flex flex-col gap-1">
+                            Funding bps / 8h
+                            <input
+                                type="number"
+                                step="any"
+                                value={fundingRateBpsPer8h}
+                                onChange={(e) =>
+                                    setFundingRateBpsPer8h(
+                                        Number(e.target.value)
+                                    )
+                                }
+                                className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                            />
+                        </label>
+                    </div>
+
+                    <div className="flex flex-col gap-2 p-2 text-sm md:flex-row md:items-center md:justify-between">
+                        <div className="text-app-text/70">
+                            Range:{" "}
+                            <span className="text-app-text font-medium">
+                                {backtestWindowLabel}
+                            </span>
+                            {intervalOn && (
+                                <span className="text-app-text/60 ml-2">
+                                    (from interval window)
+                                </span>
+                            )}
+                        </div>
+
+                        <button
+                            onClick={() => void runBacktest()}
+                            disabled={!canRunBacktest}
+                            className={`rounded border px-4 py-1.5 text-sm font-semibold transition ${
+                                canRunBacktest
+                                    ? "border-accent-brand-strong text-accent-brand hover:bg-accent-brand-strong/20"
+                                    : "border-line-weak text-app-text/35 cursor-not-allowed"
+                            }`}
+                        >
+                            {isSubmittingBacktest
+                                ? "Running..."
+                                : "Run Backtest"}
+                        </button>
+                    </div>
+
+                    {!selectedBacktestExchange && (
+                        <p className="text-accent-danger-soft px-2 text-xs">
+                            Selected exchange is chart-only for now. Backtesting
+                            supports Binance, Bybit, MEXC, HTX, Coinbase.
+                        </p>
+                    )}
+
+                    {backtestError && (
+                        <p className="text-accent-danger-soft px-2 text-xs">
+                            {backtestError}
+                        </p>
+                    )}
                 </div>
 
                 {/* CHART (middle) */}
-                <div className="border-line-weak bg-glow-10 mb-30 flex h-[80vh] min-h-fit w-[90%] flex-grow flex-col rounded-lg border-2 p-4 tracking-widest">
+                <div className="border-line-weak bg-glow-10 mb-30 flex min-h-[80vh] w-[90%] flex-1 flex-col overflow-hidden rounded-lg border-2 p-4 tracking-widest">
                     {/* Toggle + Dates */}
                     <div className="flex flex-wrap items-center gap-4 p-4 pl-1">
                         {/* Toggle Button */}
@@ -579,7 +1038,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                     </h2>
 
                     {/* TF SELECTOR */}
-                    <div className="bg-app-surface-5 flex flex-1 flex-col">
+                    <div className="bg-app-surface-5 flex min-h-0 flex-[3] flex-col">
                         <div className="bg-ink-70 z-5 grid w-full grid-cols-13 text-center tracking-normal">
                             {Object.entries(TIMEFRAME_CAMELCASE).map(
                                 ([short, tf]) => {
@@ -627,10 +1086,398 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         />
                     </div>
                     {/* CONSOLE*/}
-                    <div className="mt-20 p-2 text-xl font-semibold tracking-wide">
+                    <div className="mt-4 flex min-h-0 flex-[2] flex-col p-2 text-xl font-semibold tracking-wide">
                         <h2 className="p-2 text-center text-2xl font-semibold">
                             Result
                         </h2>
+                        {resultViewState === "loading" && (
+                            <div className="border-line-muted bg-ink-80 mx-auto mt-2 flex w-full flex-1 flex-col items-center justify-center rounded border p-6 text-sm">
+                                {activeRunId && (
+                                    <p className="text-app-text/70 mb-2 text-center font-mono text-xs">
+                                        Run ID: {activeRunId}
+                                    </p>
+                                )}
+                                <p className="text-app-text/90 text-center text-2xl font-bold">
+                                    {progressLabel ?? "Loading backtest..."}
+                                </p>
+                            </div>
+                        )}
+
+                        {resultViewState === "nothing" && (
+                            <div className="border-line-muted bg-ink-80 mx-auto mt-2 flex w-full flex-1 items-center justify-center rounded border p-4 text-center text-sm">
+                                <p className="text-app-text/55">
+                                    No backtest result yet.
+                                </p>
+                            </div>
+                        )}
+
+                        {resultViewState === "result" && (
+                            <div className="border-line-muted bg-ink-80 mx-auto mt-2 flex min-h-0 w-full flex-1 flex-col rounded border p-4 text-sm">
+                                {activeRunId && (
+                                    <p className="text-app-text/70 font-mono text-xs">
+                                        Run ID: {activeRunId}
+                                    </p>
+                                )}
+
+                                {resultToRender && (
+                                    <>
+                                    <div className="border-line-subtle mt-3 rounded border p-3">
+                                        <p className="text-app-text/50 text-xs uppercase">
+                                            Run Config
+                                        </p>
+                                        <div className="mt-2 grid grid-cols-1 gap-2 text-xs md:grid-cols-2 lg:grid-cols-3">
+                                            <div>
+                                                <p className="text-app-text/50">
+                                                    Asset
+                                                </p>
+                                                <p className="text-app-text">
+                                                    {resultToRender.config.asset}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-app-text/50">
+                                                    Source
+                                                </p>
+                                                <p className="text-app-text">
+                                                    {resultToRender.config.source.exchange.toUpperCase()}{" "}
+                                                    /{" "}
+                                                    {resultToRender.config.source.market.toUpperCase()}{" "}
+                                                    /{" "}
+                                                    {resultToRender.config.source.quoteAsset}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-app-text/50">
+                                                    Strategy
+                                                </p>
+                                                <p className="text-app-text">
+                                                    {resultToRender.config.strategy}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-app-text/50">
+                                                    Resolution
+                                                </p>
+                                                <p className="text-app-text">
+                                                    {fromTimeFrame(
+                                                        resultToRender.config
+                                                            .resolution
+                                                    )}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-app-text/50">
+                                                    Window (UTC)
+                                                </p>
+                                                <p className="text-app-text">
+                                                    {formatUtcMinute(
+                                                        resultToRender.config
+                                                            .startTime
+                                                    )}{" "}
+                                                    -{" "}
+                                                    {formatUtcMinute(
+                                                        resultToRender.config
+                                                            .endTime
+                                                    )}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-app-text/50">
+                                                    Margin / Leverage
+                                                </p>
+                                                <p className="text-app-text">
+                                                    {num(
+                                                        resultToRender.config
+                                                            .margin,
+                                                        2
+                                                    )}{" "}
+                                                    /{" "}
+                                                    {resultToRender.config.lev}
+                                                    x
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-app-text/50">
+                                                    Fees (bps)
+                                                </p>
+                                                <p className="text-app-text">
+                                                    taker{" "}
+                                                    {
+                                                        resultToRender.config
+                                                            .takerFeeBps
+                                                    }{" "}
+                                                    / maker{" "}
+                                                    {
+                                                        resultToRender.config
+                                                            .makerFeeBps
+                                                    }
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-app-text/50">
+                                                    Funding (bps / 8h)
+                                                </p>
+                                                <p className="text-app-text">
+                                                    {num(
+                                                        resultToRender.config
+                                                            .fundingRateBpsPer8h,
+                                                        4
+                                                    )}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-app-text/50">
+                                                    Snapshot Interval
+                                                </p>
+                                                <p className="text-app-text">
+                                                    {
+                                                        resultToRender.config
+                                                            .snapshotIntervalCandles
+                                                    }{" "}
+                                                    candles
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+                                        <div className="border-line-subtle rounded border p-2">
+                                            <p className="text-app-text/50 text-xs">
+                                                Trades
+                                            </p>
+                                            <p>{resultToRender.summary.totalTrades}</p>
+                                        </div>
+                                        <div className="border-line-subtle rounded border p-2">
+                                            <p className="text-app-text/50 text-xs">
+                                                Net PnL
+                                            </p>
+                                            <p
+                                                className={
+                                                    resultToRender.summary
+                                                        .netPnl >= 0
+                                                        ? "text-accent-success"
+                                                        : "text-accent-danger-soft"
+                                                }
+                                            >
+                                                {resultToRender.summary.netPnl >= 0
+                                                    ? "+"
+                                                    : ""}
+                                                {num(
+                                                    resultToRender.summary
+                                                        .netPnl,
+                                                    2
+                                                )}
+                                            </p>
+                                        </div>
+                                        <div className="border-line-subtle rounded border p-2">
+                                            <p className="text-app-text/50 text-xs">
+                                                Return %
+                                            </p>
+                                            <p>
+                                                {num(
+                                                    resultToRender.summary
+                                                        .returnPct,
+                                                    2
+                                                )}
+                                                %
+                                            </p>
+                                        </div>
+                                        <div className="border-line-subtle rounded border p-2">
+                                            <p className="text-app-text/50 text-xs">
+                                                Sharpe
+                                            </p>
+                                            <p>
+                                                {resultToRender.summary
+                                                    .sharpeRatio == null
+                                                    ? "—"
+                                                    : num(
+                                                          resultToRender.summary
+                                                              .sharpeRatio,
+                                                          3
+                                                      )}
+                                            </p>
+                                        </div>
+                                        <div className="border-line-subtle rounded border p-2">
+                                            <p className="text-app-text/50 text-xs">
+                                                Win Rate
+                                            </p>
+                                            <p>
+                                                {num(
+                                                    resultToRender.summary
+                                                        .winRatePct,
+                                                    2
+                                                )}
+                                                %
+                                            </p>
+                                        </div>
+                                        <div className="border-line-subtle rounded border p-2">
+                                            <p className="text-app-text/50 text-xs">
+                                                Profit Factor
+                                            </p>
+                                            <p>
+                                                {resultToRender.summary
+                                                    .profitFactor == null
+                                                    ? "—"
+                                                    : num(
+                                                          resultToRender.summary
+                                                              .profitFactor,
+                                                          2
+                                                      )}
+                                            </p>
+                                        </div>
+                                        <div className="border-line-subtle rounded border p-2">
+                                            <p className="text-app-text/50 text-xs">
+                                                Max DD %
+                                            </p>
+                                            <p>
+                                                {num(
+                                                    resultToRender.summary
+                                                        .maxDrawdownPct,
+                                                    2
+                                                )}
+                                                %
+                                            </p>
+                                        </div>
+                                        <div className="border-line-subtle rounded border p-2">
+                                            <p className="text-app-text/50 text-xs">
+                                                Candles
+                                            </p>
+                                            <p>
+                                                {resultToRender.candlesProcessed}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-4 min-h-0 flex-1 overflow-auto">
+                                        <table className="w-full min-w-[760px] text-left text-xs">
+                                            <thead className="text-app-text/60 border-line-subtle border-b uppercase">
+                                                <tr>
+                                                    <th className="py-2 pr-4 text-left">
+                                                        Side
+                                                    </th>
+                                                    <th className="py-2 pr-4 text-right">
+                                                        Open
+                                                    </th>
+                                                    <th className="py-2 pr-4 text-right">
+                                                        Close
+                                                    </th>
+                                                    <th className="py-2 pr-4 text-right">
+                                                        PnL
+                                                    </th>
+                                                    <th className="py-2 pr-4 text-right">
+                                                        Size
+                                                    </th>
+                                                    <th className="py-2 pr-4 text-right">
+                                                        Fee
+                                                    </th>
+                                                    <th className="py-2 pr-4 text-right">
+                                                        Funding
+                                                    </th>
+                                                    <th className="py-2 text-right">
+                                                        Open Time - Close Time
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {resultToRender.trades.length ===
+                                                0 ? (
+                                                    <tr>
+                                                        <td
+                                                            colSpan={8}
+                                                            className="text-app-text/45 p-3 text-center"
+                                                        >
+                                                            No trades in this
+                                                            run.
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    resultToRender.trades.map(
+                                                        (trade, idx) => (
+                                                            <tr
+                                                                key={`${resultToRender.runId}-${idx}`}
+                                                                className="border-line-subtle border-b last:border-b-0"
+                                                            >
+                                                                <td
+                                                                    className={`py-2 pr-4 font-semibold uppercase ${
+                                                                        trade.side ===
+                                                                        "long"
+                                                                            ? "text-accent-success-strong"
+                                                                            : "text-accent-danger"
+                                                                    }`}
+                                                                >
+                                                                    {trade.side}
+                                                                </td>
+                                                                <td className="py-2 pr-4 text-right">
+                                                                    {formatPrice(
+                                                                        trade
+                                                                            .open
+                                                                            .price
+                                                                    )}
+                                                                </td>
+                                                                <td className="py-2 pr-4 text-right">
+                                                                    {formatPrice(
+                                                                        trade
+                                                                            .close
+                                                                            .price
+                                                                    )}
+                                                                </td>
+                                                                <td
+                                                                    className={`py-2 pr-4 text-right ${
+                                                                        trade.pnl >=
+                                                                        0
+                                                                            ? "text-accent-success"
+                                                                            : "text-accent-danger-soft"
+                                                                    }`}
+                                                                >
+                                                                    {num(
+                                                                        trade.pnl,
+                                                                        2
+                                                                    )}
+                                                                    $
+                                                                </td>
+                                                                <td className="py-2 pr-4 text-right">
+                                                                    {num(
+                                                                        trade.size,
+                                                                        4
+                                                                    )}
+                                                                </td>
+                                                                <td className="py-2 pr-4 text-right">
+                                                                    {num(
+                                                                        trade.fees,
+                                                                        4
+                                                                    )}
+                                                                    $
+                                                                </td>
+                                                                <td className="py-2 pr-4 text-right">
+                                                                    {num(
+                                                                        trade.funding,
+                                                                        4
+                                                                    )}
+                                                                </td>
+                                                                <td className="py-2 text-right">
+                                                                    {formatUTC(
+                                                                        trade
+                                                                            .open
+                                                                            .time
+                                                                    )}{" "}
+                                                                    -{" "}
+                                                                    {formatUTC(
+                                                                        trade
+                                                                            .close
+                                                                            .time
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        )
+                                                    )
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

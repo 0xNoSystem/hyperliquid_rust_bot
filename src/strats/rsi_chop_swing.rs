@@ -6,6 +6,8 @@ use Value::*;
 const RSI_THRESH: f64 = 50.0;
 const ADX_THRESH: f64 = 35.0;
 const NATR_THRESH: f64 = 0.02;
+const TP_MARGIN_LOSS_PCT: f64 = 40.0;
+const SL_MARGIN_LOSS_PCT: f64 = 10.0;
 
 pub struct RsiChopSwing {
     rsi_1h: IndexId,
@@ -79,13 +81,13 @@ impl Strat for RsiChopSwing {
                 let limit_px = px * 0.997;
 
                 let tp_sl = Some(Triggers {
-                    tp: Some(40.0),
-                    sl: Some(20.0),
+                    tp: Some(TP_MARGIN_LOSS_PCT),
+                    sl: Some(SL_MARGIN_LOSS_PCT),
                 });
 
                 return Some(Intent::open_limit(
                     Side::Long,
-                    SizeSpec::RawSize(size),
+                    SizeSpec::MarginPct(90.0),
                     limit_px,
                     None,
                     tp_sl,
@@ -96,8 +98,8 @@ impl Strat for RsiChopSwing {
                 let limit_px = px * 1.003;
 
                 let tp_sl = Some(Triggers {
-                    tp: Some(40.0),
-                    sl: Some(20.0),
+                    tp: Some(TP_MARGIN_LOSS_PCT),
+                    sl: Some(SL_MARGIN_LOSS_PCT),
                 });
 
                 return Some(Intent::open_limit(
@@ -130,12 +132,12 @@ impl Strat for RsiChopSwing {
 
         match open_pos.side {
             Side::Long => {
-                if rsi_1h_value > 52.0 {
+                if rsi_1h_value > 55.0 {
                     return Some(Intent::flatten_limit(px * 1.001, None));
                 }
             }
             Side::Short => {
-                if rsi_1h_value < 48.0 {
+                if rsi_1h_value < 45.0 {
                     return Some(Intent::flatten_limit(px * 0.999, None));
                 }
             }
@@ -148,4 +150,3 @@ impl Strat for RsiChopSwing {
         None
     }
 }
-

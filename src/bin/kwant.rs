@@ -7,7 +7,12 @@ use actix_cors::Cors;
 use actix_web::{App, Error as ActixError, HttpRequest, HttpResponse, HttpServer, Responder, web};
 use actix_web_actors::ws;
 use dotenv::dotenv;
-use hyperliquid_rust_bot::{BackendStatus, BaseUrl, Bot, BotEvent, Error, UpdateFrontend, Wallet};
+use hyperliquid_rust_bot::backtest::BacktestRunRequest;
+use hyperliquid_rust_bot::{
+    BackendStatus, BacktestProgressUpdate, BacktestResultUpdate, BacktestRunError,
+    BacktestRunPayload, BacktestRunResponse, Backtester, BaseUrl, Bot, BotEvent, Error,
+    UpdateFrontend, Wallet, get_time_now,
+};
 use log::{error, info};
 use std::env;
 use tokio::{
@@ -73,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .supports_credentials(),
             )
             .route("/command", web::post().to(execute))
+            .route("/backtest", web::post().to(run_backtest))
             .route("/ws", web::get().to(ws_route))
     })
     .workers(2)
@@ -115,6 +121,92 @@ async fn execute(raw: web::Bytes, sender: web::Data<Sender<BotEvent>>) -> impl R
             error!("Failed to deserialize BotEvent: {}", err);
             HttpResponse::BadRequest().body(format!("Invalid BotEvent: {}", err))
         }
+    }
+}
+
+fn make_backtest_run_id(asset: &str) -> String {
+    format!("bt-{}-{}", asset.to_lowercase(), get_time_now())
+}
+
+fn validate_backtest_request(request: &BacktestRunRequest) -> Result<(), String> {
+    let cfg = &request.config;
+
+    if cfg.asset.trim().is_empty() {
+        return Err("asset must not be empty".to_string());
+    }
+    if !cfg.margin.is_finite() || cfg.margin <= 0.0 {
+        return Err("margin must be a positive finite number".to_string());
+    }
+    if cfg.lev == 0 {
+        return Err("lev must be greater than zero".to_string());
+    }
+    if cfg.end_time <= cfg.start_time {
+        return Err("endTime must be greater than startTime".to_string());
+    }
+    if cfg.resolution.to_millis() == 0 {
+        return Err("resolution must be a supported timeframe".to_string());
+    }
+
+    Ok(())
+}
+
+async fn run_backtest(
+    payload: web::Json<BacktestRunPayload>,
+    bcast: web::Data<BroadcastSender<UpdateFrontend>>,
+) -> impl Responder {
+    let mut request: BacktestRunRequest = payload.into_inner().into();
+    let run_id = request
+        .run_id
+        .clone()
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or_else(|| make_backtest_run_id(&request.config.asset));
+
+    if let Err(message) = validate_backtest_request(&request) {
+        return HttpResponse::BadRequest().json(BacktestRunError {
+            run_id,
+            message,
+            progress: Vec::new(),
+        });
+    }
+
+    request.run_id = Some(run_id.clone());
+
+    let mut backtester = Backtester::from_request(request);
+    let mut progress = Vec::new();
+    let progress_run_id = run_id.clone();
+    let progress_sender = bcast.get_ref().clone();
+
+    match backtester
+        .run_with_progress(|evt| {
+            progress.push(evt.clone());
+            let _ =
+                progress_sender.send(UpdateFrontend::BacktestProgress(BacktestProgressUpdate {
+                    run_id: progress_run_id.clone(),
+                    progress: evt,
+                }));
+        })
+        .await
+    {
+        Ok(mut result) => {
+            result.run_id = run_id.clone();
+            let _ = bcast
+                .get_ref()
+                .send(UpdateFrontend::BacktestResult(BacktestResultUpdate {
+                    run_id: run_id.clone(),
+                    result: result.clone(),
+                }));
+
+            HttpResponse::Ok().json(BacktestRunResponse {
+                run_id,
+                result,
+                progress,
+            })
+        }
+        Err(err) => HttpResponse::InternalServerError().json(BacktestRunError {
+            run_id,
+            message: err.to_string(),
+            progress,
+        }),
     }
 }
 
