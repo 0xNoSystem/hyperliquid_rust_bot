@@ -7,7 +7,7 @@ use std::hash::BuildHasherDefault;
 use arraydeque::{ArrayDeque, behavior::Wrapping};
 use kwant::indicators::*;
 
-use crate::{IndicatorData, IndicatorKind, MAX_HISTORY, Side, TimeFrame};
+use crate::{CandleHistory, IndicatorData, IndicatorKind, MAX_HISTORY, Side, TimeFrame};
 use log::warn;
 
 use serde::{Deserialize, Serialize};
@@ -149,10 +149,9 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
     }
 }
 
-type History = Box<ArrayDeque<Price, { MAX_HISTORY }, Wrapping>>;
 #[derive(Debug)]
 pub struct Tracker {
-    pub price_data: History,
+    pub price_data: CandleHistory,
     pub indicators: HashMap<IndicatorKind, Handler, BuildHasherDefault<FxHasher>>,
     tf: TimeFrame,
     prev_close: Option<u64>,

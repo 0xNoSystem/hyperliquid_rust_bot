@@ -25,6 +25,7 @@ alloy = { version = "1.0", default-features = false, features = [
 ] }
 reqwest = "0.12.24"
 tokio-util = "0.7.18"
+rhai = "1.24.0"
 
 [profile.release]
 panic = "abort"

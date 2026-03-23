@@ -749,7 +749,7 @@ impl SignalEngine {
 
         SignalEngine {
             engine_rv: dummy_rv,
-            trade_tx: trade_tx,
+            trade_tx,
             data_tx: None,
             trackers,
             strategy,
