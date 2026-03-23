@@ -2,6 +2,8 @@ use crate::{
     AddMarketInfo, BackendStatus, EngineView, ExecEvent, HLTradeInfo, Market, MarketCommand,
     MarketInfo, MarketState, MarketUpdate, TradeFillInfo, UpdateFrontend, Wallet,
 };
+
+use crate::broadcast::{BroadcastCmd, CacheCmdIn, SubReply, SubscribePayload};
 use hyperliquid_rust_sdk::{
     AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, UserData,
 };
@@ -11,10 +13,10 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
+use tokio::sync::{Mutex, oneshot};
 use tokio::time::{Duration, interval};
 use tokio_util::sync::CancellationToken;
 
@@ -27,7 +29,8 @@ pub struct Bot {
     info_client: InfoClient,
     wallet: Arc<Wallet>,
     markets: HashMap<String, Sender<MarketCommand>, BuildHasherDefault<FxHasher>>,
-    candle_subs: HashMap<String, u32>,
+    broadcast_tx: UnboundedSender<BroadcastCmd>,
+    candle_rx: Sender<CacheCmdIn>,
     #[allow(unused)]
     fees: (f64, f64),
     _bot_tx: Sender<BotEvent>,
@@ -36,14 +39,16 @@ pub struct Bot {
     update_tx: UnboundedSender<MarketUpdate>,
     app_tx: Option<Sender<UpdateFrontend>>,
     chain_open_positions: Vec<AssetPosition>,
-    universe: Vec<AssetMeta>,
 }
 
 impl Bot {
-    pub async fn new(wallet: Wallet) -> Result<(Self, Sender<BotEvent>), Error> {
+    pub async fn new(
+        wallet: Wallet,
+        broadcast_tx: UnboundedSender<BroadcastCmd>,
+        candle_rx: Sender<CacheCmdIn>,
+    ) -> Result<(Self, Sender<BotEvent>), Error> {
         let info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
         let fees = wallet.get_user_fees().await?;
-        let universe = get_all_assets(&info_client).await?;
 
         let (bot_tx, bot_rv) = channel::<BotEvent>(64);
         let (update_tx, update_rv) = unbounded_channel::<MarketUpdate>();
@@ -53,7 +58,8 @@ impl Bot {
                 info_client,
                 wallet: wallet.into(),
                 markets: HashMap::default(),
-                candle_subs: HashMap::new(),
+                broadcast_tx,
+                candle_rx,
                 fees,
                 _bot_tx: bot_tx.clone(),
                 bot_rv,
@@ -61,7 +67,6 @@ impl Bot {
                 update_tx,
                 app_tx: None,
                 chain_open_positions: Vec::new(),
-                universe,
             },
             bot_tx,
         ))
@@ -81,7 +86,6 @@ impl Bot {
         } = info;
 
         let asset = asset.trim().to_string();
-        let asset_str = asset.as_str();
 
         if self.markets.contains_key(&asset) {
             if let Some(tx) = &self.app_tx {
@@ -118,20 +122,26 @@ impl Bot {
                 .await;
         }
 
-        let meta = if let Some(cached) = self.universe.iter().find(|a| a.name == asset_str).cloned()
-        {
-            cached
-        } else {
-            get_asset(&self.info_client, asset_str).await?
+        let (one_tx, one_rx) = oneshot::channel::<SubReply>();
+        let sub_request = SubscribePayload {
+            asset: asset.clone(),
+            reply: one_tx,
         };
 
-        let (sub_id, receiver) = subscribe_candles(&mut self.info_client, asset_str).await?;
+        self.broadcast_tx
+            .send(BroadcastCmd::Subscribe(sub_request))
+            .map_err(|e| Error::Custom(format!("broadcast channel closed: {}", e)))?;
+
+        let sub_info = one_rx
+            .await
+            .map_err(|_| Error::Custom("subscription reply dropped".to_string()))??;
 
         let (market, market_tx) = Market::new(
             self.wallet.clone(),
             self.update_tx.clone(),
-            receiver,
-            meta,
+            self.candle_rx.clone(),
+            sub_info.px_receiver,
+            sub_info.meta,
             margin,
             lev,
             strategy,
@@ -140,7 +150,6 @@ impl Bot {
         .await?;
 
         self.markets.insert(asset.clone(), market_tx);
-        self.candle_subs.insert(asset.clone(), sub_id);
 
         let app_tx = self.app_tx.clone();
         let remove_market_tx = self._bot_tx.clone();
@@ -172,13 +181,15 @@ impl Bot {
     ) -> Result<(), Error> {
         let asset = asset.trim().to_string();
 
-        if let Some(sub_id) = self.candle_subs.remove(&asset) {
-            self.info_client.unsubscribe(sub_id).await?;
-            info!("Removed {} market successfully", asset);
-        } else {
+        if !self.markets.contains_key(&asset) {
             info!("Couldn't remove {} market, it doesn't exist", asset);
             return Ok(());
         }
+
+        let _ = self
+            .broadcast_tx
+            .send(BroadcastCmd::Unsubscribe(asset.clone()));
+        info!("Removed {} market successfully", asset);
 
         if let Some(tx) = self.markets.remove(&asset) {
             let tx = tx.clone();
@@ -220,12 +231,8 @@ impl Bot {
 
     pub async fn close_all(&mut self) {
         info!("CLOSING ALL MARKETS");
-        for (_asset, id) in self.candle_subs.drain() {
-            let _ = self.info_client.unsubscribe(id).await;
-        }
-        self.candle_subs.clear();
-
-        for (_asset, tx) in self.markets.drain() {
+        for (asset, tx) in self.markets.drain() {
+            let _ = self.broadcast_tx.send(BroadcastCmd::Unsubscribe(asset));
             let _ = tx.send(MarketCommand::Close).await;
         }
     }
@@ -547,16 +554,12 @@ impl Bot {
                             let guard = session.lock().await;
                             let sess: Vec<MarketInfo> = guard.values().map(MarketInfo::from).collect();
 
-                            let universe: Vec<AssetMeta> = if self.universe.is_empty() {
-                                match get_all_assets(&self.info_client).await {
-                                    Ok(u) => u,
-                                    Err(e) => {
-                                        let _ = err_tx.try_send(UserError(format!("Failed to fetch asset universe: {}", e)));
-                                        Vec::new()
-                                    },
-                                }
-                            } else {
-                                self.universe.clone()
+                            let universe: Vec<AssetMeta> = match get_all_assets(&self.info_client).await {
+                                Ok(u) => u,
+                                Err(e) => {
+                                    let _ = err_tx.try_send(UserError(format!("Failed to fetch asset universe: {}", e)));
+                                    Vec::new()
+                                },
                             };
 
                             let _ = err_tx.try_send(LoadSession((sess, universe)));

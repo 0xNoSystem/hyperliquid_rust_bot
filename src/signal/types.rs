@@ -193,8 +193,8 @@ impl Tracker {
         }
     }
 
-    pub(super) fn digest_bulk(&mut self, price: Vec<Price>) {
-        for p in price {
+    pub(super) fn digest_bulk(&mut self, prices: &[Price]) {
+        for &p in prices {
             self.digest(p);
         }
     }

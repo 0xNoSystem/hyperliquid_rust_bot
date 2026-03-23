@@ -330,7 +330,7 @@ impl Backtester {
 
                                     let loaded_now = loaded_candles.min(fetch_total);
                                     if loaded_now > loading_reported
-                                        && (loaded_candles % 200 == 0 || loaded_candles >= fetch_total)
+                                        && (loaded_candles.is_multiple_of(200) || loaded_candles >= fetch_total)
                                     {
                                         loading_reported = loaded_now;
                                         on_progress(BacktestProgress::LoadingCandles {
@@ -346,7 +346,7 @@ impl Backtester {
                                             loading_log_step,
                                         );
                                     }
-                                    if loaded_candles % 1_000 == 0 {
+                                    if loaded_candles.is_multiple_of(1_000) {
                                         tokio::task::yield_now().await;
                                         drain_loading_progress(
                                             &mut loading_rx,
@@ -370,7 +370,7 @@ impl Backtester {
                                             }
                                             warmup_buffer.push_back(candle);
                                             let warmup_loaded = warmup_buffer.len() as u64;
-                                            if warmup_loaded % 100 == 0 || warmup_loaded == warmup_target {
+                                            if warmup_loaded.is_multiple_of(100) || warmup_loaded == warmup_target {
                                                 on_progress(BacktestProgress::WarmingEngine {
                                                     loaded: warmup_loaded,
                                                     total: warmup_target,
@@ -417,7 +417,7 @@ impl Backtester {
                                         );
                                         break;
                                     }
-                                    if sim_processed % 200 == 0 || sim_processed >= sim_total {
+                                    if sim_processed.is_multiple_of(200) || sim_processed >= sim_total {
                                         drain_loading_progress(
                                             &mut loading_rx,
                                             &mut loading_reported,
@@ -636,7 +636,7 @@ impl Backtester {
         self.push_equity_point(candle);
 
         let interval = self.request.config.snapshot_interval_candles.max(1);
-        if (idx + 1) % interval == 0 {
+        if (idx + 1).is_multiple_of(interval) {
             self.capture_snapshot(candle, SnapshotReason::Interval);
         }
         false
@@ -935,19 +935,19 @@ impl Backtester {
         };
 
         while candle.open_time >= next {
-            if let Some(mut pos) = self.position {
-                if rate_bps != 0.0 {
-                    let rate = rate_bps / 10_000.0;
-                    let notional = pos.size * candle.open;
-                    let signed = match pos.side {
-                        Side::Long => -1.0,
-                        Side::Short => 1.0,
-                    };
-                    let funding = notional * rate * signed;
-                    pos.funding += funding;
-                    self.balance += funding;
-                    self.position = Some(pos);
-                }
+            if let Some(mut pos) = self.position
+                && rate_bps != 0.0
+            {
+                let rate = rate_bps / 10_000.0;
+                let notional = pos.size * candle.open;
+                let signed = match pos.side {
+                    Side::Long => -1.0,
+                    Side::Short => 1.0,
+                };
+                let funding = notional * rate * signed;
+                pos.funding += funding;
+                self.balance += funding;
+                self.position = Some(pos);
             }
             next = next.saturating_add(FUNDING_WINDOW_MS);
         }
@@ -1158,6 +1158,7 @@ impl Backtester {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn stream_fetch_windows_parallel(
     run_id: String,
     source: DataSource,
@@ -1241,7 +1242,7 @@ async fn stream_fetch_windows_parallel(
                     }
                 };
                 completed = completed.saturating_add(1);
-                if completed % 10 == 0 || completed == windows.len() {
+                if completed.is_multiple_of(10) || completed == windows.len() {
                     info!(
                         "backtest[{run_id}] fetch windows completed {}/{}",
                         completed,
@@ -1344,6 +1345,7 @@ fn build_fetch_windows(fetch_start: u64, fetch_end: u64, window_span_ms: u64) ->
     windows
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_fetch_worker(
     joinset: &mut tokio::task::JoinSet<WorkerResult>,
     window: FetchWindow,
@@ -1678,7 +1680,7 @@ fn div_ceil_u64(value: u64, divisor: u64) -> u64 {
     if divisor == 0 {
         return 0;
     }
-    value / divisor + u64::from(value % divisor != 0)
+    value / divisor + u64::from(!value.is_multiple_of(divisor))
 }
 
 fn snapshot_reason_from_action(action: BtAction) -> Option<SnapshotReason> {

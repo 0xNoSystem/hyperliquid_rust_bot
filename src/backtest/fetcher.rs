@@ -173,7 +173,7 @@ impl DataSource {
         let mut best: Option<(TimeFrame, &'static str)> = None;
         for (candidate, interval) in map.iter().copied() {
             let base_secs = candidate.to_secs();
-            if base_secs > target_secs || target_secs % base_secs != 0 {
+            if base_secs > target_secs || !target_secs.is_multiple_of(base_secs) {
                 continue;
             }
             let replace = match best {
@@ -1070,7 +1070,7 @@ fn truncate_for_log(input: &str, max_chars: usize) -> String {
     if max_chars == 0 || input.is_empty() {
         return String::new();
     }
-    let normalized = input.replace('\n', " ").replace('\r', " ");
+    let normalized = input.replace(['\n', '\r'], " ");
     if normalized.chars().count() <= max_chars {
         normalized
     } else {
@@ -1335,6 +1335,7 @@ fn parse_coinbase(json: &Value, interval_ms: u64) -> Result<Vec<Price>, Error> {
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_price(
     start: u64,
     open: f64,
@@ -1365,10 +1366,11 @@ fn parse_u64(value: &Value) -> Result<u64, Error> {
             .parse::<u64>()
             .map_err(|_| Error::Custom("Invalid integer".to_string()));
     }
-    if let Some(f) = value.as_f64() {
-        if f.is_finite() && f >= 0.0 {
-            return Ok(f as u64);
-        }
+    if let Some(f) = value.as_f64()
+        && f.is_finite()
+        && f >= 0.0
+    {
+        return Ok(f as u64);
     }
     Err(Error::Custom("Invalid integer".to_string()))
 }
@@ -1406,7 +1408,7 @@ fn parse_rfc3339_to_ms(input: &str) -> Option<u64> {
             if b == b'Z' {
                 break;
             }
-            if !(b'0'..=b'9').contains(&b) {
+            if !b.is_ascii_digit() {
                 return None;
             }
             if factor > 0 {
@@ -1436,7 +1438,7 @@ fn parse_int_range(input: &str, start: usize, end: usize) -> Option<u32> {
 }
 
 fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
-    if month < 1 || month > 12 || day < 1 || day > 31 {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
     let mut y = year as i64;
@@ -1473,7 +1475,7 @@ fn div_ceil(value: u64, divisor: u64) -> u64 {
     if divisor == 0 {
         return 0;
     }
-    value / divisor + u64::from(value % divisor != 0)
+    value / divisor + u64::from(!value.is_multiple_of(divisor))
 }
 
 fn now_ms() -> u64 {

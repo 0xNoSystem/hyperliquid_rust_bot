@@ -112,10 +112,10 @@ fn write_position_states_csv(snapshots: &[PositionSnapshot], path: &Path) -> Res
 
         writeln!(
             writer,
-            "{},{},{},{},{},{},{:?},{:.10},{:.10},{:.10},{:.10},{:.10},{:?},{:.10},{:.10},{:.10}",
+            "{},{},{:?},{},{},{},{:?},{:.10},{:.10},{:.10},{:.10},{:.10},{:?},{:.10},{:.10},{:.10}",
             snap.id,
             snap.ts,
-            format!("{:?}", snap.reason),
+            snap.reason,
             snap.candle.open_time,
             snap.candle.close_time,
             pos.open_time,

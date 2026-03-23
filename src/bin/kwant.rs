@@ -11,7 +11,9 @@ use hyperliquid_rust_bot::backtest::BacktestRunRequest;
 use hyperliquid_rust_bot::{
     BackendStatus, BacktestProgressUpdate, BacktestResultUpdate, BacktestRunError,
     BacktestRunPayload, BacktestRunResponse, Backtester, BaseUrl, Bot, BotEvent, Error,
-    UpdateFrontend, Wallet, get_time_now,
+    UpdateFrontend, Wallet,
+    broadcast::{Broadcaster, CandleCache},
+    get_time_now,
 };
 use log::{error, info};
 use std::env;
@@ -37,7 +39,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let url = BaseUrl::Mainnet;
     let wallet = load_wallet(url).await?;
 
-    let (bot, cmd_sender) = Bot::new(wallet).await?;
+    let (mut candle_cache, cache_tx) = CandleCache::new(url).await?;
+    let (mut broadcaster, broadcast_tx) = Broadcaster::new(url, cache_tx.clone()).await?;
+
+    tokio::spawn(async move { candle_cache.start().await });
+    tokio::spawn(async move { broadcaster.start().await });
+
+    let (bot, cmd_sender) = Bot::new(wallet, broadcast_tx, cache_tx).await?;
     let (update_tx, mut update_rx) = channel::<UpdateFrontend>(256);
 
     let bot_to_ui_sender = update_tx.clone();
@@ -191,10 +199,12 @@ async fn run_backtest(
             result.run_id = run_id.clone();
             let _ = bcast
                 .get_ref()
-                .send(UpdateFrontend::BacktestResult(BacktestResultUpdate {
-                    run_id: run_id.clone(),
-                    result: result.clone(),
-                }));
+                .send(UpdateFrontend::BacktestResult(Box::new(
+                    BacktestResultUpdate {
+                        run_id: run_id.clone(),
+                        result: result.clone(),
+                    },
+                )));
 
             HttpResponse::Ok().json(BacktestRunResponse {
                 run_id,

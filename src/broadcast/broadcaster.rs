@@ -1,12 +1,15 @@
+use super::CacheCmdIn;
 use super::PriceData;
-use crate::{Error, TimeFrame, candles_snapshot, get_all_assets, get_time_now, parse_candle, subscribe_candles, MAX_DISCONNECTION_WINDOW};
+use crate::{
+    Error, MAX_DISCONNECTION_WINDOW, TimeFrame, candles_snapshot, get_all_assets, get_time_now,
+    parse_candle, subscribe_candles,
+};
 use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, InfoClient, Message};
 use rustc_hash::FxHasher;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 use std::time::Instant;
-use super::CacheCmdIn;
 use tokio::sync::{
     Mutex, broadcast,
     mpsc::{Sender, UnboundedReceiver, UnboundedSender, unbounded_channel},
@@ -16,6 +19,7 @@ use tokio::sync::{
 const SUBSCRIPTION_ATTEMPTS_MAX: u32 = 5;
 
 type FxMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
+pub type SubReply = Result<SubscriptionReply, Error>;
 
 pub struct SubscriptionReply {
     pub px_receiver: broadcast::Receiver<PriceData>,
@@ -24,7 +28,7 @@ pub struct SubscriptionReply {
 
 pub struct SubscribePayload {
     pub asset: String,
-    pub reply: oneshot::Sender<Result<SubscriptionReply, Error>>,
+    pub reply: oneshot::Sender<SubReply>,
 }
 
 pub enum BroadcastCmd {
@@ -49,7 +53,10 @@ pub struct Broadcaster {
 }
 
 impl Broadcaster {
-    pub async fn new(url: BaseUrl, cache_tx: Sender<CacheCmdIn>) -> Result<(Self, UnboundedSender<BroadcastCmd>), Error> {
+    pub async fn new(
+        url: BaseUrl,
+        cache_tx: Sender<CacheCmdIn>,
+    ) -> Result<(Self, UnboundedSender<BroadcastCmd>), Error> {
         let info_client = InfoClient::with_reconnect(None, Some(url)).await?;
         let universe = get_all_assets(&info_client).await?;
         let (cmd_tx, cmd_rx) = unbounded_channel::<BroadcastCmd>();
@@ -120,7 +127,12 @@ impl Broadcaster {
                 tokio::spawn(async move {
                     let mut client = client.lock().await;
                     if let Err(e) = client.unsubscribe(sub_id).await {
-                        log::warn!("failed to unsubscribe {} (sub_id {}): {:?}", &asset, sub_id, e);
+                        log::warn!(
+                            "failed to unsubscribe {} (sub_id {}): {:?}",
+                            &asset,
+                            sub_id,
+                            e
+                        );
                     }
                 });
             }
@@ -128,6 +140,7 @@ impl Broadcaster {
     }
 
     #[inline]
+    #[allow(dead_code)]
     fn is_feed_idle(&self, asset: &str) -> bool {
         self.channels
             .get(asset)
@@ -141,7 +154,6 @@ impl Broadcaster {
             feed.sub_id = Some(sub_id);
         }
     }
-
 
     pub async fn start(&mut self) {
         while let Some(cmd) = self.cmd_rx.recv().await {
@@ -157,7 +169,6 @@ impl Broadcaster {
         }
     }
 }
-
 
 async fn spawn_hl_feed(
     info_client: Arc<Mutex<InfoClient>>,
@@ -206,41 +217,39 @@ async fn spawn_hl_feed(
                 Ok(price) => {
                     if disconnected {
                         disconnected = false;
-                        if let Some(timer) = disconnection_start.take() {
-                            if timer.elapsed().as_millis() > MAX_DISCONNECTION_WINDOW {
-                                let disc_start =
-                                    last_confirmed_close.unwrap_or_else(get_time_now);
-                                let end = get_time_now();
+                        if let Some(timer) = disconnection_start.take()
+                            && timer.elapsed().as_millis() > MAX_DISCONNECTION_WINDOW
+                        {
+                            let disc_start = last_confirmed_close.unwrap_or_else(get_time_now);
+                            let end = get_time_now();
 
-                                let fetch_client =
-                                    InfoClient::new(None, Some(url)).await;
+                            let fetch_client = InfoClient::new(None, Some(url)).await;
 
-                                if let Ok(client) = fetch_client {
-                                    match candles_snapshot(
-                                        &client,
-                                        &asset,
-                                        TimeFrame::Min1,
-                                        disc_start,
-                                        end,
-                                    )
-                                    .await
-                                    {
-                                        Ok(missed) if !missed.is_empty() => {
-                                            log::info!(
-                                                "recovered {} missed 1m candles for {}",
-                                                missed.len(),
-                                                &asset
-                                            );
-                                            let _ = tx.send(PriceData::Bulk(missed));
-                                        }
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            log::warn!(
-                                                "failed to fetch missed window for {}: {:?}",
-                                                &asset,
-                                                e
-                                            );
-                                        }
+                            if let Ok(client) = fetch_client {
+                                match candles_snapshot(
+                                    &client,
+                                    &asset,
+                                    TimeFrame::Min1,
+                                    disc_start,
+                                    end,
+                                )
+                                .await
+                                {
+                                    Ok(missed) if !missed.is_empty() => {
+                                        log::info!(
+                                            "recovered {} missed 1m candles for {}",
+                                            missed.len(),
+                                            &asset
+                                        );
+                                        let _ = tx.send(PriceData::Bulk(missed));
+                                    }
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        log::warn!(
+                                            "failed to fetch missed window for {}: {:?}",
+                                            &asset,
+                                            e
+                                        );
                                     }
                                 }
                             }

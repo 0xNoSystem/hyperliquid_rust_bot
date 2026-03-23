@@ -115,12 +115,18 @@ impl CandleCache {
         let mut cached: TimeFrameData = HashMap::default();
         if let Some(tf_map) = self.candles.get(&request.asset) {
             request.request.retain(|tf, count| {
-                if let Some(history) = tf_map.get(tf) {
-                    if history.len() >= *count as usize {
-                        let data: Vec<Price> = history.iter().rev().take(*count as usize).rev().copied().collect();
-                        cached.insert(*tf, data);
-                        return false;
-                    }
+                if let Some(history) = tf_map.get(tf)
+                    && history.len() >= *count as usize
+                {
+                    let data: Vec<Price> = history
+                        .iter()
+                        .rev()
+                        .take(*count as usize)
+                        .rev()
+                        .copied()
+                        .collect();
+                    cached.insert(*tf, data);
+                    return false;
                 }
                 true
             });
@@ -214,10 +220,12 @@ impl CandleCache {
             let _ = request.reply.send(Ok(result));
 
             if !backfill.is_empty() {
-                let _ = cmd_tx.send(CacheCmdIn::Backfill {
-                    asset,
-                    data: backfill,
-                }).await;
+                let _ = cmd_tx
+                    .send(CacheCmdIn::Backfill {
+                        asset,
+                        data: backfill,
+                    })
+                    .await;
             }
         });
     }
@@ -227,10 +235,10 @@ impl CandleCache {
         let mut builders = self.builders.get_mut(&asset);
 
         for (tf, candles) in data {
-            if let Some(last) = candles.last() {
-                if let Some(builder) = builders.as_mut().and_then(|b| b.get_mut(&tf)) {
-                    builder.resync(last.close_time);
-                }
+            if let Some(last) = candles.last()
+                && let Some(builder) = builders.as_mut().and_then(|b| b.get_mut(&tf))
+            {
+                builder.resync(last.close_time);
             }
 
             let history: CandleHistory = Box::new(candles.into_iter().collect());
@@ -238,7 +246,6 @@ impl CandleCache {
         }
     }
 }
-
 
 impl CandleCache {
     pub async fn start(&mut self) {

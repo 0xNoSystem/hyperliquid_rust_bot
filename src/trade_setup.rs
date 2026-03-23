@@ -44,7 +44,9 @@ impl TimeFrame {
 
     pub const fn available_tfs() -> [TimeFrame; 13] {
         use TimeFrame::*;
-        [Min1, Min3, Min5, Min15, Min30, Hour1, Hour2, Hour4, Hour12, Day1, Day3, Week, Month]
+        [
+            Min1, Min3, Min5, Min15, Min30, Hour1, Hour2, Hour4, Hour12, Day1, Day3, Week, Month,
+        ]
     }
 }
 

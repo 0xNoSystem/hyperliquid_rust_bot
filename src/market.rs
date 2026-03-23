@@ -3,36 +3,28 @@ use log::{info, warn};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 
-use hyperliquid_rust_sdk::{
-    AssetMeta, Error, ExchangeClient, ExchangeResponseStatus, InfoClient, Message,
-};
+use hyperliquid_rust_sdk::{AssetMeta, Error, ExchangeClient, ExchangeResponseStatus};
 
+use crate::broadcast::{CacheCmdIn, CandleCount, CandleSnapshotRequest, PriceData};
 use crate::signal::{
     EditType, EngineCommand, EngineView, Entry, ExecParam, ExecParams, IndexId, SignalEngine,
     TimeFrameData,
 };
-use crate::{
-    ExecCommand, ExecControl, ExecEvent, Executor, candles_snapshot, get_time_now, load_candles,
-    parse_candle,
-};
-use crate::{MAX_DISCONNECTION_WINDOW, MAX_HISTORY, MarketInfo, Strategy, Wallet};
-
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, MarketStream, UpdateFrontend};
+use crate::{ExecCommand, ExecControl, ExecEvent, Executor};
+use crate::{MAX_HISTORY, MarketInfo, Strategy, Wallet};
 use crate::{OpenPositionLocal, TimeFrame, TradeInfo};
 
-use tokio::sync::mpsc::{
-    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
-};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_channel};
+use tokio::sync::{broadcast, oneshot};
 use tokio::task::JoinHandle;
 
 use flume::{Sender as FlumeSender, bounded};
 
 pub struct Market {
-    info_client: InfoClient,
     exchange_client: ExchangeClient,
+    cache_tx: Sender<CacheCmdIn>,
     pub trade_history: Vec<TradeInfo>,
     pub pnl: f64,
     pub lev: usize,
@@ -44,7 +36,6 @@ pub struct Market {
     senders: MarketSenders,
     pub active_tfs: HashSet<TimeFrame>,
     pub margin: f64,
-    disconnected: Arc<AtomicBool>,
 }
 
 impl Market {
@@ -52,14 +43,14 @@ impl Market {
     pub async fn new(
         wallet: Arc<Wallet>,
         bot_tx: UnboundedSender<MarketUpdate>,
-        price_rv: UnboundedReceiver<Message>,
+        cache_tx: Sender<CacheCmdIn>,
+        px_receiver: broadcast::Receiver<PriceData>,
         asset: AssetMeta,
         margin: f64,
         lev: usize,
         strategy: Strategy,
         config: Option<Vec<IndexId>>,
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
-        let info_client = InfoClient::new(None, Some(wallet.url)).await?;
         let exchange_client =
             ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
 
@@ -82,11 +73,10 @@ impl Market {
             bot_tx,
             engine_tx,
             exec_tx: exec_tx.clone(),
-            market_tx: market_tx.clone(),
         };
 
         let receivers = MarketReceivers {
-            price_rv,
+            price_rv: px_receiver,
             market_rv,
         };
 
@@ -95,8 +85,8 @@ impl Market {
 
         Ok((
             Market {
-                info_client,
                 exchange_client,
+                cache_tx,
                 margin,
                 trade_history: Vec::with_capacity(MAX_HISTORY),
                 pnl: 0_f64,
@@ -117,7 +107,6 @@ impl Market {
                 receivers,
                 senders,
                 active_tfs,
-                disconnected: Arc::new(AtomicBool::new(false)),
             },
             market_tx,
         ))
@@ -154,19 +143,33 @@ impl Market {
         }
     }
 
-    async fn load_engine(&mut self, candle_count: u64) -> Result<Option<f64>, Error> {
+    async fn load_engine(&mut self, candle_count: CandleCount) -> Result<Option<f64>, Error> {
         info!("---------------Loading Engine---------------");
+
+        let request: HashMap<TimeFrame, CandleCount> = self
+            .active_tfs
+            .iter()
+            .map(|tf| (*tf, candle_count))
+            .collect();
+
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cache_tx
+            .send(CacheCmdIn::Snapshot(CandleSnapshotRequest {
+                asset: self.asset.name.clone(),
+                request,
+                reply: reply_tx,
+            }))
+            .await
+            .map_err(|_| Error::Custom("CandleCache channel closed".into()))?;
+
+        let tf_data = reply_rx
+            .await
+            .map_err(|_| Error::Custom("CandleCache reply dropped".into()))??;
+
         let mut last_price: Option<f64> = None;
-        for tf in &self.active_tfs {
-            let price_data = load_candles(
-                &self.info_client,
-                self.asset.name.as_str(),
-                *tf,
-                candle_count,
-            )
-            .await?;
-            last_price = price_data.last().map(|p| p.close);
-            self.signal_engine.load(*tf, price_data).await;
+        for (tf, prices) in &tf_data {
+            last_price = prices.last().map(|p| p.close);
+            self.signal_engine.load(*tf, prices.clone()).await;
         }
 
         Ok(last_price)
@@ -210,77 +213,38 @@ impl Market {
         //Candle Stream
         let engine_price_tx = self.senders.engine_tx.clone();
         let bot_price_update = self.senders.bot_tx.clone();
-
         let asset_name: Arc<str> = Arc::from(self.asset.name.clone());
-        let disconnected_price_stream_flag = self.disconnected.clone();
-        let disconnection_info_sender = self.senders.market_tx;
+        let mut px_receiver = self.receivers.price_rv;
 
         let candle_stream_handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-            let mut disconnected = false;
-            let mut disconnection_start: Option<Instant> = None;
-            let mut last_confirmed_close: Option<u64> = None;
-            while let Some(msg) = self.receivers.price_rv.recv().await {
-                match msg {
-                    Message::Candle(candle) => {
-                        let price = parse_candle(candle.data)?;
+            loop {
+                match px_receiver.recv().await {
+                    Ok(PriceData::Single(price)) => {
                         let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
                             UpdateFrontend::MarketStream(MarketStream::Price {
-                                asset: asset_name.clone().to_string(),
+                                asset: asset_name.to_string(),
                                 price: price.close,
                             }),
                         ));
-                        if disconnected {
-                            if disconnected_price_stream_flag.load(Ordering::Relaxed) {
-                                let mut send_next_px = false;
-                                //Check if missed window is worth fetching
-                                if let Some(timer) = disconnection_start.take() {
-                                    info!(
-                                        "checking for timeout threshold to fetch missed data {}",
-                                        timer.elapsed().as_millis()
-                                    );
-                                    if timer.elapsed().as_millis() > MAX_DISCONNECTION_WINDOW {
-                                        let cmd = MarketCommand::FetchMissedWindow(
-                                            last_confirmed_close.unwrap_or_else(get_time_now),
-                                        );
-                                        if let Err(e) = disconnection_info_sender.send(cmd).await {
-                                            warn!(
-                                                "Failed to notify market about missing price window,
-                                                    close the market and reopen if indicators drift: {}",e);
-                                            disconnected_price_stream_flag
-                                                .store(false, Ordering::Relaxed);
-                                            disconnected = false;
-                                        }
-                                        continue;
-                                    } else {
-                                        disconnected_price_stream_flag
-                                            .store(false, Ordering::Relaxed);
-                                        disconnected = false;
-                                        send_next_px = true;
-                                    }
-                                }
-                                if !send_next_px {
-                                    continue;
-                                }
-                            } else {
-                                disconnected = false;
-                            }
-                        }
-                        last_confirmed_close = Some(price.open_time);
                         let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
                     }
-                    Message::NoData => {
-                        if !disconnected {
-                            disconnected_price_stream_flag.store(true, Ordering::Relaxed);
-                            disconnected = true;
-                            disconnection_start = Some(Instant::now());
-                            info!(
-                                "{} price stream disconnected, receiver is still alive and well",
-                                &asset_name
-                            );
+                    Ok(PriceData::Bulk(prices)) => {
+                        if let Some(last) = prices.last() {
+                            let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
+                                UpdateFrontend::MarketStream(MarketStream::Price {
+                                    asset: asset_name.to_string(),
+                                    price: last.close,
+                                }),
+                            ));
                         }
+                        let _ = engine_price_tx.send(EngineCommand::UpdatePriceBulk(prices));
                     }
-                    _ => {
-                        warn!("Received unexpected Message type in candle stream");
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("{} price receiver lagged by {} messages", &asset_name, n);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        warn!("{} broadcast channel closed", &asset_name);
+                        break;
                     }
                 }
             }
@@ -292,7 +256,6 @@ impl Market {
         let bot_update_tx = self.senders.bot_tx;
         let asset = self.asset.clone();
 
-        let disconnection_flag = self.disconnected.clone();
         while let Some(cmd) = self.receivers.market_rv.recv().await {
             match cmd {
                 MarketCommand::UpdateLeverage(lev) => {
@@ -327,31 +290,41 @@ impl Market {
                     }
                     self.strategy = strat;
 
-                    let mut map: TimeFrameData = HashMap::default();
                     let required_indicators = strat.indicators();
+                    let new_tfs: HashMap<TimeFrame, CandleCount> = required_indicators
+                        .iter()
+                        .filter(|(_, tf)| !self.active_tfs.contains(tf))
+                        .map(|(_, tf)| (*tf, 5000))
+                        .collect();
 
-                    for (kind, tf) in required_indicators.iter() {
-                        if !self.active_tfs.contains(tf) {
-                            match load_candles(&self.info_client, asset.name.as_str(), *tf, 5000)
-                                .await
-                            {
-                                Ok(tf_data) => {
-                                    map.insert(*tf, tf_data);
-                                    self.active_tfs.insert(*tf);
+                    let mut map: TimeFrameData = HashMap::default();
+                    if !new_tfs.is_empty() {
+                        let (reply_tx, reply_rx) = oneshot::channel();
+                        let req = CandleSnapshotRequest {
+                            asset: asset.name.clone(),
+                            request: new_tfs,
+                            reply: reply_tx,
+                        };
+                        if self.cache_tx.send(CacheCmdIn::Snapshot(req)).await.is_ok() {
+                            match reply_rx.await {
+                                Ok(Ok(data)) => {
+                                    for tf in data.keys() {
+                                        self.active_tfs.insert(*tf);
+                                    }
+                                    map = data;
                                 }
-
-                                Err(e) => {
+                                Ok(Err(e)) => {
                                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                                         UpdateFrontend::UserError(format!(
-                                            "Failed to load candle data for {} timeframe: {}\n
-                                                REMOVE CONCERNED INDICATORS AND TRY AGAIN",
-                                            tf, e
+                                            "Failed to load candle data: {}\nREMOVE CONCERNED INDICATORS AND TRY AGAIN", e
                                         )),
                                     ));
                                 }
+                                Err(_) => {}
                             }
                         }
                     }
+
                     let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(strat));
 
                     let price_data = if map.is_empty() { None } else { Some(map) };
@@ -376,7 +349,6 @@ impl Market {
                 }
 
                 MarketCommand::EditIndicators(mut entry_vec) => {
-                    let mut map: TimeFrameData = HashMap::default();
                     let strategy_indicators = self.strategy.indicators();
                     let mut failed_removes = Vec::with_capacity(strategy_indicators.len());
                     entry_vec.retain(|entry| {
@@ -388,30 +360,37 @@ impl Market {
                             true
                         }
                     });
-                    for &entry in &entry_vec {
-                        if entry.edit == EditType::Add && !self.active_tfs.contains(&entry.id.1) {
-                            match load_candles(
-                                &self.info_client,
-                                asset.name.as_str(),
-                                entry.id.1,
-                                5000,
-                            )
-                            .await
-                            {
-                                Ok(tf_data) => {
-                                    map.insert(entry.id.1, tf_data);
-                                    self.active_tfs.insert(entry.id.1);
-                                }
 
-                                Err(e) => {
+                    let new_tfs: HashMap<TimeFrame, CandleCount> = entry_vec
+                        .iter()
+                        .filter(|e| e.edit == EditType::Add && !self.active_tfs.contains(&e.id.1))
+                        .map(|e| (e.id.1, 5000))
+                        .collect();
+
+                    let mut map: TimeFrameData = HashMap::default();
+                    if !new_tfs.is_empty() {
+                        let (reply_tx, reply_rx) = oneshot::channel();
+                        let req = CandleSnapshotRequest {
+                            asset: asset.name.clone(),
+                            request: new_tfs,
+                            reply: reply_tx,
+                        };
+                        if self.cache_tx.send(CacheCmdIn::Snapshot(req)).await.is_ok() {
+                            match reply_rx.await {
+                                Ok(Ok(data)) => {
+                                    for tf in data.keys() {
+                                        self.active_tfs.insert(*tf);
+                                    }
+                                    map = data;
+                                }
+                                Ok(Err(e)) => {
                                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                                         UpdateFrontend::UserError(format!(
-                                            "Failed to load candle data for {} timeframe: {}\n
-                                                REMOVE CONCERNED INDICATORS AND TRY AGAIN",
-                                            entry.id.1, e
+                                            "Failed to load candle data: {}\nREMOVE CONCERNED INDICATORS AND TRY AGAIN", e
                                         )),
                                     ));
                                 }
+                                Err(_) => {}
                             }
                         }
                     }
@@ -484,48 +463,6 @@ impl Market {
                         asset.name.clone(),
                         EditMarketInfo::EngineState(new_state),
                     )));
-                }
-
-                MarketCommand::FetchMissedWindow(disc_start) => {
-                    info!("FILLING MISSED PRICE WINDOW");
-                    let mut map: TimeFrameData = HashMap::default();
-
-                    let end = get_time_now();
-                    for tf in &self.active_tfs {
-                        if (tf.to_millis()) < (end - disc_start) {
-                            match candles_snapshot(
-                                &self.info_client,
-                                asset.name.as_str(),
-                                *tf,
-                                disc_start,
-                                end,
-                            )
-                            .await
-                            {
-                                Ok(res) => {
-                                    info!(
-                                        "fetched data for {} timeframe in refill window\n missed {} candles\n",
-                                        tf,
-                                        res.len()
-                                    );
-                                    map.insert(*tf, res);
-                                }
-
-                                Err(e) => {
-                                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                        UpdateFrontend::UserError(format!(
-                                            "Failed to missed candle data for {} timeframe: {}",
-                                            tf, e
-                                        )),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    if !map.is_empty() {
-                        let _ = engine_update_tx.send(EngineCommand::UpdatePriceBulk(map));
-                    }
-                    disconnection_flag.store(false, Ordering::Relaxed);
                 }
 
                 MarketCommand::Pause => {
@@ -607,18 +544,16 @@ pub enum MarketCommand {
     Resume, //UI/Bot
     Pause,  //UI/Bot
     Close,  //UI/Bot
-    FetchMissedWindow(u64),
 }
 
 struct MarketSenders {
     bot_tx: UnboundedSender<MarketUpdate>,
     engine_tx: UnboundedSender<EngineCommand>,
     exec_tx: FlumeSender<ExecCommand>,
-    market_tx: Sender<MarketCommand>,
 }
 
 struct MarketReceivers {
-    pub price_rv: UnboundedReceiver<Message>,
+    pub price_rv: broadcast::Receiver<PriceData>,
     pub market_rv: Receiver<MarketCommand>,
 }
 

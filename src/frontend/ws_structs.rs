@@ -103,7 +103,7 @@ pub enum UpdateFrontend {
     MarketInfoEdit((String, EditMarketInfo)),
     UserError(String),
     BacktestProgress(BacktestProgressUpdate),
-    BacktestResult(BacktestResultUpdate),
+    BacktestResult(Box<BacktestResultUpdate>),
     LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),
     Status(BackendStatus),
 }
