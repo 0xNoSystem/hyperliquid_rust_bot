@@ -4,8 +4,11 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use rhai::Engine;
+
 use hyperliquid_rust_sdk::{AssetMeta, Error, ExchangeClient, ExchangeResponseStatus};
 
+use crate::backend::scripting::CompiledStrategy;
 use crate::broadcast::{CacheCmdIn, CandleCount, CandleSnapshotRequest, PriceData};
 use crate::signal::{
     EditType, EngineCommand, EngineView, Entry, ExecParam, ExecParams, IndexId, SignalEngine,
@@ -13,7 +16,7 @@ use crate::signal::{
 };
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, MarketStream, UpdateFrontend};
 use crate::{ExecCommand, ExecControl, ExecEvent, Executor};
-use crate::{MAX_HISTORY, MarketInfo, Strategy, Wallet};
+use crate::{MAX_HISTORY, MarketInfo, Wallet};
 use crate::{OpenPositionLocal, TimeFrame, TradeInfo};
 
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_channel};
@@ -28,7 +31,7 @@ pub struct Market {
     pub trade_history: Vec<TradeInfo>,
     pub pnl: f64,
     pub lev: usize,
-    pub strategy: Strategy,
+    pub strategy_name: String,
     pub asset: AssetMeta,
     signal_engine: SignalEngine,
     executor: Executor,
@@ -48,16 +51,18 @@ impl Market {
         asset: AssetMeta,
         margin: f64,
         lev: usize,
-        strategy: Strategy,
+        rhai_engine: Arc<Engine>,
+        compiled: CompiledStrategy,
+        strat_indicators: Vec<IndexId>,
+        strategy_name: String,
         config: Option<Vec<IndexId>>,
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
         let exchange_client =
             ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
 
         //Look up needed tfs for loading
-        let strat_indicators = strategy.indicators();
         let mut active_tfs: HashSet<TimeFrame> =
-            strat_indicators.into_iter().map(|id| id.1).collect();
+            strat_indicators.iter().map(|id| id.1).collect();
         if let Some(ref cfg) = config {
             for ind_id in cfg {
                 active_tfs.insert(ind_id.1);
@@ -91,11 +96,13 @@ impl Market {
                 trade_history: Vec::with_capacity(MAX_HISTORY),
                 pnl: 0_f64,
                 lev,
-                strategy,
+                strategy_name,
                 asset: asset.clone(),
                 signal_engine: SignalEngine::new(
                     config,
-                    strategy,
+                    rhai_engine,
+                    compiled,
+                    strat_indicators,
                     engine_rv,
                     Some(market_tx.clone()),
                     exec_tx,
@@ -125,8 +132,8 @@ impl Market {
 
         let last_price = self.load_engine(5000).await?;
         println!(
-            "\nMarket initialized for {} (lev: {}, strategy: {:?})\n",
-            self.asset.name, self.lev, self.strategy
+            "\nMarket initialized for {} (lev: {}, strategy: {})\n",
+            self.asset.name, self.lev, self.strategy_name
         );
         Ok(last_price)
     }
@@ -189,7 +196,7 @@ impl Market {
             asset: self.asset.name.clone(),
             lev: self.lev,
             price: last_price.unwrap_or(0.0),
-            strategy: self.strategy,
+            strategy_name: self.strategy_name.clone(),
             margin: self.margin,
             pnl: 0.0,
             is_paused: false,
@@ -284,14 +291,10 @@ impl Market {
                     }
                 }
 
-                MarketCommand::UpdateStrategy(strat) => {
-                    if strat == self.strategy {
-                        continue;
-                    }
-                    self.strategy = strat;
+                MarketCommand::UpdateStrategy(compiled, strat_indicators, name) => {
+                    self.strategy_name = name;
 
-                    let required_indicators = strat.indicators();
-                    let new_tfs: HashMap<TimeFrame, CandleCount> = required_indicators
+                    let new_tfs: HashMap<TimeFrame, CandleCount> = strat_indicators
                         .iter()
                         .filter(|(_, tf)| !self.active_tfs.contains(tf))
                         .map(|(_, tf)| (*tf, 5000))
@@ -325,10 +328,13 @@ impl Market {
                         }
                     }
 
-                    let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(strat));
+                    let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(
+                        compiled,
+                        strat_indicators.clone(),
+                    ));
 
                     let price_data = if map.is_empty() { None } else { Some(map) };
-                    let indicators: Vec<Entry> = required_indicators
+                    let indicators: Vec<Entry> = strat_indicators
                         .into_iter()
                         .map(|id| Entry {
                             id,
@@ -348,19 +354,7 @@ impl Market {
                         .await;
                 }
 
-                MarketCommand::EditIndicators(mut entry_vec) => {
-                    let strategy_indicators = self.strategy.indicators();
-                    let mut failed_removes = Vec::with_capacity(strategy_indicators.len());
-                    entry_vec.retain(|entry| {
-                        if strategy_indicators.contains(&entry.id) && entry.edit == EditType::Remove
-                        {
-                            failed_removes.push(entry.id);
-                            false
-                        } else {
-                            true
-                        }
-                    });
-
+                MarketCommand::EditIndicators(entry_vec) => {
                     let new_tfs: HashMap<TimeFrame, CandleCount> = entry_vec
                         .iter()
                         .filter(|e| e.edit == EditType::Add && !self.active_tfs.contains(&e.id.1))
@@ -400,19 +394,6 @@ impl Market {
                         indicators: entry_vec,
                         price_data,
                     });
-
-                    if !failed_removes.is_empty() {
-                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                            UpdateFrontend::UserError(format!(
-                                "INVALID OPERATION: Current strategy requires the following indicator(s):\n{}",
-                                failed_removes
-                                .iter()
-                                .map(|id| format!("• {:?}", id))
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                            )),
-                        ));
-                    }
                 }
 
                 MarketCommand::UpdateOpenPosition(pos) => {
@@ -432,6 +413,7 @@ impl Market {
                         asset.name.clone(),
                         EditMarketInfo::Trade(trade_info),
                     )));
+
                 }
 
                 MarketCommand::UserEvent(event) => {
@@ -500,6 +482,7 @@ impl Market {
                                         let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate(
                                             (asset.name.clone(), EditMarketInfo::Trade(trade_info)),
                                         ));
+
                                         break;
                                     }
 
@@ -529,21 +512,22 @@ impl Market {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MarketCommand {
-    UpdateLeverage(usize),      //UI
-    UpdateStrategy(Strategy),   //UI
-    EditIndicators(Vec<Entry>), //UI
-    ReceiveTrade(TradeInfo),    //Exec
+    UpdateLeverage(usize),
+    #[serde(skip)]
+    UpdateStrategy(CompiledStrategy, Vec<IndexId>, String), // compiled, indicators, name
+    EditIndicators(Vec<Entry>),
+    ReceiveTrade(TradeInfo),
     UpdateOpenPosition(Option<OpenPositionLocal>),
-    UserEvent(ExecEvent),                    //Bot
-    UpdateMargin(f64),                       //UI or Exec
-    UpdateIndicatorData(Vec<IndicatorData>), //Engine
+    UserEvent(ExecEvent),
+    UpdateMargin(f64),
+    UpdateIndicatorData(Vec<IndicatorData>),
     EngineStateChange(EngineView),
-    Resume, //UI/Bot
-    Pause,  //UI/Bot
-    Close,  //UI/Bot
+    Resume,
+    Pause,
+    Close,
 }
 
 struct MarketSenders {
@@ -571,7 +555,7 @@ pub type AssetPrice = (String, f64);
 pub struct MarketState {
     pub asset: String,
     pub lev: usize,
-    pub strategy: Strategy,
+    pub strategy_name: String,
     pub margin: f64,
     pub pnl: f64,
     pub is_paused: bool,
@@ -585,7 +569,7 @@ impl From<&MarketInfo> for MarketState {
         MarketState {
             asset: info.asset.clone(),
             lev: info.lev,
-            strategy: info.strategy,
+            strategy_name: info.strategy_name.clone(),
             margin: info.margin,
             pnl: info.pnl,
             is_paused: info.is_paused,

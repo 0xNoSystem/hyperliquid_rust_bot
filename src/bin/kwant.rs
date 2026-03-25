@@ -1,300 +1,72 @@
-use actix::ActorContext;
-use actix::AsyncContext;
-use actix::fut;
-use actix::prelude::*;
-use actix::{Actor, Handler, Message, StreamHandler};
-use actix_cors::Cors;
-use actix_web::{App, Error as ActixError, HttpRequest, HttpResponse, HttpServer, Responder, web};
-use actix_web_actors::ws;
 use dotenv::dotenv;
-use hyperliquid_rust_bot::backtest::BacktestRunRequest;
 use hyperliquid_rust_bot::{
-    BackendStatus, BacktestProgressUpdate, BacktestResultUpdate, BacktestRunError,
-    BacktestRunPayload, BacktestRunResponse, Backtester, BaseUrl, Bot, BotEvent, Error,
-    UpdateFrontend, Wallet,
+    BaseUrl,
+    backend::{AppState, BotManager, WsConnections, create_engine, create_router, spawn_nonce_pruner},
     broadcast::{Broadcaster, CandleCache},
-    get_time_now,
 };
-use log::{error, info};
-use std::env;
-use tokio::{
-    signal,
-    sync::{
-        broadcast::{self, Sender as BroadcastSender},
-        mpsc::{Sender, channel},
-    },
-    time::Duration,
-};
+use log::info;
+use sqlx::postgres::PgPoolOptions;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
     env_logger::init();
-    /*
-    env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Warn)
-        .init();
-    */
 
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL required");
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET required");
+    let encryption_key_hex = std::env::var("ENCRYPTION_KEY").expect("ENCRYPTION_KEY required");
+    let encryption_key = hex::decode(&encryption_key_hex).expect("invalid hex key");
+    assert_eq!(encryption_key.len(), 32, "ENCRYPTION_KEY must be 32 bytes");
+
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&database_url)
+        .await?;
+
+    info!("Connected to Supabase PostgreSQL");
+
+    // Shared infrastructure (one instance, all users)
     let url = BaseUrl::Mainnet;
-    let wallet = load_wallet(url).await?;
-
     let (mut candle_cache, cache_tx) = CandleCache::new(url).await?;
     let (mut broadcaster, broadcast_tx) = Broadcaster::new(url, cache_tx.clone()).await?;
-
     tokio::spawn(async move { candle_cache.start().await });
     tokio::spawn(async move { broadcaster.start().await });
 
-    let (bot, cmd_sender) = Bot::new(wallet, broadcast_tx, cache_tx).await?;
-    let (update_tx, mut update_rx) = channel::<UpdateFrontend>(256);
+    let bot_manager = BotManager::new(broadcast_tx, cache_tx);
+    let rhai_engine = Arc::new(create_engine());
 
-    let bot_to_ui_sender = update_tx.clone();
-    tokio::spawn(async move { bot.start(bot_to_ui_sender).await });
+    let ws_connections: WsConnections = Arc::new(RwLock::new(HashMap::new()));
+    let nonces = Arc::new(RwLock::new(HashMap::new()));
 
-    let (bcast_tx, _) = broadcast::channel::<UpdateFrontend>(128);
-    let bcast_cl = bcast_tx.clone();
+    // Spawn nonce pruner
+    spawn_nonce_pruner(nonces.clone());
 
-    let mut _dummy_rx = bcast_tx.subscribe();
-    tokio::spawn(async move {
-        loop {
-            let _ = _dummy_rx.recv().await;
-        }
+    let state = Arc::new(AppState {
+        pool,
+        ws_connections,
+        bot_manager: Arc::new(RwLock::new(bot_manager)),
+        rhai_engine,
+        strategy_cache: Arc::new(RwLock::new(HashMap::new())),
+        jwt_secret,
+        encryption_key: encryption_key.try_into().unwrap(),
+        nonces,
     });
 
-    tokio::spawn(async move {
-        while let Some(update) = update_rx.recv().await {
-            if let Err(err) = bcast_tx.send(update) {
-                error!("broadcast send error: {}", err);
-            }
-        }
-    });
+    let app = create_router(state);
 
-    let cmd_data = web::Data::new(cmd_sender.clone());
-    let bcast_data = web::Data::new(bcast_cl.clone());
-
-    let bot_shutdown_tx = cmd_sender.clone();
-    let client_shutdown_tx = update_tx.clone();
-    let server = HttpServer::new(move || {
-        App::new()
-            .app_data(cmd_data.clone())
-            .app_data(bcast_data.clone())
-            .wrap(
-                Cors::default()
-                    .allow_any_origin()
-                    .allow_any_method()
-                    .allow_any_header()
-                    .supports_credentials(),
-            )
-            .route("/command", web::post().to(execute))
-            .route("/backtest", web::post().to(run_backtest))
-            .route("/ws", web::get().to(ws_route))
-    })
-    .workers(2)
-    .disable_signals()
-    .bind(("127.0.0.1", 8090))?
-    .run();
-
-    let shutdown_handle = server.handle();
-    tokio::spawn(async move {
-        signal::ctrl_c().await.ok();
-
-        let _ = client_shutdown_tx
-            .send(UpdateFrontend::Status(BackendStatus::Shutdown))
-            .await;
-        let _ = bot_shutdown_tx.send(BotEvent::Kill).await;
-        shutdown_handle.stop(false).await;
-    });
-
-    server.await?;
+    info!("Starting server on 0.0.0.0:8090");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8090").await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
     Ok(())
 }
 
-async fn execute(raw: web::Bytes, sender: web::Data<Sender<BotEvent>>) -> impl Responder {
-    //log
-    let body_str = String::from_utf8_lossy(&raw);
-    println!("Incoming raw body: {}", body_str);
-
-    match serde_json::from_slice::<BotEvent>(&raw) {
-        Ok(event) => match sender.try_send(event) {
-            Ok(()) => HttpResponse::Ok().finish(),
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                HttpResponse::TooManyRequests().finish()
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                HttpResponse::ServiceUnavailable().finish()
-            }
-        },
-        Err(err) => {
-            error!("Failed to deserialize BotEvent: {}", err);
-            HttpResponse::BadRequest().body(format!("Invalid BotEvent: {}", err))
-        }
-    }
-}
-
-fn make_backtest_run_id(asset: &str) -> String {
-    format!("bt-{}-{}", asset.to_lowercase(), get_time_now())
-}
-
-fn validate_backtest_request(request: &BacktestRunRequest) -> Result<(), String> {
-    let cfg = &request.config;
-
-    if cfg.asset.trim().is_empty() {
-        return Err("asset must not be empty".to_string());
-    }
-    if !cfg.margin.is_finite() || cfg.margin <= 0.0 {
-        return Err("margin must be a positive finite number".to_string());
-    }
-    if cfg.lev == 0 {
-        return Err("lev must be greater than zero".to_string());
-    }
-    if cfg.end_time <= cfg.start_time {
-        return Err("endTime must be greater than startTime".to_string());
-    }
-    if cfg.resolution.to_millis() == 0 {
-        return Err("resolution must be a supported timeframe".to_string());
-    }
-
-    Ok(())
-}
-
-async fn run_backtest(
-    payload: web::Json<BacktestRunPayload>,
-    bcast: web::Data<BroadcastSender<UpdateFrontend>>,
-) -> impl Responder {
-    let mut request: BacktestRunRequest = payload.into_inner().into();
-    let run_id = request
-        .run_id
-        .clone()
-        .filter(|id| !id.trim().is_empty())
-        .unwrap_or_else(|| make_backtest_run_id(&request.config.asset));
-
-    if let Err(message) = validate_backtest_request(&request) {
-        return HttpResponse::BadRequest().json(BacktestRunError {
-            run_id,
-            message,
-            progress: Vec::new(),
-        });
-    }
-
-    request.run_id = Some(run_id.clone());
-
-    let mut backtester = Backtester::from_request(request);
-    let mut progress = Vec::new();
-    let progress_run_id = run_id.clone();
-    let progress_sender = bcast.get_ref().clone();
-
-    match backtester
-        .run_with_progress(|evt| {
-            progress.push(evt.clone());
-            let _ =
-                progress_sender.send(UpdateFrontend::BacktestProgress(BacktestProgressUpdate {
-                    run_id: progress_run_id.clone(),
-                    progress: evt,
-                }));
-        })
-        .await
-    {
-        Ok(mut result) => {
-            result.run_id = run_id.clone();
-            let _ = bcast
-                .get_ref()
-                .send(UpdateFrontend::BacktestResult(Box::new(
-                    BacktestResultUpdate {
-                        run_id: run_id.clone(),
-                        result: result.clone(),
-                    },
-                )));
-
-            HttpResponse::Ok().json(BacktestRunResponse {
-                run_id,
-                result,
-                progress,
-            })
-        }
-        Err(err) => HttpResponse::InternalServerError().json(BacktestRunError {
-            run_id,
-            message: err.to_string(),
-            progress,
-        }),
-    }
-}
-
-async fn ws_route(
-    req: HttpRequest,
-    stream: web::Payload,
-    bcast: web::Data<BroadcastSender<UpdateFrontend>>,
-) -> Result<HttpResponse, ActixError> {
-    let rx = bcast.subscribe();
-    let ws = MyWebSocket { rx };
-    ws::start(ws, &req, stream)
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-struct ServerMessage(String);
-
-struct MyWebSocket {
-    rx: broadcast::Receiver<UpdateFrontend>,
-}
-impl Actor for MyWebSocket {
-    type Context = ws::WebsocketContext<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.run_interval(Duration::from_secs(30), |_, ctx| ctx.ping(b""));
-
-        let mut rx = self.rx.resubscribe();
-        let addr = ctx.address();
-
-        ctx.spawn(
-            fut::wrap_future(async move {
-                while let Ok(update) = rx.recv().await {
-                    if let Ok(text) = serde_json::to_string(&update) {
-                        //info!("\n{}\n", text);
-                        addr.do_send(ServerMessage(text));
-                    }
-                }
-            })
-            .map(|_, _actor, _ctx| ()), // required combinator, result ignored
-        );
-    }
-
-    fn stopped(&mut self, _ctx: &mut Self::Context) {
-        info!("WebSocket actor stopped — unsubscribed");
-    }
-}
-impl Handler<ServerMessage> for MyWebSocket {
-    type Result = ();
-
-    fn handle(&mut self, msg: ServerMessage, ctx: &mut Self::Context) {
-        if msg.0 == "__SERVER_CLOSED__" {
-            ctx.close(None);
-            ctx.stop();
-        } else {
-            ctx.text(msg.0);
-        }
-    }
-}
-
-impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
-    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        if let Ok(ws::Message::Ping(p)) = msg {
-            ctx.pong(&p);
-        } else if let Ok(ws::Message::Close(reason)) = msg {
-            ctx.close(reason);
-            ctx.stop();
-        }
-    }
-}
-
-pub async fn load_wallet(url: BaseUrl) -> Result<Wallet, Error> {
-    let wallet = env::var("PRIVATE_KEY")
-        .expect("Error fetching PRIVATE_KEY")
-        .parse();
-
-    if let Err(ref e) = wallet {
-        return Err(Error::Custom(format!("Failed to load wallet: {}", e)));
-    }
-    let pubkey: String = env::var("WALLET").expect("Error fetching WALLET address");
-    Wallet::new(url, pubkey, wallet.unwrap()).await
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c().await.ok();
+    info!("Shutdown signal received");
 }

@@ -1,4 +1,3 @@
-import type { Strategy } from "./strats.ts";
 import { formatVolume } from "./chart/utils.ts";
 
 export const indicatorKinds: IndicatorName[] = [
@@ -62,10 +61,10 @@ export type EngineView = "idle" | "armed" | "opening" | "closing" | "open";
 export interface BackendMarketInfo {
     asset: string;
     lev: number;
+    strategyName: string;
     price: number;
     margin: number;
     pnl: number;
-    strategy: Strategy;
     isPaused: boolean;
     indicators: indicatorData[];
     position: OpenPositionLocal | null;
@@ -80,7 +79,8 @@ export interface MarketInfo {
     prev: number | null;
     margin: number | null;
     pnl: number | null;
-    strategy: Strategy;
+    strategyName: string;
+    strategyId?: string;
     isPaused: boolean;
     indicators: indicatorData[];
     trades: TradeInfo[];
@@ -227,14 +227,14 @@ export function into(tf: string): TimeFrame {
 export type MarginAllocation = { alloc: number } | { amount: number };
 
 export function market_add_info(m: MarketInfo): AddMarketInfo {
-    const { asset, margin, lev, strategy, indicators } = m;
+    const { asset, margin, lev, indicators, strategyId } = m;
     const config = indicators.map((i) => i.id);
 
     return {
         asset,
         marginAlloc: { amount: margin ?? 0 },
         lev: lev ?? 1,
-        strategy,
+        strategyId: strategyId ?? "",
         config,
     };
 }
@@ -243,7 +243,7 @@ export interface AddMarketInfo {
     asset: string;
     marginAlloc: MarginAllocation;
     lev: number;
-    strategy: Strategy;
+    strategyId: string;
     config?: IndexId[];
 }
 
@@ -251,6 +251,7 @@ export interface AddMarketProps {
     onClose: () => void;
     totalMargin: number;
     assets: assetMeta[];
+    strategies: import("./strats").Strategy[];
 }
 
 export type BackendLoadSessionPayload =
@@ -281,7 +282,7 @@ export interface BacktestSource {
 export interface BacktestConfig {
     asset: string;
     source: BacktestSource;
-    strategy: Strategy;
+    strategyId: string;
     resolution: TimeFrame;
     margin: number;
     lev: number;

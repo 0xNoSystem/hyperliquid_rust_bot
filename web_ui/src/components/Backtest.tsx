@@ -33,7 +33,7 @@ import { formatUTC } from "../chart/utils";
 import type { CandleData } from "../chart/utils";
 import { useChartContext } from "../chart/ChartContextStore";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
-import { strategyOptions } from "../strats";
+import { useAuth } from "../context/AuthContextStore";
 import type { Strategy } from "../strats";
 
 type RangePreset = "24H" | "7D" | "30D" | "YTD" | "CUSTOM";
@@ -97,7 +97,7 @@ type BacktestRunRequestPayload = {
             market: MarketType;
             quoteAsset: QuoteAsset;
         };
-        strategy: Strategy;
+        strategyId: string;
         resolution: TimeFrame;
         margin: number;
         lev: number;
@@ -210,6 +210,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         intervalEndX,
     } = useChartContext();
     const { universe, backtestRuns } = useWebSocketContext();
+    const { token } = useAuth();
     const activeAsset = routeAsset ?? "";
     const defaultStartParts = useMemo(
         () => dateToParts(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
@@ -227,7 +228,9 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     const [selectedMarket, setSelectedMarket] = useState<MarketType>(
         DEFAULT_DATA_SOURCE.market
     );
-    const [strategy, setStrategy] = useState<Strategy>(strategyOptions[0]);
+    // TODO: fetch strategies from backend via GET /strategies
+    const [strategies, setStrategies] = useState<Strategy[]>([]);
+    const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
     const [quoteAsset, setQuoteAsset] = useState<QuoteAsset>("USDT");
     const [margin, setMargin] = useState(10_000);
     const [lev, setLev] = useState(8);
@@ -467,7 +470,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                     market: selectedMarket,
                     quoteAsset: quoteAsset,
                 },
-                strategy,
+                strategyId: selectedStrategy?.id ?? "",
                 resolution: BACKTEST_RESOLUTION,
                 margin,
                 lev: clampedLev,
@@ -487,9 +490,13 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         setIsSubmittingBacktest(true);
 
         try {
+            const headers: Record<string, string> = {
+                "Content-Type": "application/json",
+            };
+            if (token) headers["Authorization"] = `Bearer ${token}`;
             const res = await fetch(`${API_URL}/backtest`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers,
                 body: JSON.stringify(payload),
                 signal: controller.signal,
             });
@@ -535,7 +542,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         warmupCandles,
         selectedMarket,
         quoteAsset,
-        strategy,
+        selectedStrategy,
         margin,
         takerFeeBps,
         makerFeeBps,
@@ -673,15 +680,19 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         <label className="text-app-text/75 flex flex-col gap-1">
                             Strategy
                             <select
-                                value={strategy}
-                                onChange={(e) =>
-                                    setStrategy(e.target.value as Strategy)
-                                }
+                                value={selectedStrategy?.id ?? ""}
+                                onChange={(e) => {
+                                    const s = strategies.find((s) => s.id === e.target.value);
+                                    setSelectedStrategy(s ?? null);
+                                }}
                                 className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
                             >
-                                {strategyOptions.map((opt) => (
-                                    <option key={opt} value={opt}>
-                                        {opt}
+                                <option value="" disabled>
+                                    -- select --
+                                </option>
+                                {strategies.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.name}
                                     </option>
                                 ))}
                             </select>
@@ -1151,7 +1162,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                                     Strategy
                                                 </p>
                                                 <p className="text-app-text">
-                                                    {resultToRender.config.strategy}
+                                                    {resultToRender.config.strategyId}
                                                 </p>
                                             </div>
                                             <div>

@@ -33,7 +33,6 @@ import type {
     TradeInfo,
 } from "../types";
 import type { Strategy } from "../strats.ts";
-import { strategyOptions } from "../strats.ts";
 import { ArrowLeft, Plus, Minus, X } from "lucide-react";
 
 const formatPrice = (n: number) => {
@@ -145,9 +144,11 @@ export default function MarketDetail() {
 
     // batch
     const [pending, setPending] = useState<PendingEdit[]>([]);
-    const [pendingStrategy, setPendingStrategy] = useState<Strategy | null>(
+    const [pendingStrategyId, setPendingStrategyId] = useState<string | null>(
         null
     );
+    // TODO: fetch strategies from backend via GET /strategies
+    const [strategies, setStrategies] = useState<Strategy[]>([]);
 
     const maxLev = meta?.maxLeverage ?? 1;
     const eqIndexId = (a: IndexId, b: IndexId) =>
@@ -263,8 +264,8 @@ export default function MarketDetail() {
         });
     };
     useEffect(() => {
-        setPendingStrategy(null);
-    }, [market?.asset, market?.strategy]);
+        setPendingStrategyId(null);
+    }, [market?.asset, market?.strategyName]);
 
     if (!market) {
         return (
@@ -280,32 +281,35 @@ export default function MarketDetail() {
 
     const marketLev = market.lev ?? 0;
     const marketMargin = market.margin ?? 0;
-    const currentStrategy = market.strategy;
+    const currentStrategyName = market.strategyName;
+    const pendingStrat = strategies.find((s) => s.id === pendingStrategyId);
     const hasPendingStrategy =
-        pendingStrategy !== null && pendingStrategy !== currentStrategy;
+        pendingStrategyId !== null && pendingStrat?.name !== currentStrategyName;
     const showMinOrderWarning =
         market.margin != null &&
         market.lev != null &&
         market.margin * market.lev < MIN_ORDER_VALUE;
-    const handleStrategySelect = (option: Strategy) => {
-        setPendingStrategy((prev) => {
-            if (option === currentStrategy) return null;
-            return prev === option ? null : option;
-        });
+    const handleStrategySelect = (strategyId: string) => {
+        const strat = strategies.find((s) => s.id === strategyId);
+        if (!strat || strat.name === currentStrategyName) {
+            setPendingStrategyId(null);
+            return;
+        }
+        setPendingStrategyId((prev) => (prev === strategyId ? null : strategyId));
     };
-    const cancelStrategyChange = () => setPendingStrategy(null);
+    const cancelStrategyChange = () => setPendingStrategyId(null);
     const applyStrategyChange = async () => {
-        if (!pendingStrategy || pendingStrategy === currentStrategy) return;
+        if (!pendingStrat || pendingStrat.name === currentStrategyName) return;
         try {
             await sendMarketCmd(market.asset, {
-                updateStrategy: pendingStrategy,
+                updateStrategy: pendingStrategyId,
             });
         } catch (err) {
             console.error("Update strategy failed", err);
             return;
         }
-        updateMarketStrategy(market.asset, pendingStrategy);
-        setPendingStrategy(null);
+        updateMarketStrategy(market.asset, pendingStrat.name);
+        setPendingStrategyId(null);
     };
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
@@ -520,20 +524,20 @@ export default function MarketDetail() {
                                 Current
                             </div>
                             <p className="text-center text-[14px] font-semibold">
-                                {currentStrategy}
+                                {currentStrategyName}
                             </p>
                             <div className="mt-2 grid gap-2">
-                                {strategyOptions.map((option) => {
+                                {strategies.map((strat) => {
                                     const isCurrent =
-                                        option === currentStrategy;
+                                        strat.name === currentStrategyName;
                                     const isPending =
-                                        option === pendingStrategy;
+                                        strat.id === pendingStrategyId;
                                     return (
                                         <button
-                                            key={option}
+                                            key={strat.id}
                                             type="button"
                                             onClick={() =>
-                                                handleStrategySelect(option)
+                                                handleStrategySelect(strat.id)
                                             }
                                             className={`w-full rounded-md border px-2 py-1 text-[11px] tracking-wide uppercase transition ${
                                                 isPending
@@ -543,7 +547,7 @@ export default function MarketDetail() {
                                                       : "border-line-subtle bg-app-surface-3 text-app-text/70 hover:bg-glow-10"
                                             }`}
                                         >
-                                            {option}
+                                            {strat.name}
                                         </button>
                                     );
                                 })}
@@ -551,7 +555,7 @@ export default function MarketDetail() {
                             {hasPendingStrategy && (
                                 <>
                                     <div className="text-accent-warning-mid text-center text-[11px] uppercase">
-                                        Pending: {pendingStrategy}
+                                        Pending: {pendingStrat?.name}
                                     </div>
                                     <div className="border-accent-warning/40 bg-surface-warning rounded-md border px-2 py-1 text-[11px]">
                                         <span className="text-accent-warning-mid font-semibold">

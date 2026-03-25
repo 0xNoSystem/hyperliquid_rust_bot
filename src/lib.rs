@@ -1,3 +1,5 @@
+pub mod backend;
+
 mod assets;
 pub mod backtest;
 pub mod broadcast;
@@ -6,7 +8,6 @@ mod frontend;
 mod helper;
 mod market;
 mod strategy;
-mod strats;
 mod trade_setup;
 mod wallet;
 
@@ -29,7 +30,6 @@ pub use signal::{
     OpenOrder, OpenPosInfo, SignalEngine, TimeFrameData, TimedValue, ValuesMap,
 };
 pub use strategy::*;
-pub use strats::Strategy;
 pub use trade_setup::*;
 pub use wallet::Wallet;
 

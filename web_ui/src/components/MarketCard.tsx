@@ -60,7 +60,7 @@ const MarketCard = ({
         price,
         lev,
         margin,
-        strategy,
+        strategyName,
         pnl,
         isPaused,
         indicators,
@@ -260,7 +260,7 @@ const MarketCard = ({
                             <div className="text-app-text/50 text-[12px] uppercase">
                                 Strategy
                             </div>
-                            <p className="text-[14px] font-bold">{strategy}</p>
+                            <p className="text-[14px] font-bold">{strategyName}</p>
                         </div>
                     </>
                 )}

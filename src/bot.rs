@@ -3,13 +3,16 @@ use crate::{
     MarketInfo, MarketState, MarketUpdate, TradeFillInfo, UpdateFrontend, Wallet,
 };
 
+use crate::backend::app_state::{StrategyCache, WsConnections, broadcast_to_user};
 use crate::broadcast::{BroadcastCmd, CacheCmdIn, SubReply, SubscribePayload};
 use hyperliquid_rust_sdk::{
     AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, UserData,
 };
 use log::{info, warn};
+use rhai::Engine;
 use rustc_hash::FxHasher;
 use serde::Deserialize;
+use sqlx::PgPool;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
@@ -37,7 +40,11 @@ pub struct Bot {
     bot_rv: Receiver<BotEvent>,
     update_rv: Option<UnboundedReceiver<MarketUpdate>>,
     update_tx: UnboundedSender<MarketUpdate>,
-    app_tx: Option<Sender<UpdateFrontend>>,
+    ws_connections: Option<WsConnections>,
+    pubkey: Option<String>,
+    pool: Option<PgPool>,
+    rhai_engine: Option<Arc<Engine>>,
+    strategy_cache: Option<StrategyCache>,
     chain_open_positions: Vec<AssetPosition>,
 }
 
@@ -65,11 +72,22 @@ impl Bot {
                 bot_rv,
                 update_rv: Some(update_rv),
                 update_tx,
-                app_tx: None,
+                ws_connections: None,
+                pubkey: None,
+                pool: None,
+                rhai_engine: None,
+                strategy_cache: None,
                 chain_open_positions: Vec::new(),
             },
             bot_tx,
         ))
+    }
+
+    /// Helper: broadcast a message to all connected devices for this bot's user.
+    async fn send_to_frontend(&self, msg: UpdateFrontend) {
+        if let (Some(conns), Some(pubkey)) = (&self.ws_connections, &self.pubkey) {
+            broadcast_to_user(conns, pubkey, msg).await;
+        }
     }
 
     pub async fn add_market(
@@ -81,19 +99,32 @@ impl Bot {
             asset,
             margin_alloc,
             lev,
-            strategy,
+            strategy_id,
             config,
         } = info;
+
+        // Resolve strategy_id → compiled strategy + indicators + name
+        let cache = self.strategy_cache.as_ref()
+            .ok_or_else(|| Error::Custom("strategy cache not initialized".to_string()))?;
+        let rhai_engine = self.rhai_engine.as_ref()
+            .ok_or_else(|| Error::Custom("rhai engine not initialized".to_string()))?
+            .clone();
+
+        let (compiled, strat_indicators, strategy_name) = {
+            let guard = cache.read().await;
+            let entry = guard.get(&strategy_id)
+                .ok_or_else(|| Error::Custom(format!("strategy {} not found in cache", strategy_id)))?;
+            (entry.compiled.clone(), entry.indicators.clone(), entry.name.clone())
+        };
 
         let asset = asset.trim().to_string();
 
         if self.markets.contains_key(&asset) {
-            if let Some(tx) = &self.app_tx {
-                let _ = tx.try_send(UpdateFrontend::UserError(format!(
-                    "{} market is already added.",
-                    &asset
-                )));
-            }
+            self.send_to_frontend(UpdateFrontend::UserError(format!(
+                "{} market is already added.",
+                &asset
+            )))
+            .await;
             return Ok(());
         }
 
@@ -104,23 +135,19 @@ impl Bot {
             .iter()
             .any(|p| p.position.coin == asset)
         {
-            if let Some(tx) = &self.app_tx {
-                let _ = tx.try_send(UpdateFrontend::UserError(format!(
-                    "Cannot add a market with open on-chain position({})",
-                    &asset
-                )));
-            }
+            self.send_to_frontend(UpdateFrontend::UserError(format!(
+                "Cannot add a market with open on-chain position({})",
+                &asset
+            )))
+            .await;
             return Ok(());
         }
 
         let margin = book.allocate(asset.clone(), margin_alloc).await?;
         drop(book);
 
-        if let Some(tx) = &self.app_tx {
-            let _ = tx
-                .send(UpdateFrontend::PreconfirmMarket(asset.clone()))
-                .await;
-        }
+        self.send_to_frontend(UpdateFrontend::PreconfirmMarket(asset.clone()))
+            .await;
 
         let (one_tx, one_rx) = oneshot::channel::<SubReply>();
         let sub_request = SubscribePayload {
@@ -144,26 +171,34 @@ impl Bot {
             sub_info.meta,
             margin,
             lev,
-            strategy,
+            rhai_engine,
+            compiled,
+            strat_indicators,
+            strategy_name,
             config,
         )
         .await?;
 
         self.markets.insert(asset.clone(), market_tx);
 
-        let app_tx = self.app_tx.clone();
+        let ws_conns = self.ws_connections.clone();
+        let bot_pubkey = self.pubkey.clone();
         let remove_market_tx = self._bot_tx.clone();
 
         tokio::spawn(async move {
             if let Err(e) = market.start().await {
-                if let Some(tx) = app_tx {
-                    let _ = tx.send(UpdateFrontend::CancelMarket(asset.clone())).await;
-                    let _ = tx
-                        .send(UpdateFrontend::UserError(format!(
+                if let (Some(conns), Some(pk)) = (&ws_conns, &bot_pubkey) {
+                    broadcast_to_user(conns, pk, UpdateFrontend::CancelMarket(asset.clone()))
+                        .await;
+                    broadcast_to_user(
+                        conns,
+                        pk,
+                        UpdateFrontend::UserError(format!(
                             "Market {} exited with error:\n {:?}",
                             &asset, e
-                        )))
-                        .await;
+                        )),
+                    )
+                    .await;
                 }
                 let _ = remove_market_tx
                     .send(BotEvent::RemoveMarket(asset.clone()))
@@ -246,12 +281,23 @@ impl Bot {
         }
     }
 
-    pub async fn start(mut self, app_tx: Sender<UpdateFrontend>) -> Result<(), Error> {
+    pub async fn start(
+        mut self,
+        ws_connections: WsConnections,
+        pubkey: String,
+        pool: PgPool,
+        rhai_engine: Arc<Engine>,
+        strategy_cache: StrategyCache,
+    ) -> Result<(), Error> {
         use BotEvent::*;
         use MarketUpdate as M;
         use UpdateFrontend::*;
 
-        self.app_tx = Some(app_tx.clone());
+        self.ws_connections = Some(ws_connections.clone());
+        self.pubkey = Some(pubkey.clone());
+        self.pool = Some(pool);
+        self.rhai_engine = Some(rhai_engine);
+        self.strategy_cache = Some(strategy_cache);
 
         let mut update_rv = self.update_rv.take().unwrap();
 
@@ -265,9 +311,9 @@ impl Bot {
         let margin_market_edit = margin_arc.clone();
         let cancel_token = CancellationToken::new();
 
-        let app_tx_margin = app_tx.clone();
-        let err_tx = app_tx.clone();
-
+        // Margin sync task — broadcasts to user via WsConnections
+        let margin_ws = ws_connections.clone();
+        let margin_pk = pubkey.clone();
         let margin_token = cancel_token.clone();
         let margin_book_handle = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(2));
@@ -281,13 +327,18 @@ impl Bot {
                         match result {
                             Ok(_) => {
                                 let total = book.total_on_chain - book.used();
-                                let _ = app_tx_margin.try_send(UpdateTotalMargin(total));
+                                broadcast_to_user(&margin_ws, &margin_pk, UpdateTotalMargin(total)).await;
                             }
                             Err(e) => {
                                 warn!("Failed to fetch User Margin");
-                                let _ = app_tx_margin.try_send(UserError(format!(
-                                    "Failed to fetch user margin, check your connection: {e}"
-                                )));
+                                broadcast_to_user(
+                                    &margin_ws,
+                                    &margin_pk,
+                                    UserError(format!(
+                                        "Failed to fetch user margin, check your connection: {e}"
+                                    )),
+                                )
+                                .await;
                             }
                         }
                     }
@@ -295,8 +346,10 @@ impl Bot {
             }
         });
 
+        // MarketUpdate relay task — broadcasts to user via WsConnections
         let session_upd = session.clone();
-        let app_tx_upd = app_tx.clone();
+        let upd_ws = ws_connections.clone();
+        let upd_pk = pubkey.clone();
 
         tokio::spawn(async move {
             while let Some(market_update) = update_rv.recv().await {
@@ -307,7 +360,7 @@ impl Bot {
                             let mut guard = session_upd.lock().await;
                             guard.insert(info.asset.clone(), state);
                         }
-                        let _ = app_tx_upd.try_send(ConfirmMarket(info));
+                        broadcast_to_user(&upd_ws, &upd_pk, ConfirmMarket(info)).await;
                     }
 
                     M::MarginUpdate(asset_margin) => {
@@ -326,10 +379,11 @@ impl Bot {
                                         s.margin = margin;
                                     }
                                 }
-                                let _ = app_tx_upd.try_send(UpdateMarketMargin(asset_margin));
+                                broadcast_to_user(&upd_ws, &upd_pk, UpdateMarketMargin(asset_margin))
+                                    .await;
                             }
                             Err(e) => {
-                                let _ = app_tx_upd.try_send(UserError(e.to_string()));
+                                broadcast_to_user(&upd_ws, &upd_pk, UserError(e.to_string())).await;
                             }
                         }
                     }
@@ -355,11 +409,11 @@ impl Bot {
                                 }
                             }
                         }
-                        let _ = app_tx_upd.try_send(MarketInfoEdit((asset, edit)));
+                        broadcast_to_user(&upd_ws, &upd_pk, MarketInfoEdit((asset, edit))).await;
                     }
 
                     M::RelayToFrontend(cmd) => {
-                        let _ = app_tx_upd.try_send(cmd);
+                        broadcast_to_user(&upd_ws, &upd_pk, cmd).await;
                     }
                 }
             }
@@ -426,7 +480,7 @@ impl Bot {
                         }
                     } else if let Message::NoData = msg {
                         info!("Received Message::NoData from WS, check connection");
-                        let _ = err_tx.send(Status(BackendStatus::Offline)).await;
+                        self.send_to_frontend(Status(BackendStatus::Offline)).await;
                     }
                 },
 
@@ -435,8 +489,8 @@ impl Bot {
                         AddMarket(add_market_info) => {
                             let asset = add_market_info.asset.clone();
                             if let Err(e) = self.add_market(add_market_info, &margin_user_edit).await {
-                                let _ = err_tx.try_send(UserError(format!("FAILED TO ADD MARKET: {}", e)));
-                                let _ = err_tx.send(CancelMarket(asset)).await;
+                                self.send_to_frontend(UserError(format!("FAILED TO ADD MARKET: {}", e))).await;
+                                self.send_to_frontend(CancelMarket(asset)).await;
                             }
                         }
 
@@ -463,20 +517,20 @@ impl Bot {
                         }
 
                         MarketComm(command) => {
-                            if let MarketCommand::UpdateStrategy(strat) = command.cmd{
+                            if let MarketCommand::UpdateStrategy(_, _, ref name) = command.cmd {
                                 let mut guard = session.lock().await;
-                                if let Some(s) = guard.get_mut(&command.asset){
-                                    s.strategy = strat;
+                                if let Some(s) = guard.get_mut(&command.asset) {
+                                    s.strategy_name = name.clone();
                                 }
                             }else if let MarketCommand::UpdateLeverage(_lev) = command.cmd{
                                 let mut guard = session.lock().await;
                                 if let Some(s) = guard.get_mut(&command.asset)
                                     && s.position.is_some()
                                 {
-                                    let _ = err_tx.try_send(
+                                    self.send_to_frontend(
                                         UserError(format!(
                                             "Leverage update failed: {} market has open order(s)", &command.asset)
-                                            ));
+                                            )).await;
                                     continue;
                                 }
                             }
@@ -490,10 +544,10 @@ impl Bot {
                             let mut guard = session.lock().await;
                             if let Some(s) = guard.get_mut(&asset) {
                                 if matches!(s.engine_state, EngineView::Open | EngineView::Opening | EngineView::Closing){
-                                    let _ = err_tx.try_send(
+                                    self.send_to_frontend(
                                         UserError(format!(
                                             "Margin update failed: {} market has open order(s)", &asset)
-                                            ));
+                                            )).await;
                                     continue;
                                 }
                             let result = {
@@ -508,13 +562,13 @@ impl Bot {
                                             s.margin = new_margin;
                                         }
                                     }
-                                    let _ = err_tx.try_send(UpdateMarketMargin((asset.clone(), new_margin)));
+                                    self.send_to_frontend(UpdateMarketMargin((asset.clone(), new_margin))).await;
                                     let cmd = MarketCommand::UpdateMargin(new_margin);
                                     self.send_cmd(asset, cmd).await;
                                 }
 
                                 Err(e) => {
-                                    let _ = err_tx.try_send(UserError(e.to_string()));
+                                    self.send_to_frontend(UserError(e.to_string())).await;
                                 }
                             }
 
@@ -557,12 +611,12 @@ impl Bot {
                             let universe: Vec<AssetMeta> = match get_all_assets(&self.info_client).await {
                                 Ok(u) => u,
                                 Err(e) => {
-                                    let _ = err_tx.try_send(UserError(format!("Failed to fetch asset universe: {}", e)));
+                                    self.send_to_frontend(UserError(format!("Failed to fetch asset universe: {}", e))).await;
                                     Vec::new()
                                 },
                             };
 
-                            let _ = err_tx.try_send(LoadSession((sess, universe)));
+                            self.send_to_frontend(LoadSession((sess, universe))).await;
                         }
 
                         Kill => {

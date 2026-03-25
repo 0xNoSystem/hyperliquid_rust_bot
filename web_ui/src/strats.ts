@@ -1,16 +1,11 @@
-// AUTO-GENERATED — DO NOT EDIT
+import type { IndexId } from "./types";
 
-export type Strategy =
-  | "elderTripleScreen"
-  | "rsiChopSwing"
-  | "rsiEmaScalp"
-  | "smaRsiScalpTest"
-  | "srsiAdxScalp";
-
-export const strategyOptions: readonly Strategy[] = [
-  "elderTripleScreen",
-  "rsiChopSwing",
-  "rsiEmaScalp",
-  "smaRsiScalpTest",
-  "srsiAdxScalp",
-] as const;
+export interface Strategy {
+    id: string;
+    name: string;
+    onIdle: string;
+    onOpen: string;
+    onBusy: string;
+    indicators: IndexId[];
+    isActive?: boolean;
+}

@@ -1,6 +1,12 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
+use std::sync::Arc;
+
+use log::warn;
+use rhai::{Dynamic, Engine, Map, Scope};
+
+use crate::backend::scripting::CompiledStrategy;
 use crate::signal::ValuesMap;
 use crate::{IndexId, OpenPosInfo, Price, Side, TimeDelta, TimeFrame, timedelta};
 
@@ -21,11 +27,91 @@ pub trait Strat: Send {
     fn required_indicators(&self) -> Vec<IndexId>;
 }
 
-pub trait NeedsIndicators {
-    fn required_indicators_static() -> Vec<IndexId>;
+pub type Armed = Option<u64>; //expiry time
+
+// ── Strategy (Rhai-powered Strat implementation) ────────────────────────────
+
+pub struct Strategy {
+    engine: Arc<Engine>,
+    compiled: CompiledStrategy,
+    indicators: Vec<IndexId>,
+    scope: Scope<'static>,
 }
 
-pub type Armed = Option<u64>; //expiry time
+impl Strategy {
+    pub fn new(
+        engine: Arc<Engine>,
+        compiled: CompiledStrategy,
+        indicators: Vec<IndexId>,
+    ) -> Self {
+        Self {
+            engine,
+            compiled,
+            indicators,
+            scope: Scope::new(),
+        }
+    }
+
+    fn push_context(&mut self, ctx: &StratContext) {
+        self.scope.set_or_push("free_margin", ctx.free_margin);
+        self.scope.set_or_push("lev", ctx.lev as i64);
+        self.scope.set_or_push("last_price", ctx.last_price);
+        self.scope
+            .set_or_push("indicators", indicators_to_map(ctx.indicators));
+    }
+
+    fn eval_ast(&mut self, ast: &rhai::AST) -> Option<Intent> {
+        match self.engine.eval_ast_with_scope::<Dynamic>(&mut self.scope, ast) {
+            Ok(result) => {
+                if result.is_unit() {
+                    None
+                } else {
+                    result.try_cast::<Intent>()
+                }
+            }
+            Err(e) => {
+                warn!("Rhai eval error: {}", e);
+                None
+            }
+        }
+    }
+}
+
+impl Strat for Strategy {
+    fn on_idle(&mut self, ctx: StratContext, is_armed: Armed) -> Option<Intent> {
+        self.push_context(&ctx);
+        self.scope.set_or_push("is_armed", is_armed.map(|t| t as i64).unwrap_or(-1_i64));
+        let ast = self.compiled.ast_on_idle.clone();
+        self.eval_ast(&ast)
+    }
+
+    fn on_open(&mut self, ctx: StratContext, open_pos: &OpenPosInfo) -> Option<Intent> {
+        self.push_context(&ctx);
+        self.scope.set_or_push("open_position", *open_pos);
+        let ast = self.compiled.ast_on_open.clone();
+        self.eval_ast(&ast)
+    }
+
+    fn on_busy(&mut self, ctx: StratContext, busy_reason: BusyType) -> Option<Intent> {
+        self.push_context(&ctx);
+        self.scope.set_or_push("busy_reason", busy_reason);
+        let ast = self.compiled.ast_on_busy.clone();
+        self.eval_ast(&ast)
+    }
+
+    fn required_indicators(&self) -> Vec<IndexId> {
+        self.indicators.clone()
+    }
+}
+
+fn indicators_to_map(values: &ValuesMap) -> Map {
+    let mut map = Map::new();
+    for ((kind, tf), timed_value) in values.iter() {
+        let key = format!("{:?}:{:?}", kind, tf).into();
+        map.insert(key, Dynamic::from(*timed_value));
+    }
+    map
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct LiveTimeoutInfo {

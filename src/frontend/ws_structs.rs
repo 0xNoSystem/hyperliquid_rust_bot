@@ -1,10 +1,11 @@
 use crate::backtest::{BacktestProgress, BacktestResult};
 use crate::{
-    AssetMargin, EngineView, IndexId, MarginAllocation, MarketState, OpenPositionLocal, Strategy,
+    AssetMargin, EngineView, IndexId, MarginAllocation, MarketState, OpenPositionLocal,
     TradeInfo, Value,
 };
 use hyperliquid_rust_sdk::AssetMeta;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,7 +13,7 @@ pub struct AddMarketInfo {
     pub asset: String,
     pub margin_alloc: MarginAllocation,
     pub lev: usize,
-    pub strategy: Strategy,
+    pub strategy_id: Uuid,
     pub config: Option<Vec<IndexId>>,
 }
 
@@ -21,7 +22,7 @@ pub struct AddMarketInfo {
 pub struct MarketInfo {
     pub asset: String,
     pub lev: usize,
-    pub strategy: Strategy,
+    pub strategy_name: String,
     pub price: f64,
     pub margin: f64,
     pub pnl: f64,
@@ -37,7 +38,7 @@ impl From<&MarketState> for MarketInfo {
             asset: s.asset.clone(),
             lev: s.lev,
             price: 0.0,
-            strategy: s.strategy,
+            strategy_name: s.strategy_name.clone(),
             margin: s.margin,
             pnl: s.pnl,
             is_paused: s.is_paused,

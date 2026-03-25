@@ -7,17 +7,15 @@ import type {
     Message,
     assetMeta,
 } from "../types";
-import type { Strategy } from "../strats";
 import { API_URL, WS_ENDPOINT } from "../consts";
 import { market_add_info } from "../types";
 import type { WebSocketContextValue } from "./WebSocketContextStore";
 import { WebSocketContext } from "./WebSocketContextStore";
+import { useAuth } from "./AuthContextStore";
 
 const CACHED_MARKETS_KEY = "cachedMarkets.v1";
 const MARKET_INFO_KEY = "markets.v1";
 const UNIVERSE_KEY = "universe.v1";
-
-const DEFAULT_PLACEHOLDER_STRATEGY: Strategy = "rsiEmaScalp";
 
 const toMarketInfo = (market: BackendMarketInfo): MarketInfo => ({
     ...market,
@@ -45,6 +43,7 @@ const isAssetMetaArray = (value: unknown): value is assetMeta[] =>
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     children,
 }) => {
+    const { token } = useAuth();
     const [markets, setMarkets] = useState<MarketInfo[]>([]);
     const [universe, setUniverse] = useState<assetMeta[]>([]);
     const [cachedMarkets, setCachedMarkets] = useState<AddMarketInfo[]>([]);
@@ -75,10 +74,21 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     const activeRef = useRef(true);
 
     /** ---------- utils ---------- **/
+    const tokenRef = useRef(token);
+    useEffect(() => {
+        tokenRef.current = token;
+    }, [token]);
+
     const sendCommand = useCallback(async (body: unknown) => {
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+        if (tokenRef.current) {
+            headers["Authorization"] = `Bearer ${tokenRef.current}`;
+        }
         const res = await fetch(`${API_URL}/command`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify(body),
         });
         if (!res.ok) throw new Error(`Command failed: ${res.status}`);
@@ -202,7 +212,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                                   pnl: null,
                                   indicators: [],
                                   trades: [],
-                                  strategy: DEFAULT_PLACEHOLDER_STRATEGY,
+                                  strategyName: "",
                                   isPaused: false,
                                   position: null,
                                   engineState: "idle",
@@ -345,13 +355,16 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     /** ---------- WS lifecycle ---------- **/
     useEffect(() => {
+        if (!token) return;
+
         let retry = 0;
         activeRef.current = true;
 
         const connect = () => {
             if (!activeRef.current) return;
 
-            const ws = new WebSocket(WS_ENDPOINT);
+            const wsUrl = `${WS_ENDPOINT}?token=${encodeURIComponent(token)}`;
+            const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
 
             ws.addEventListener("open", () => {
@@ -380,7 +393,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             wsRef.current?.close();
             if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
         };
-    }, [handleMessage, sendCommand]);
+    }, [token, handleMessage, sendCommand]);
 
     /** ---------- API ---------- **/
     const cacheMarket = useCallback((market: MarketInfo) => {
@@ -431,9 +444,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     }, [sendCommand]);
 
     const updateMarketStrategy = useCallback(
-        (asset: string, strategy: Strategy) => {
+        (asset: string, strategyName: string) => {
             setMarkets((prev) =>
-                prev.map((m) => (m.asset === asset ? { ...m, strategy } : m))
+                prev.map((m) => (m.asset === asset ? { ...m, strategyName } : m))
             );
         },
         []

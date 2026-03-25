@@ -5,7 +5,6 @@ import type {
     MarketInfo,
     assetMeta,
 } from "../types";
-import type { Strategy } from "../strats.ts";
 
 export interface WebSocketContextValue {
     markets: MarketInfo[];
@@ -23,7 +22,7 @@ export interface WebSocketContextValue {
     requestToggleMarket: (asset: string, pause: boolean) => Promise<void>;
     requestCloseAll: () => Promise<void>;
     requestPauseAll: () => Promise<void>;
-    updateMarketStrategy: (asset: string, strategy: Strategy) => void;
+    updateMarketStrategy: (asset: string, strategyName: string) => void;
 }
 
 export const WebSocketContext = createContext<

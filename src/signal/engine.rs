@@ -1,18 +1,21 @@
 #![allow(unused_variables)]
-use rustc_hash::FxHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
+use std::sync::Arc;
 
 use log::info;
+use rhai::Engine;
+use rustc_hash::FxHasher;
 use serde::{Deserialize, Serialize};
 
 use kwant::indicators::Price;
 
-use crate::strategy::{Strat, StratContext};
+use crate::backend::scripting::CompiledStrategy;
+use crate::strategy::{Strat, StratContext, Strategy};
 use crate::trade_setup::TimeFrame;
 use crate::{
     BusyType, EngineOrder, ExecCommand, ExecControl, IndicatorData, Intent, LiqSide,
-    LiveTimeoutInfo, MIN_ORDER_VALUE, MarketCommand, OnTimeout, PositionOp, Side, Strategy,
+    LiveTimeoutInfo, MIN_ORDER_VALUE, MarketCommand, OnTimeout, PositionOp, Side,
     TimeoutInfo, TriggerKind, Triggers,
 };
 
@@ -29,7 +32,8 @@ pub struct SignalEngine {
     trade_tx: Sender<ExecCommand>,
     data_tx: Option<tokioSender<MarketCommand>>,
     trackers: TrackersMap,
-    strategy: Box<dyn Strat>,
+    rhai_engine: Arc<Engine>,
+    strategy: Strategy,
     exec_params: ExecParams,
     state: EngineState,
     pending_orders: Option<PendingOpen>,
@@ -39,20 +43,22 @@ pub struct SignalEngine {
 impl SignalEngine {
     pub async fn new(
         config: Option<Vec<IndexId>>,
-        strategy: Strategy,
+        rhai_engine: Arc<Engine>,
+        compiled: CompiledStrategy,
+        strat_indicators: Vec<IndexId>,
         engine_rv: UnboundedReceiver<EngineCommand>,
         data_tx: Option<tokioSender<MarketCommand>>,
         trade_tx: Sender<ExecCommand>,
         exec_params: ExecParams,
     ) -> Self {
-        let strategy_impl = strategy.init();
-        let required_indicators = strategy_impl.required_indicators();
+        let strategy = Strategy::new(rhai_engine.clone(), compiled, strat_indicators.clone());
+
         let mut indicators: HashSet<IndexId> = if let Some(list) = config {
             list.into_iter().collect()
         } else {
             HashSet::new()
         };
-        indicators.extend(required_indicators);
+        indicators.extend(strat_indicators);
 
         let mut trackers: TrackersMap = HashMap::default();
 
@@ -71,7 +77,8 @@ impl SignalEngine {
             trade_tx,
             data_tx,
             trackers,
-            strategy: strategy_impl,
+            rhai_engine,
+            strategy,
             exec_params,
             state: EngineState::Idle,
             pending_orders: None,
@@ -656,8 +663,12 @@ impl SignalEngine {
                     self.digest_bulk(&prices);
                 }
 
-                EngineCommand::UpdateStrategy(new_strat) => {
-                    self.strategy = new_strat.init();
+                EngineCommand::UpdateStrategy(compiled, indicators) => {
+                    self.strategy = Strategy::new(
+                        self.rhai_engine.clone(),
+                        compiled,
+                        indicators,
+                    );
                     self.state = EngineState::Idle;
                 }
 
@@ -724,13 +735,18 @@ impl SignalEngine {
     }
 }
 impl SignalEngine {
-    pub fn new_backtest(margin: f64, lev: usize, strategy: Strategy) -> Self {
-        let strategy = strategy.init();
-        let required_indicators = strategy.required_indicators();
+    pub fn new_backtest(
+        margin: f64,
+        lev: usize,
+        rhai_engine: Arc<Engine>,
+        compiled: CompiledStrategy,
+        strat_indicators: Vec<IndexId>,
+    ) -> Self {
+        let strategy = Strategy::new(rhai_engine.clone(), compiled, strat_indicators.clone());
 
         let mut trackers: TrackersMap = HashMap::default();
 
-        for id in required_indicators {
+        for id in &strat_indicators {
             if let Some(tracker) = &mut trackers.get_mut(&id.1) {
                 tracker.add_indicator(id.0, false);
             } else {
@@ -750,6 +766,7 @@ impl SignalEngine {
             trade_tx,
             data_tx: None,
             trackers,
+            rhai_engine,
             strategy,
             exec_params,
             state: EngineState::Idle,
@@ -1008,7 +1025,7 @@ impl SignalEngine {
 pub enum EngineCommand {
     UpdatePrice(Price),
     UpdatePriceBulk(Vec<Price>),
-    UpdateStrategy(Strategy),
+    UpdateStrategy(CompiledStrategy, Vec<IndexId>),
     EditIndicators {
         indicators: Vec<Entry>,
         price_data: Option<TimeFrameData>,

@@ -13,7 +13,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
     onAdd,
     onRemove,
 }) => {
-    const { asset, marginAlloc, lev, strategy, config } = market;
+    const { asset, marginAlloc, lev, strategyId, config } = market;
 
     return (
         <div className="border-line-ink-strong bg-surface-input-soft/80 text-ink hover:bg-surface-input-soft my-2 flex h-fit min-w-fit items-center justify-between rounded-lg border-2 px-3 py-1 font-semibold">
@@ -50,7 +50,7 @@ export const CachedMarket: React.FC<CachedMarketProps> = ({
                 <div className="text-ink-muted ml-10 flex items-center gap-2 text-[13px] font-bold">
                     <span className="tracking-wide uppercase">Strategy</span>
                     <span className="bg-ink-50 text-app-text/70 rounded-md px-2 py-1 text-[12px] font-semibold">
-                        {strategy}
+                        {strategyId.slice(0, 8)}
                     </span>
                 </div>
             </div>

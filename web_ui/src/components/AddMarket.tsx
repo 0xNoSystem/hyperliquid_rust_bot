@@ -7,6 +7,7 @@ import {
     indicatorParamLabels,
     indicatorKinds,
 } from "../types";
+import { useWebSocketContext } from "../context/WebSocketContextStore";
 import type {
     AddMarketInfo,
     IndexId,
@@ -15,8 +16,6 @@ import type {
     AddMarketProps,
 } from "../types";
 
-import { strategyOptions } from "../strats.ts";
-import type { Strategy } from "../strats.ts";
 
 type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
 type ConfigDraft = [IndicatorKind, TimeframeKey];
@@ -25,12 +24,16 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     onClose,
     totalMargin,
     assets,
+    strategies,
 }) => {
+    const { sendCommand } = useWebSocketContext();
     const [asset, setAsset] = useState("");
     const [marginType, setMarginType] = useState<"alloc" | "amount">("alloc");
     const [marginValue, setMarginValue] = useState(0.1);
     const [lev, setLev] = useState(1);
-    const [strategy, setStrategy] = useState<Strategy>(strategyOptions[0]);
+    const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(
+        strategies[0] ?? null
+    );
 
     const [showConfig, setShowConfig] = useState(false);
     const [config, setConfig] = useState<ConfigDraft[]>([]);
@@ -110,6 +113,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!selectedStrategy) return;
         const validConfig: IndexId[] = config.map(([ind, tf]) => [
             ind,
             into(tf),
@@ -121,19 +125,17 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                     ? { alloc: marginValue / 100 }
                     : { amount: marginValue },
             lev,
-            strategy,
+            strategyId: selectedStrategy.id,
             config: validConfig,
         };
 
-        console.log(JSON.stringify(validConfig));
-
-        const res = await fetch("http://127.0.0.1:8090/command", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ addMarket: info }),
-        });
-        if (res.ok) onClose();
-        else console.error("Submit failed");
+        try {
+            const res = await sendCommand({ addMarket: info });
+            if (res.ok) onClose();
+            else console.error("Submit failed");
+        } catch (err) {
+            console.error("Submit failed", err);
+        }
     };
 
     const inputClass =
@@ -275,15 +277,19 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             Strategy
                         </label>
                         <select
-                            value={strategy}
-                            onChange={(e) =>
-                                setStrategy(e.target.value as Strategy)
-                            }
+                            value={selectedStrategy?.id ?? ""}
+                            onChange={(e) => {
+                                const s = strategies.find((s) => s.id === e.target.value);
+                                setSelectedStrategy(s ?? null);
+                            }}
                             className={selectClass}
                         >
-                            {strategyOptions.map((s) => (
-                                <option key={s} value={s}>
-                                    {s}
+                            <option value="" disabled>
+                                -- select a strategy --
+                            </option>
+                            {strategies.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                    {s.name}
                                 </option>
                             ))}
                         </select>

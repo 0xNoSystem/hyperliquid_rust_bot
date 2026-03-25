@@ -2,8 +2,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use uuid::Uuid;
+
 use super::fetcher::DataSource;
-use crate::{EngineView, IndicatorData, OpenPositionLocal, Price, Strategy, TimeFrame, TradeInfo};
+use crate::{EngineView, IndicatorData, OpenPositionLocal, Price, TimeFrame, TradeInfo};
 
 pub type PnlTracker = BTreeMap<u64, f64>;
 
@@ -12,7 +14,7 @@ pub type PnlTracker = BTreeMap<u64, f64>;
 pub struct BacktestConfig {
     pub asset: String,
     pub source: DataSource,
-    pub strategy: Strategy,
+    pub strategy_id: Uuid,
     pub resolution: TimeFrame,
     pub margin: f64,
     pub lev: usize,

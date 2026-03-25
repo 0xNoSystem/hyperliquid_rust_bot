@@ -9,7 +9,7 @@ use super::types::{
 };
 use crate::{
     BtAction, BtIntent, BtOrder, CloseOrder, EngineOrder, Error, FillInfo, FillType, OpenOrder,
-    OpenPosInfo, OpenPositionLocal, PositionOp, Price, Side, SignalEngine, Strategy, TimeFrame,
+    OpenPosInfo, OpenPositionLocal, PositionOp, Price, Side, SignalEngine, TimeFrame,
     TradeInfo, TriggerKind, Triggers, get_time_now,
 };
 
@@ -110,60 +110,13 @@ pub struct Backtester {
 }
 
 impl Backtester {
-    pub fn new(margin: f64, lev: usize, strategy: Strategy) -> Self {
-        let now = get_time_now();
-        let config = BacktestConfig {
-            asset: "BTC".to_string(),
-            source: DataSource::default(),
-            strategy,
-            resolution: TimeFrame::Min1,
-            margin,
-            lev,
-            taker_fee_bps: 5,
-            maker_fee_bps: 2,
-            funding_rate_bps_per_8h: 0.0,
-            start_time: now.saturating_sub(TimeFrame::Day1.to_millis()),
-            end_time: now,
-            snapshot_interval_candles: 10,
-        };
-        let request = BacktestRunRequest {
-            run_id: None,
-            config,
-            warmup_candles: 500,
-        };
-        Self::from_request(request)
+    // TODO: backtester needs rework for Rhai strategy architecture
+    pub fn from_config(_config: BacktestConfig) -> Self {
+        todo!("backtester needs rework for Rhai strategy architecture")
     }
 
-    pub fn from_config(config: BacktestConfig) -> Self {
-        let request = BacktestRunRequest {
-            run_id: None,
-            config,
-            warmup_candles: 500,
-        };
-        Self::from_request(request)
-    }
-
-    pub fn from_request(request: BacktestRunRequest) -> Self {
-        let fetcher = Fetcher::new(request.config.source.clone());
-        let engine = SignalEngine::new_backtest(
-            request.config.margin,
-            request.config.lev,
-            request.config.strategy,
-        );
-        Self {
-            balance: request.config.margin,
-            request,
-            fetcher,
-            engine,
-            next_order_id: 1,
-            next_snapshot_id: 1,
-            position: None,
-            resting_orders: HashMap::new(),
-            trades: Vec::new(),
-            equity_curve: Vec::new(),
-            snapshots: Vec::new(),
-            next_funding_time: None,
-        }
+    pub fn from_request(_request: BacktestRunRequest) -> Self {
+        todo!("backtester needs rework for Rhai strategy architecture")
     }
 
     pub fn request(&self) -> &BacktestRunRequest {
@@ -579,35 +532,12 @@ impl Backtester {
     }
 
     fn update_snapshot_interval_from_strategy(&mut self) {
-        let resolution_ms = self.request.config.resolution.to_millis().max(1);
-        let smallest_tf_ms = self
-            .request
-            .config
-            .strategy
-            .indicators()
-            .into_iter()
-            .map(|(_, tf)| tf.to_millis())
-            .min()
-            .unwrap_or(resolution_ms);
-        let interval = div_ceil_u64(smallest_tf_ms.max(1), resolution_ms).max(1);
-        self.request.config.snapshot_interval_candles = interval;
+        // TODO: rework for Rhai strategy architecture
     }
 
     fn reset_runtime(&mut self) {
-        self.balance = self.request.config.margin;
-        self.position = None;
-        self.next_order_id = 1;
-        self.next_snapshot_id = 1;
-        self.resting_orders.clear();
-        self.trades.clear();
-        self.equity_curve.clear();
-        self.snapshots.clear();
-        self.next_funding_time = None;
-        self.engine = SignalEngine::new_backtest(
-            self.request.config.margin,
-            self.request.config.lev,
-            self.request.config.strategy,
-        );
+        // TODO: rework for Rhai strategy architecture
+        todo!("backtester reset_runtime needs rework for Rhai strategy architecture")
     }
 
     fn process_candle(&mut self, candle: Price, idx: u64) -> bool {
