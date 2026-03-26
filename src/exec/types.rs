@@ -297,7 +297,7 @@ pub struct FillInfo {
     pub fill_type: FillType,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TradeInfo {
     pub side: Side,
@@ -309,6 +309,9 @@ pub struct TradeInfo {
     pub funding: f64,
     pub open: FillInfo,
     pub close: FillInfo,
+    /// Stamped by Bot when relaying through MarketState; None at Executor level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<String>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -355,8 +358,6 @@ impl OpenPositionLocal {
     }
 
     pub fn apply_open_fill(&mut self, fill: &TradeFillInfo) {
-        assert_eq!(self.side, fill.side);
-
         let old_size = self.size;
         let new_size = old_size + fill.sz;
 
@@ -418,6 +419,7 @@ impl OpenPositionLocal {
                 price: avg_close_px,
                 fill_type: fill.fill_type,
             },
+            strategy: None,
         })
     }
 

@@ -80,7 +80,6 @@ export interface MarketInfo {
     margin: number | null;
     pnl: number | null;
     strategyName: string;
-    strategyId?: string;
     isPaused: boolean;
     indicators: indicatorData[];
     trades: TradeInfo[];
@@ -226,24 +225,11 @@ export function into(tf: string): TimeFrame {
 
 export type MarginAllocation = { alloc: number } | { amount: number };
 
-export function market_add_info(m: MarketInfo): AddMarketInfo {
-    const { asset, margin, lev, indicators, strategyId } = m;
-    const config = indicators.map((i) => i.id);
-
-    return {
-        asset,
-        marginAlloc: { amount: margin ?? 0 },
-        lev: lev ?? 1,
-        strategyId: strategyId ?? "",
-        config,
-    };
-}
-
 export interface AddMarketInfo {
     asset: string;
     marginAlloc: MarginAllocation;
     lev: number;
-    strategyId: string;
+    strategyId?: string | null;
     config?: IndexId[];
 }
 
@@ -252,6 +238,7 @@ export interface AddMarketProps {
     totalMargin: number;
     assets: assetMeta[];
     strategies: import("./strats").Strategy[];
+    initialAsset?: string;
 }
 
 export type BackendLoadSessionPayload =
@@ -405,7 +392,8 @@ export type editMarketInfo =
     | { lev: number }
     | { openPosition: OpenPositionLocal | null }
     | { trade: TradeInfo }
-    | { engineState: EngineView };
+    | { engineState: EngineView }
+    | { paused: boolean };
 
 export type Side = "long" | "short";
 
@@ -434,6 +422,7 @@ export interface TradeInfo {
     funding: number;
     open: FillInfo;
     close: FillInfo;
+    strategy?: string;
 }
 
 export interface OpenPositionLocal {

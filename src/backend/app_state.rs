@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use rhai::Engine;
 use sqlx::PgPool;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 use super::bot_manager::BotManager;

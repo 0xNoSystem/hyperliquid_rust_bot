@@ -39,11 +39,7 @@ pub struct Strategy {
 }
 
 impl Strategy {
-    pub fn new(
-        engine: Arc<Engine>,
-        compiled: CompiledStrategy,
-        indicators: Vec<IndexId>,
-    ) -> Self {
+    pub fn new(engine: Arc<Engine>, compiled: CompiledStrategy, indicators: Vec<IndexId>) -> Self {
         Self {
             engine,
             compiled,
@@ -61,7 +57,10 @@ impl Strategy {
     }
 
     fn eval_ast(&mut self, ast: &rhai::AST) -> Option<Intent> {
-        match self.engine.eval_ast_with_scope::<Dynamic>(&mut self.scope, ast) {
+        match self
+            .engine
+            .eval_ast_with_scope::<Dynamic>(&mut self.scope, ast)
+        {
             Ok(result) => {
                 if result.is_unit() {
                     None
@@ -80,7 +79,8 @@ impl Strategy {
 impl Strat for Strategy {
     fn on_idle(&mut self, ctx: StratContext, is_armed: Armed) -> Option<Intent> {
         self.push_context(&ctx);
-        self.scope.set_or_push("is_armed", is_armed.map(|t| t as i64).unwrap_or(-1_i64));
+        self.scope
+            .set_or_push("is_armed", is_armed.map(|t| t as i64).unwrap_or(-1_i64));
         let ast = self.compiled.ast_on_idle.clone();
         self.eval_ast(&ast)
     }

@@ -23,10 +23,7 @@ pub struct BotManager {
 }
 
 impl BotManager {
-    pub fn new(
-        broadcast_tx: UnboundedSender<BroadcastCmd>,
-        cache_tx: Sender<CacheCmdIn>,
-    ) -> Self {
+    pub fn new(broadcast_tx: UnboundedSender<BroadcastCmd>, cache_tx: Sender<CacheCmdIn>) -> Self {
         Self {
             bots: HashMap::new(),
             broadcast_tx,
@@ -55,13 +52,14 @@ impl BotManager {
         }
 
         // 1. Fetch user's encrypted API key from DB
-        let row = sqlx::query_scalar::<_, Vec<u8>>(
+        let row = sqlx::query_scalar::<_, Option<Vec<u8>>>(
             "SELECT api_key_enc FROM users WHERE pubkey = $1",
         )
         .bind(pubkey)
         .fetch_optional(pool)
         .await
         .map_err(|e| crate::Error::Custom(format!("DB error: {}", e)))?
+        .flatten()
         .ok_or_else(|| crate::Error::Custom("user has no API key set".to_string()))?;
 
         // 2. Decrypt
@@ -88,15 +86,27 @@ impl BotManager {
         let ws_conns = ws_connections.clone();
         let pool_clone = pool.clone();
         tokio::spawn(async move {
-            if let Err(e) = bot.start(ws_conns, bot_pubkey, pool_clone, rhai_engine, strategy_cache).await {
+            if let Err(e) = bot
+                .start(
+                    ws_conns,
+                    bot_pubkey,
+                    pool_clone,
+                    rhai_engine,
+                    strategy_cache,
+                )
+                .await
+            {
                 log::error!("Bot exited with error: {:?}", e);
             }
         });
 
         // 6. Store handle
-        self.bots.insert(pubkey.to_string(), BotHandle {
-            cmd_tx: cmd_tx.clone(),
-        });
+        self.bots.insert(
+            pubkey.to_string(),
+            BotHandle {
+                cmd_tx: cmd_tx.clone(),
+            },
+        );
 
         info!("Created bot for user {}", pubkey);
 

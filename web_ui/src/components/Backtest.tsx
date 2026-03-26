@@ -8,11 +8,7 @@ import {
     num,
     sanitizeAsset,
 } from "../types";
-import type {
-    BacktestProgress,
-    BacktestResult,
-    TimeFrame,
-} from "../types";
+import type { BacktestProgress, BacktestResult, TimeFrame } from "../types";
 import ChartContainer from "../chart/ChartContainer";
 import { isTimeframeSupported } from "../chart/dataSources";
 import { loadCandles } from "../chart/loader";
@@ -202,13 +198,8 @@ type BacktestContentProps = {
 // -----------------------
 function BacktestContent({ routeAsset }: BacktestContentProps) {
     const nav = useNavigate();
-    const {
-        startTime,
-        endTime,
-        setTimeRange,
-        intervalStartX,
-        intervalEndX,
-    } = useChartContext();
+    const { startTime, endTime, setTimeRange, intervalStartX, intervalEndX } =
+        useChartContext();
     const { universe, backtestRuns } = useWebSocketContext();
     const { token } = useAuth();
     const activeAsset = routeAsset ?? "";
@@ -230,7 +221,9 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     );
     // TODO: fetch strategies from backend via GET /strategies
     const [strategies, setStrategies] = useState<Strategy[]>([]);
-    const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
+    const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(
+        null
+    );
     const [quoteAsset, setQuoteAsset] = useState<QuoteAsset>("USDT");
     const [margin, setMargin] = useState(10_000);
     const [lev, setLev] = useState(8);
@@ -395,7 +388,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     ]);
 
     const activeRun = useMemo(
-        () => (activeRunId ? backtestRuns[activeRunId] ?? null : null),
+        () => (activeRunId ? (backtestRuns[activeRunId] ?? null) : null),
         [activeRunId, backtestRuns]
     );
 
@@ -535,6 +528,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
             setIsSubmittingBacktest(false);
         }
     }, [
+        token,
         routeAsset,
         selectedBacktestExchange,
         backtestWindow,
@@ -654,7 +648,14 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
             clearTimeout(timer);
             controller.abort();
         };
-    }, [startTime, endTime, timeframe, routeAsset, selectedDataSource, quoteAsset]);
+    }, [
+        startTime,
+        endTime,
+        timeframe,
+        routeAsset,
+        selectedDataSource,
+        quoteAsset,
+    ]);
 
     useEffect(() => {
         return () => {
@@ -682,7 +683,9 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                             <select
                                 value={selectedStrategy?.id ?? ""}
                                 onChange={(e) => {
-                                    const s = strategies.find((s) => s.id === e.target.value);
+                                    const s = strategies.find(
+                                        (s) => s.id === e.target.value
+                                    );
                                     setSelectedStrategy(s ?? null);
                                 }}
                                 className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
@@ -1132,359 +1135,392 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
 
                                 {resultToRender && (
                                     <>
-                                    <div className="border-line-subtle mt-3 rounded border p-3">
-                                        <p className="text-app-text/50 text-xs uppercase">
-                                            Run Config
-                                        </p>
-                                        <div className="mt-2 grid grid-cols-1 gap-2 text-xs md:grid-cols-2 lg:grid-cols-3">
-                                            <div>
-                                                <p className="text-app-text/50">
-                                                    Asset
-                                                </p>
-                                                <p className="text-app-text">
-                                                    {resultToRender.config.asset}
-                                                </p>
+                                        <div className="border-line-subtle mt-3 rounded border p-3">
+                                            <p className="text-app-text/50 text-xs uppercase">
+                                                Run Config
+                                            </p>
+                                            <div className="mt-2 grid grid-cols-1 gap-2 text-xs md:grid-cols-2 lg:grid-cols-3">
+                                                <div>
+                                                    <p className="text-app-text/50">
+                                                        Asset
+                                                    </p>
+                                                    <p className="text-app-text">
+                                                        {
+                                                            resultToRender
+                                                                .config.asset
+                                                        }
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-app-text/50">
+                                                        Source
+                                                    </p>
+                                                    <p className="text-app-text">
+                                                        {resultToRender.config.source.exchange.toUpperCase()}{" "}
+                                                        /{" "}
+                                                        {resultToRender.config.source.market.toUpperCase()}{" "}
+                                                        /{" "}
+                                                        {
+                                                            resultToRender
+                                                                .config.source
+                                                                .quoteAsset
+                                                        }
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-app-text/50">
+                                                        Strategy
+                                                    </p>
+                                                    <p className="text-app-text">
+                                                        {
+                                                            resultToRender
+                                                                .config
+                                                                .strategyId
+                                                        }
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-app-text/50">
+                                                        Resolution
+                                                    </p>
+                                                    <p className="text-app-text">
+                                                        {fromTimeFrame(
+                                                            resultToRender
+                                                                .config
+                                                                .resolution
+                                                        )}
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-app-text/50">
+                                                        Window (UTC)
+                                                    </p>
+                                                    <p className="text-app-text">
+                                                        {formatUtcMinute(
+                                                            resultToRender
+                                                                .config
+                                                                .startTime
+                                                        )}{" "}
+                                                        -{" "}
+                                                        {formatUtcMinute(
+                                                            resultToRender
+                                                                .config.endTime
+                                                        )}
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-app-text/50">
+                                                        Margin / Leverage
+                                                    </p>
+                                                    <p className="text-app-text">
+                                                        {num(
+                                                            resultToRender
+                                                                .config.margin,
+                                                            2
+                                                        )}{" "}
+                                                        /{" "}
+                                                        {
+                                                            resultToRender
+                                                                .config.lev
+                                                        }
+                                                        x
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-app-text/50">
+                                                        Fees (bps)
+                                                    </p>
+                                                    <p className="text-app-text">
+                                                        taker{" "}
+                                                        {
+                                                            resultToRender
+                                                                .config
+                                                                .takerFeeBps
+                                                        }{" "}
+                                                        / maker{" "}
+                                                        {
+                                                            resultToRender
+                                                                .config
+                                                                .makerFeeBps
+                                                        }
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-app-text/50">
+                                                        Funding (bps / 8h)
+                                                    </p>
+                                                    <p className="text-app-text">
+                                                        {num(
+                                                            resultToRender
+                                                                .config
+                                                                .fundingRateBpsPer8h,
+                                                            4
+                                                        )}
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-app-text/50">
+                                                        Snapshot Interval
+                                                    </p>
+                                                    <p className="text-app-text">
+                                                        {
+                                                            resultToRender
+                                                                .config
+                                                                .snapshotIntervalCandles
+                                                        }{" "}
+                                                        candles
+                                                    </p>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <p className="text-app-text/50">
-                                                    Source
+                                        </div>
+
+                                        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+                                            <div className="border-line-subtle rounded border p-2">
+                                                <p className="text-app-text/50 text-xs">
+                                                    Trades
                                                 </p>
-                                                <p className="text-app-text">
-                                                    {resultToRender.config.source.exchange.toUpperCase()}{" "}
-                                                    /{" "}
-                                                    {resultToRender.config.source.market.toUpperCase()}{" "}
-                                                    /{" "}
-                                                    {resultToRender.config.source.quoteAsset}
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <p className="text-app-text/50">
-                                                    Strategy
-                                                </p>
-                                                <p className="text-app-text">
-                                                    {resultToRender.config.strategyId}
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <p className="text-app-text/50">
-                                                    Resolution
-                                                </p>
-                                                <p className="text-app-text">
-                                                    {fromTimeFrame(
-                                                        resultToRender.config
-                                                            .resolution
-                                                    )}
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <p className="text-app-text/50">
-                                                    Window (UTC)
-                                                </p>
-                                                <p className="text-app-text">
-                                                    {formatUtcMinute(
-                                                        resultToRender.config
-                                                            .startTime
-                                                    )}{" "}
-                                                    -{" "}
-                                                    {formatUtcMinute(
-                                                        resultToRender.config
-                                                            .endTime
-                                                    )}
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <p className="text-app-text/50">
-                                                    Margin / Leverage
-                                                </p>
-                                                <p className="text-app-text">
-                                                    {num(
-                                                        resultToRender.config
-                                                            .margin,
-                                                        2
-                                                    )}{" "}
-                                                    /{" "}
-                                                    {resultToRender.config.lev}
-                                                    x
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <p className="text-app-text/50">
-                                                    Fees (bps)
-                                                </p>
-                                                <p className="text-app-text">
-                                                    taker{" "}
+                                                <p>
                                                     {
-                                                        resultToRender.config
-                                                            .takerFeeBps
-                                                    }{" "}
-                                                    / maker{" "}
-                                                    {
-                                                        resultToRender.config
-                                                            .makerFeeBps
+                                                        resultToRender.summary
+                                                            .totalTrades
                                                     }
                                                 </p>
                                             </div>
-                                            <div>
-                                                <p className="text-app-text/50">
-                                                    Funding (bps / 8h)
+                                            <div className="border-line-subtle rounded border p-2">
+                                                <p className="text-app-text/50 text-xs">
+                                                    Net PnL
                                                 </p>
-                                                <p className="text-app-text">
+                                                <p
+                                                    className={
+                                                        resultToRender.summary
+                                                            .netPnl >= 0
+                                                            ? "text-accent-success"
+                                                            : "text-accent-danger-soft"
+                                                    }
+                                                >
+                                                    {resultToRender.summary
+                                                        .netPnl >= 0
+                                                        ? "+"
+                                                        : ""}
                                                     {num(
-                                                        resultToRender.config
-                                                            .fundingRateBpsPer8h,
-                                                        4
+                                                        resultToRender.summary
+                                                            .netPnl,
+                                                        2
                                                     )}
                                                 </p>
                                             </div>
-                                            <div>
-                                                <p className="text-app-text/50">
-                                                    Snapshot Interval
+                                            <div className="border-line-subtle rounded border p-2">
+                                                <p className="text-app-text/50 text-xs">
+                                                    Return %
                                                 </p>
-                                                <p className="text-app-text">
+                                                <p>
+                                                    {num(
+                                                        resultToRender.summary
+                                                            .returnPct,
+                                                        2
+                                                    )}
+                                                    %
+                                                </p>
+                                            </div>
+                                            <div className="border-line-subtle rounded border p-2">
+                                                <p className="text-app-text/50 text-xs">
+                                                    Sharpe
+                                                </p>
+                                                <p>
+                                                    {resultToRender.summary
+                                                        .sharpeRatio == null
+                                                        ? "—"
+                                                        : num(
+                                                              resultToRender
+                                                                  .summary
+                                                                  .sharpeRatio,
+                                                              3
+                                                          )}
+                                                </p>
+                                            </div>
+                                            <div className="border-line-subtle rounded border p-2">
+                                                <p className="text-app-text/50 text-xs">
+                                                    Win Rate
+                                                </p>
+                                                <p>
+                                                    {num(
+                                                        resultToRender.summary
+                                                            .winRatePct,
+                                                        2
+                                                    )}
+                                                    %
+                                                </p>
+                                            </div>
+                                            <div className="border-line-subtle rounded border p-2">
+                                                <p className="text-app-text/50 text-xs">
+                                                    Profit Factor
+                                                </p>
+                                                <p>
+                                                    {resultToRender.summary
+                                                        .profitFactor == null
+                                                        ? "—"
+                                                        : num(
+                                                              resultToRender
+                                                                  .summary
+                                                                  .profitFactor,
+                                                              2
+                                                          )}
+                                                </p>
+                                            </div>
+                                            <div className="border-line-subtle rounded border p-2">
+                                                <p className="text-app-text/50 text-xs">
+                                                    Max DD %
+                                                </p>
+                                                <p>
+                                                    {num(
+                                                        resultToRender.summary
+                                                            .maxDrawdownPct,
+                                                        2
+                                                    )}
+                                                    %
+                                                </p>
+                                            </div>
+                                            <div className="border-line-subtle rounded border p-2">
+                                                <p className="text-app-text/50 text-xs">
+                                                    Candles
+                                                </p>
+                                                <p>
                                                     {
-                                                        resultToRender.config
-                                                            .snapshotIntervalCandles
-                                                    }{" "}
-                                                    candles
+                                                        resultToRender.candlesProcessed
+                                                    }
                                                 </p>
                                             </div>
                                         </div>
-                                    </div>
 
-                                    <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
-                                        <div className="border-line-subtle rounded border p-2">
-                                            <p className="text-app-text/50 text-xs">
-                                                Trades
-                                            </p>
-                                            <p>{resultToRender.summary.totalTrades}</p>
-                                        </div>
-                                        <div className="border-line-subtle rounded border p-2">
-                                            <p className="text-app-text/50 text-xs">
-                                                Net PnL
-                                            </p>
-                                            <p
-                                                className={
-                                                    resultToRender.summary
-                                                        .netPnl >= 0
-                                                        ? "text-accent-success"
-                                                        : "text-accent-danger-soft"
-                                                }
-                                            >
-                                                {resultToRender.summary.netPnl >= 0
-                                                    ? "+"
-                                                    : ""}
-                                                {num(
-                                                    resultToRender.summary
-                                                        .netPnl,
-                                                    2
-                                                )}
-                                            </p>
-                                        </div>
-                                        <div className="border-line-subtle rounded border p-2">
-                                            <p className="text-app-text/50 text-xs">
-                                                Return %
-                                            </p>
-                                            <p>
-                                                {num(
-                                                    resultToRender.summary
-                                                        .returnPct,
-                                                    2
-                                                )}
-                                                %
-                                            </p>
-                                        </div>
-                                        <div className="border-line-subtle rounded border p-2">
-                                            <p className="text-app-text/50 text-xs">
-                                                Sharpe
-                                            </p>
-                                            <p>
-                                                {resultToRender.summary
-                                                    .sharpeRatio == null
-                                                    ? "—"
-                                                    : num(
-                                                          resultToRender.summary
-                                                              .sharpeRatio,
-                                                          3
-                                                      )}
-                                            </p>
-                                        </div>
-                                        <div className="border-line-subtle rounded border p-2">
-                                            <p className="text-app-text/50 text-xs">
-                                                Win Rate
-                                            </p>
-                                            <p>
-                                                {num(
-                                                    resultToRender.summary
-                                                        .winRatePct,
-                                                    2
-                                                )}
-                                                %
-                                            </p>
-                                        </div>
-                                        <div className="border-line-subtle rounded border p-2">
-                                            <p className="text-app-text/50 text-xs">
-                                                Profit Factor
-                                            </p>
-                                            <p>
-                                                {resultToRender.summary
-                                                    .profitFactor == null
-                                                    ? "—"
-                                                    : num(
-                                                          resultToRender.summary
-                                                              .profitFactor,
-                                                          2
-                                                      )}
-                                            </p>
-                                        </div>
-                                        <div className="border-line-subtle rounded border p-2">
-                                            <p className="text-app-text/50 text-xs">
-                                                Max DD %
-                                            </p>
-                                            <p>
-                                                {num(
-                                                    resultToRender.summary
-                                                        .maxDrawdownPct,
-                                                    2
-                                                )}
-                                                %
-                                            </p>
-                                        </div>
-                                        <div className="border-line-subtle rounded border p-2">
-                                            <p className="text-app-text/50 text-xs">
-                                                Candles
-                                            </p>
-                                            <p>
-                                                {resultToRender.candlesProcessed}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <div className="mt-4 min-h-0 flex-1 overflow-auto">
-                                        <table className="w-full min-w-[760px] text-left text-xs">
-                                            <thead className="text-app-text/60 border-line-subtle border-b uppercase">
-                                                <tr>
-                                                    <th className="py-2 pr-4 text-left">
-                                                        Side
-                                                    </th>
-                                                    <th className="py-2 pr-4 text-right">
-                                                        Open
-                                                    </th>
-                                                    <th className="py-2 pr-4 text-right">
-                                                        Close
-                                                    </th>
-                                                    <th className="py-2 pr-4 text-right">
-                                                        PnL
-                                                    </th>
-                                                    <th className="py-2 pr-4 text-right">
-                                                        Size
-                                                    </th>
-                                                    <th className="py-2 pr-4 text-right">
-                                                        Fee
-                                                    </th>
-                                                    <th className="py-2 pr-4 text-right">
-                                                        Funding
-                                                    </th>
-                                                    <th className="py-2 text-right">
-                                                        Open Time - Close Time
-                                                    </th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {resultToRender.trades.length ===
-                                                0 ? (
+                                        <div className="mt-4 min-h-0 flex-1 overflow-auto">
+                                            <table className="w-full min-w-[760px] text-left text-xs">
+                                                <thead className="text-app-text/60 border-line-subtle border-b uppercase">
                                                     <tr>
-                                                        <td
-                                                            colSpan={8}
-                                                            className="text-app-text/45 p-3 text-center"
-                                                        >
-                                                            No trades in this
-                                                            run.
-                                                        </td>
+                                                        <th className="py-2 pr-4 text-left">
+                                                            Side
+                                                        </th>
+                                                        <th className="py-2 pr-4 text-right">
+                                                            Open
+                                                        </th>
+                                                        <th className="py-2 pr-4 text-right">
+                                                            Close
+                                                        </th>
+                                                        <th className="py-2 pr-4 text-right">
+                                                            PnL
+                                                        </th>
+                                                        <th className="py-2 pr-4 text-right">
+                                                            Size
+                                                        </th>
+                                                        <th className="py-2 pr-4 text-right">
+                                                            Fee
+                                                        </th>
+                                                        <th className="py-2 pr-4 text-right">
+                                                            Funding
+                                                        </th>
+                                                        <th className="py-2 text-right">
+                                                            Open Time - Close
+                                                            Time
+                                                        </th>
                                                     </tr>
-                                                ) : (
-                                                    resultToRender.trades.map(
-                                                        (trade, idx) => (
-                                                            <tr
-                                                                key={`${resultToRender.runId}-${idx}`}
-                                                                className="border-line-subtle border-b last:border-b-0"
+                                                </thead>
+                                                <tbody>
+                                                    {resultToRender.trades
+                                                        .length === 0 ? (
+                                                        <tr>
+                                                            <td
+                                                                colSpan={8}
+                                                                className="text-app-text/45 p-3 text-center"
                                                             >
-                                                                <td
-                                                                    className={`py-2 pr-4 font-semibold uppercase ${
-                                                                        trade.side ===
-                                                                        "long"
-                                                                            ? "text-accent-success-strong"
-                                                                            : "text-accent-danger"
-                                                                    }`}
+                                                                No trades in
+                                                                this run.
+                                                            </td>
+                                                        </tr>
+                                                    ) : (
+                                                        resultToRender.trades.map(
+                                                            (trade, idx) => (
+                                                                <tr
+                                                                    key={`${resultToRender.runId}-${idx}`}
+                                                                    className="border-line-subtle border-b last:border-b-0"
                                                                 >
-                                                                    {trade.side}
-                                                                </td>
-                                                                <td className="py-2 pr-4 text-right">
-                                                                    {formatPrice(
-                                                                        trade
-                                                                            .open
-                                                                            .price
-                                                                    )}
-                                                                </td>
-                                                                <td className="py-2 pr-4 text-right">
-                                                                    {formatPrice(
-                                                                        trade
-                                                                            .close
-                                                                            .price
-                                                                    )}
-                                                                </td>
-                                                                <td
-                                                                    className={`py-2 pr-4 text-right ${
-                                                                        trade.pnl >=
-                                                                        0
-                                                                            ? "text-accent-success"
-                                                                            : "text-accent-danger-soft"
-                                                                    }`}
-                                                                >
-                                                                    {num(
-                                                                        trade.pnl,
-                                                                        2
-                                                                    )}
-                                                                    $
-                                                                </td>
-                                                                <td className="py-2 pr-4 text-right">
-                                                                    {num(
-                                                                        trade.size,
-                                                                        4
-                                                                    )}
-                                                                </td>
-                                                                <td className="py-2 pr-4 text-right">
-                                                                    {num(
-                                                                        trade.fees,
-                                                                        4
-                                                                    )}
-                                                                    $
-                                                                </td>
-                                                                <td className="py-2 pr-4 text-right">
-                                                                    {num(
-                                                                        trade.funding,
-                                                                        4
-                                                                    )}
-                                                                </td>
-                                                                <td className="py-2 text-right">
-                                                                    {formatUTC(
-                                                                        trade
-                                                                            .open
-                                                                            .time
-                                                                    )}{" "}
-                                                                    -{" "}
-                                                                    {formatUTC(
-                                                                        trade
-                                                                            .close
-                                                                            .time
-                                                                    )}
-                                                                </td>
-                                                            </tr>
+                                                                    <td
+                                                                        className={`py-2 pr-4 font-semibold uppercase ${
+                                                                            trade.side ===
+                                                                            "long"
+                                                                                ? "text-accent-success-strong"
+                                                                                : "text-accent-danger"
+                                                                        }`}
+                                                                    >
+                                                                        {
+                                                                            trade.side
+                                                                        }
+                                                                    </td>
+                                                                    <td className="py-2 pr-4 text-right">
+                                                                        {formatPrice(
+                                                                            trade
+                                                                                .open
+                                                                                .price
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="py-2 pr-4 text-right">
+                                                                        {formatPrice(
+                                                                            trade
+                                                                                .close
+                                                                                .price
+                                                                        )}
+                                                                    </td>
+                                                                    <td
+                                                                        className={`py-2 pr-4 text-right ${
+                                                                            trade.pnl >=
+                                                                            0
+                                                                                ? "text-accent-success"
+                                                                                : "text-accent-danger-soft"
+                                                                        }`}
+                                                                    >
+                                                                        {num(
+                                                                            trade.pnl,
+                                                                            2
+                                                                        )}
+                                                                        $
+                                                                    </td>
+                                                                    <td className="py-2 pr-4 text-right">
+                                                                        {num(
+                                                                            trade.size,
+                                                                            4
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="py-2 pr-4 text-right">
+                                                                        {num(
+                                                                            trade.fees,
+                                                                            4
+                                                                        )}
+                                                                        $
+                                                                    </td>
+                                                                    <td className="py-2 pr-4 text-right">
+                                                                        {num(
+                                                                            trade.funding,
+                                                                            4
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="py-2 text-right">
+                                                                        {formatUTC(
+                                                                            trade
+                                                                                .open
+                                                                                .time
+                                                                        )}{" "}
+                                                                        -{" "}
+                                                                        {formatUTC(
+                                                                            trade
+                                                                                .close
+                                                                                .time
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            )
                                                         )
-                                                    )
-                                                )}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </>
                                 )}
                             </div>

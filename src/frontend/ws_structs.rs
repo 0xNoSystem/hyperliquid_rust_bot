@@ -1,7 +1,7 @@
 use crate::backtest::{BacktestProgress, BacktestResult};
 use crate::{
-    AssetMargin, EngineView, IndexId, MarginAllocation, MarketState, OpenPositionLocal,
-    TradeInfo, Value,
+    AssetMargin, EngineView, IndexId, MarginAllocation, MarketState, OpenPositionLocal, TradeInfo,
+    Value,
 };
 use hyperliquid_rust_sdk::AssetMeta;
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ pub struct AddMarketInfo {
     pub asset: String,
     pub margin_alloc: MarginAllocation,
     pub lev: usize,
-    pub strategy_id: Uuid,
+    pub strategy_id: Option<Uuid>,
     pub config: Option<Vec<IndexId>>,
 }
 
@@ -56,13 +56,14 @@ pub struct IndicatorData {
     pub value: Option<Value>,
 }
 
-#[derive(Copy, Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EditMarketInfo {
     Lev(usize),
     Trade(TradeInfo),
     OpenPosition(Option<OpenPositionLocal>),
     EngineState(EngineView),
+    Paused(bool),
 }
 
 #[derive(Clone, Debug, Serialize)]

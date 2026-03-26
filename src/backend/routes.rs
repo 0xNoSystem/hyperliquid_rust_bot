@@ -31,10 +31,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/backtest", post(run_backtest))
         // Data queries (authenticated)
         .route("/trades/{market}", get(get_trades))
-        .route(
-            "/strategies",
-            get(list_strategies).post(save_strategy),
-        )
+        .route("/strategies", get(list_strategies).post(save_strategy))
         .route(
             "/strategies/{id}",
             put(update_strategy).delete(delete_strategy),
@@ -122,8 +119,8 @@ async fn verify_signature(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Issue JWT
-    let token =
-        auth::issue_jwt(&address, &state.jwt_secret).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let token = auth::issue_jwt(&address, &state.jwt_secret)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(VerifyResponse { token }))
 }
@@ -135,17 +132,33 @@ async fn execute_command(
     auth: AuthUser,
     Json(event): Json<BotEvent>,
 ) -> impl IntoResponse {
-    let manager = state.bot_manager.read().await;
-    if let Some(cmd_tx) = manager.get_bot(&auth.pubkey) {
-        match cmd_tx.try_send(event) {
-            Ok(()) => StatusCode::OK,
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => StatusCode::TOO_MANY_REQUESTS,
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
+    let mut manager = state.bot_manager.write().await;
+    let cmd_tx = match manager
+        .get_or_create_bot(
+            &auth.pubkey,
+            &state.pool,
+            &state.encryption_key,
+            state.ws_connections.clone(),
+            state.rhai_engine.clone(),
+            state.strategy_cache.clone(),
+        )
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            log::warn!("Bot creation failed for {}: {:?}", auth.pubkey, e);
+            return (StatusCode::PRECONDITION_FAILED, e.to_string()).into_response();
         }
-    } else {
-        StatusCode::NOT_FOUND
+    };
+
+    match cmd_tx.try_send(event) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            StatusCode::TOO_MANY_REQUESTS.into_response()
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            StatusCode::SERVICE_UNAVAILABLE.into_response()
+        }
     }
 }
 
@@ -188,12 +201,14 @@ async fn run_backtest(
         .unwrap_or_else(|| make_backtest_run_id(&request.config.asset));
 
     if let Err(message) = validate_backtest_request(&request) {
-        return Json(serde_json::to_value(BacktestRunError {
-            run_id,
-            message,
-            progress: Vec::new(),
-        })
-        .unwrap())
+        return Json(
+            serde_json::to_value(BacktestRunError {
+                run_id,
+                message,
+                progress: Vec::new(),
+            })
+            .unwrap(),
+        )
         .into_response();
     }
 
@@ -339,7 +354,11 @@ async fn save_strategy(
     ) {
         Ok(c) => c,
         Err(msg) => {
-            return Ok((StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": msg }))).into_response());
+            return Ok((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": msg })),
+            )
+                .into_response());
         }
     };
 
@@ -360,15 +379,18 @@ async fn save_strategy(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Parse indicators and cache the compiled strategy
-    let indicators: Vec<crate::IndexId> = serde_json::from_value(payload.indicators.clone())
-        .unwrap_or_default();
+    let indicators: Vec<crate::IndexId> =
+        serde_json::from_value(payload.indicators.clone()).unwrap_or_default();
     {
         let mut cache = state.strategy_cache.write().await;
-        cache.insert(row.id, CachedStrategy {
-            compiled,
-            indicators,
-            name: payload.name.clone(),
-        });
+        cache.insert(
+            row.id,
+            CachedStrategy {
+                compiled,
+                indicators,
+                name: payload.name.clone(),
+            },
+        );
     }
 
     Ok((StatusCode::CREATED, Json(row)).into_response())
@@ -391,7 +413,11 @@ async fn update_strategy(
     ) {
         Ok(c) => c,
         Err(msg) => {
-            return Ok((StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": msg }))).into_response());
+            return Ok((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": msg })),
+            )
+                .into_response());
         }
     };
 
@@ -415,15 +441,18 @@ async fn update_strategy(
     match row {
         Some(r) => {
             // Update cache with recompiled strategy
-            let indicators: Vec<crate::IndexId> = serde_json::from_value(payload.indicators.clone())
-                .unwrap_or_default();
+            let indicators: Vec<crate::IndexId> =
+                serde_json::from_value(payload.indicators.clone()).unwrap_or_default();
             {
                 let mut cache = state.strategy_cache.write().await;
-                cache.insert(id, CachedStrategy {
-                    compiled,
-                    indicators,
-                    name: payload.name.clone(),
-                });
+                cache.insert(
+                    id,
+                    CachedStrategy {
+                        compiled,
+                        indicators,
+                        name: payload.name.clone(),
+                    },
+                );
             }
             Ok(Json(r).into_response())
         }
@@ -469,15 +498,49 @@ async fn set_api_key(
     auth: AuthUser,
     Json(payload): Json<SetApiKeyPayload>,
 ) -> impl IntoResponse {
-    let encrypted = super::crypto::encrypt(&state.encryption_key, payload.api_key.as_bytes());
+    // Validate: must parse as a valid private key
+    let key = payload.api_key.trim();
+    if key
+        .parse::<alloy::signers::local::PrivateKeySigner>()
+        .is_err()
+    {
+        return (StatusCode::BAD_REQUEST, "Invalid API key format").into_response();
+    }
 
-    sqlx::query("UPDATE users SET api_key_enc = $1 WHERE pubkey = $2")
+    let encrypted = super::crypto::encrypt(&state.encryption_key, key.as_bytes());
+
+    if let Err(e) = sqlx::query("UPDATE users SET api_key_enc = $1 WHERE pubkey = $2")
         .bind(&encrypted)
         .bind(&auth.pubkey)
         .execute(&state.pool)
         .await
-        .map(|_| StatusCode::OK)
-        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+    {
+        log::error!("Failed to store API key for {}: {}", auth.pubkey, e);
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    // Spawn the bot immediately so the user doesn't have to wait for a command
+    let mut manager = state.bot_manager.write().await;
+    if let Err(e) = manager
+        .get_or_create_bot(
+            &auth.pubkey,
+            &state.pool,
+            &state.encryption_key,
+            state.ws_connections.clone(),
+            state.rhai_engine.clone(),
+            state.strategy_cache.clone(),
+        )
+        .await
+    {
+        log::warn!(
+            "Bot creation after API key save failed for {}: {:?}",
+            auth.pubkey,
+            e
+        );
+        // Key is saved, bot will be created on first command — don't fail the request
+    }
+
+    StatusCode::OK.into_response()
 }
 
 // ── WebSocket Handler ────────────────────────────────────────────────────────
@@ -507,21 +570,21 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>, pubkey: String) {
     // Send task: channel → WebSocket (outbound)
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if let Ok(text) = serde_json::to_string(&msg) {
-                if ws_sender.send(Message::Text(text.into())).await.is_err() {
-                    break;
-                }
+            if let Ok(text) = serde_json::to_string(&msg)
+                && ws_sender.send(Message::Text(text.into())).await.is_err()
+            {
+                break;
             }
         }
     });
 
     // Receive task: WebSocket → handle (inbound)
     let recv_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = ws_receiver.next().await {
-            match msg {
-                Message::Close(_) => break,
-                _ => {}
-            }
+        #[allow(clippy::never_loop)]
+        while let Some(Ok(msg)) = ws_receiver.next().await
+            && let Message::Close(_) = msg
+        {
+            break;
         }
     });
 

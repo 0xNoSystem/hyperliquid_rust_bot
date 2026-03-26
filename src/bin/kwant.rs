@@ -1,7 +1,9 @@
 use dotenv::dotenv;
 use hyperliquid_rust_bot::{
     BaseUrl,
-    backend::{AppState, BotManager, WsConnections, create_engine, create_router, spawn_nonce_pruner},
+    backend::{
+        AppState, BotManager, WsConnections, create_engine, create_router, spawn_nonce_pruner,
+    },
     broadcast::{Broadcaster, CandleCache},
 };
 use log::info;

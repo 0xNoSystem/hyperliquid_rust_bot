@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type {
-    AddMarketInfo,
     BacktestRunState,
     BackendMarketInfo,
     MarketInfo,
@@ -8,14 +7,13 @@ import type {
     assetMeta,
 } from "../types";
 import { API_URL, WS_ENDPOINT } from "../consts";
-import { market_add_info } from "../types";
 import type { WebSocketContextValue } from "./WebSocketContextStore";
 import { WebSocketContext } from "./WebSocketContextStore";
 import { useAuth } from "./AuthContextStore";
 
-const CACHED_MARKETS_KEY = "cachedMarkets.v1";
-const MARKET_INFO_KEY = "markets.v1";
 const UNIVERSE_KEY = "universe.v1";
+const userKey = (base: string, addr: string | null) =>
+    addr ? `${base}.${addr.toLowerCase()}` : base;
 
 const toMarketInfo = (market: BackendMarketInfo): MarketInfo => ({
     ...market,
@@ -43,16 +41,17 @@ const isAssetMetaArray = (value: unknown): value is assetMeta[] =>
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     children,
 }) => {
-    const { token } = useAuth();
+    const { token, address } = useAuth();
     const [markets, setMarkets] = useState<MarketInfo[]>([]);
     const [universe, setUniverse] = useState<assetMeta[]>([]);
-    const [cachedMarkets, setCachedMarkets] = useState<AddMarketInfo[]>([]);
+    const [cachedMarkets, setCachedMarkets] = useState<string[]>([]);
     const [backtestRuns, setBacktestRuns] = useState<
         Record<string, BacktestRunState>
     >({});
     const [totalMargin, setTotalMargin] = useState(0);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [isOffline, setIsOffline] = useState(false);
+    const [needsApiKey, setNeedsApiKey] = useState(false);
 
     /** ---------- refs for latest state (CRITICAL) ---------- **/
     const marketsRef = useRef<MarketInfo[]>([]);
@@ -79,22 +78,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         tokenRef.current = token;
     }, [token]);
 
-    const sendCommand = useCallback(async (body: unknown) => {
-        const headers: Record<string, string> = {
-            "Content-Type": "application/json",
-        };
-        if (tokenRef.current) {
-            headers["Authorization"] = `Bearer ${tokenRef.current}`;
-        }
-        const res = await fetch(`${API_URL}/command`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify(body),
-        });
-        if (!res.ok) throw new Error(`Command failed: ${res.status}`);
-        return res;
-    }, []);
-
     const setErrorWithTimeout = useCallback((message: string | null) => {
         if (errorTimeoutRef.current) {
             clearTimeout(errorTimeoutRef.current);
@@ -109,22 +92,56 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         }
     }, []);
 
-    /** ---------- localStorage hydration ---------- **/
+    const sendCommand = useCallback(
+        async (body: unknown) => {
+            const headers: Record<string, string> = {
+                "Content-Type": "application/json",
+            };
+            if (tokenRef.current) {
+                headers["Authorization"] = `Bearer ${tokenRef.current}`;
+            }
+            const res = await fetch(`${API_URL}/command`, {
+                method: "POST",
+                headers,
+                body: JSON.stringify(body),
+            });
+            if (res.status === 412) {
+                const text = await res.text();
+                const msg = text.includes("no API key")
+                    ? "No API key configured. Go to Settings to add your Hyperliquid API key."
+                    : text || "Precondition failed";
+                setNeedsApiKey(true);
+                setErrorWithTimeout(msg);
+                throw new Error(msg);
+            }
+            if (!res.ok) throw new Error(`Command failed: ${res.status}`);
+            return res;
+        },
+        [setErrorWithTimeout]
+    );
+
+    /** ---------- localStorage hydration (scoped per wallet) ---------- **/
     useEffect(() => {
         try {
-            const raw = localStorage.getItem(MARKET_INFO_KEY);
+            const raw = localStorage.getItem(userKey("markets.v1", address));
             if (raw) {
                 const parsed = JSON.parse(raw) as MarketInfo[];
                 hasLocalMarketsRef.current = parsed.length > 0;
                 setMarkets(dedupeMarkets(parsed));
+            } else {
+                setMarkets([]);
+                hasLocalMarketsRef.current = false;
             }
         } catch {
             console.log("Failed to hydrate localStorage");
         }
 
         try {
-            const raw = localStorage.getItem(CACHED_MARKETS_KEY);
+            const raw = localStorage.getItem(
+                userKey("cachedMarkets.v1", address)
+            );
             if (raw) setCachedMarkets(JSON.parse(raw));
+            else setCachedMarkets([]);
         } catch {
             console.log("Failed to hydrate localStorage");
         }
@@ -135,16 +152,24 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         } catch {
             console.log("Failed to hydrate localStorage");
         }
-    }, []);
+    }, [address]);
 
     useEffect(() => {
-        localStorage.setItem(MARKET_INFO_KEY, JSON.stringify(markets));
+        if (address)
+            localStorage.setItem(
+                userKey("markets.v1", address),
+                JSON.stringify(markets)
+            );
         hasLocalMarketsRef.current = markets.length > 0;
-    }, [markets]);
+    }, [markets, address]);
 
     useEffect(() => {
-        localStorage.setItem(CACHED_MARKETS_KEY, JSON.stringify(cachedMarkets));
-    }, [cachedMarkets]);
+        if (address)
+            localStorage.setItem(
+                userKey("cachedMarkets.v1", address),
+                JSON.stringify(cachedMarkets)
+            );
+    }, [cachedMarkets, address]);
 
     useEffect(() => {
         localStorage.setItem(UNIVERSE_KEY, JSON.stringify(universe));
@@ -165,14 +190,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
                 if (payload.status === "shutdown") {
                     setCachedMarkets((prev) => {
-                        const next = [...prev];
-                        marketsRef.current.forEach((market) => {
-                            const cached = market_add_info(market);
-                            if (!next.some((m) => m.asset === cached.asset)) {
-                                next.push(cached);
-                            }
-                        });
-                        return next;
+                        const next = new Set(prev);
+                        marketsRef.current.forEach((m) => next.add(m.asset));
+                        return Array.from(next);
                     });
                     setMarkets([]);
                 }
@@ -244,6 +264,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                             };
                         if ("engineState" in edit)
                             return { ...m, engineState: edit.engineState };
+                        if ("paused" in edit)
+                            return { ...m, isPaused: edit.paused };
                         return m;
                     })
                 );
@@ -291,6 +313,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
             if ("updateTotalMargin" in payload) {
                 setTotalMargin(payload.updateTotalMargin);
+                setNeedsApiKey(false);
                 return;
             }
 
@@ -339,15 +362,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 }
                 const [sessionMarkets, meta] = session;
                 setUniverse(meta);
-                setMarkets((prev) => {
-                    if (hasLocalMarketsRef.current && prev.length > 0)
-                        return prev;
-                    const deduped = dedupeMarkets(
-                        sessionMarkets.map(toMarketInfo)
-                    );
-                    hasLocalMarketsRef.current = deduped.length > 0;
-                    return deduped;
-                });
+                if (sessionMarkets.length > 0) setNeedsApiKey(false);
+                const deduped = dedupeMarkets(sessionMarkets.map(toMarketInfo));
+                hasLocalMarketsRef.current = deduped.length > 0;
+                setMarkets(deduped);
             }
         },
         [setErrorWithTimeout]
@@ -396,18 +414,15 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     }, [token, handleMessage, sendCommand]);
 
     /** ---------- API ---------- **/
-    const cacheMarket = useCallback((market: MarketInfo) => {
-        setCachedMarkets((prev) => {
-            const cached = market_add_info(market);
-            return prev.some((m) => m.asset === cached.asset)
-                ? prev
-                : [...prev, cached];
-        });
+    const cacheMarket = useCallback((asset: string) => {
+        setCachedMarkets((prev) =>
+            prev.includes(asset) ? prev : [...prev, asset]
+        );
     }, []);
 
     const deleteCachedMarket = useCallback(
         (asset: string) =>
-            setCachedMarkets((p) => p.filter((m) => m.asset !== asset)),
+            setCachedMarkets((p) => p.filter((a) => a !== asset)),
         []
     );
 
@@ -424,11 +439,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             await sendCommand(
                 pause ? { pauseMarket: asset } : { resumeMarket: asset }
             );
-            setMarkets((p) =>
-                p.map((m) =>
-                    m.asset === asset ? { ...m, isPaused: !m.isPaused } : m
-                )
-            );
         },
         [sendCommand]
     );
@@ -440,13 +450,18 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const requestPauseAll = useCallback(async () => {
         await sendCommand({ pauseAll: null });
-        setMarkets((p) => p.map((m) => ({ ...m, isPaused: true })));
+    }, [sendCommand]);
+
+    const requestSyncMargin = useCallback(async () => {
+        await sendCommand({ syncMargin: null });
     }, [sendCommand]);
 
     const updateMarketStrategy = useCallback(
         (asset: string, strategyName: string) => {
             setMarkets((prev) =>
-                prev.map((m) => (m.asset === asset ? { ...m, strategyName } : m))
+                prev.map((m) =>
+                    m.asset === asset ? { ...m, strategyName } : m
+                )
             );
         },
         []
@@ -464,6 +479,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         backtestRuns,
         totalMargin,
         isOffline,
+        needsApiKey,
+        setNeedsApiKey,
         errorMsg,
         sendCommand,
         dismissError,
@@ -473,6 +490,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         requestToggleMarket,
         requestCloseAll,
         requestPauseAll,
+        requestSyncMargin,
         updateMarketStrategy,
     };
 

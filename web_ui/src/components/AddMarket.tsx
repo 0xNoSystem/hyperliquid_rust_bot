@@ -15,7 +15,7 @@ import type {
     IndicatorName,
     AddMarketProps,
 } from "../types";
-
+import type { Strategy } from "../strats";
 
 type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
 type ConfigDraft = [IndicatorKind, TimeframeKey];
@@ -25,9 +25,10 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     totalMargin,
     assets,
     strategies,
+    initialAsset,
 }) => {
     const { sendCommand } = useWebSocketContext();
-    const [asset, setAsset] = useState("");
+    const [asset, setAsset] = useState(initialAsset ?? "");
     const [marginType, setMarginType] = useState<"alloc" | "amount">("alloc");
     const [marginValue, setMarginValue] = useState(0.1);
     const [lev, setLev] = useState(1);
@@ -113,7 +114,6 @@ export const AddMarket: React.FC<AddMarketProps> = ({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedStrategy) return;
         const validConfig: IndexId[] = config.map(([ind, tf]) => [
             ind,
             into(tf),
@@ -125,7 +125,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                     ? { alloc: marginValue / 100 }
                     : { amount: marginValue },
             lev,
-            strategyId: selectedStrategy.id,
+            strategyId: selectedStrategy?.id ?? null,
             config: validConfig,
         };
 
@@ -279,14 +279,18 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         <select
                             value={selectedStrategy?.id ?? ""}
                             onChange={(e) => {
-                                const s = strategies.find((s) => s.id === e.target.value);
-                                setSelectedStrategy(s ?? null);
+                                if (e.target.value === "") {
+                                    setSelectedStrategy(null);
+                                } else {
+                                    const s = strategies.find(
+                                        (s) => s.id === e.target.value
+                                    );
+                                    setSelectedStrategy(s ?? null);
+                                }
                             }}
                             className={selectClass}
                         >
-                            <option value="" disabled>
-                                -- select a strategy --
-                            </option>
+                            <option value="">View Only (no trading)</option>
                             {strategies.map((s) => (
                                 <option key={s.id} value={s.id}>
                                     {s.name}

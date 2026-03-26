@@ -1,13 +1,21 @@
 import React from "react";
-import { Github, ExternalLink, Moon, Sun } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Github, ExternalLink, Moon, Sun, LogOut } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { useTheme } from "../context/ThemeContextStore";
+import { useAuth } from "../context/AuthContextStore";
 import RotatingCube from "./Cube";
 
 const Header: React.FC = () => {
     const { isOffline } = useWebSocketContext();
     const { theme, toggleTheme } = useTheme();
+    const { address, logout } = useAuth();
+    const navigate = useNavigate();
+
+    const handleDisconnect = () => {
+        logout();
+        navigate("/login", { replace: true });
+    };
     const isLight = theme === "light";
     return (
         <header className="border-line-subtle bg-app-surface-1/30 top-0 z-40 border-b py-2">
@@ -87,6 +95,23 @@ const Header: React.FC = () => {
                     >
                         Settings
                     </Link>
+
+                    <button
+                        onClick={handleDisconnect}
+                        className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-accent-danger-soft/20 hover:text-accent-danger-soft inline-flex items-center gap-2 rounded-md border px-3 py-1"
+                        title={
+                            address
+                                ? `${address.slice(0, 6)}…${address.slice(-4)}`
+                                : "Disconnect"
+                        }
+                    >
+                        <LogOut className="h-4 w-4" />
+                        <span className="text-[12px]">
+                            {address
+                                ? `${address.slice(0, 6)}…${address.slice(-4)}`
+                                : "Disconnect"}
+                        </span>
+                    </button>
                 </div>
             </div>
         </header>

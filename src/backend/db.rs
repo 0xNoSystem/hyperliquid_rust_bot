@@ -18,6 +18,7 @@ pub struct TradeRow {
     pub close_time: i64,
     pub close_price: f64,
     pub close_type: String,
+    pub strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

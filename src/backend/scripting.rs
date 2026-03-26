@@ -1,10 +1,10 @@
-use rhai::{Engine, AST};
+use rhai::{AST, Engine};
 
 use crate::strategy::{
-    BusyType, Intent, LiqSide, LimitOptions, OnTimeout, Order, ReduceOrder, SizeSpec, TimeoutInfo,
+    BusyType, Intent, LimitOptions, LiqSide, OnTimeout, Order, ReduceOrder, SizeSpec, TimeoutInfo,
     Triggers,
 };
-use crate::{OpenPosInfo, Price, Side, TimeDelta, TimeFrame, Value, TimedValue};
+use crate::{OpenPosInfo, Price, Side, TimeDelta, TimeFrame, TimedValue, Value};
 
 // ── Compiled strategy (validated ASTs) ──────────────────────────────────────
 
@@ -13,6 +13,18 @@ pub struct CompiledStrategy {
     pub ast_on_idle: AST,
     pub ast_on_open: AST,
     pub ast_on_busy: AST,
+}
+
+impl CompiledStrategy {
+    /// A no-op strategy that never emits any trading signals.
+    pub fn noop(engine: &Engine) -> Self {
+        let ast = engine.compile("()").expect("noop script must compile");
+        Self {
+            ast_on_idle: ast.clone(),
+            ast_on_open: ast.clone(),
+            ast_on_busy: ast,
+        }
+    }
 }
 
 // ── Engine factory ──────────────────────────────────────────────────────────
@@ -120,19 +132,34 @@ fn register_value(engine: &mut Engine) {
         }
     });
     engine.register_fn("stoch_k", |v: &mut Value| -> f64 {
-        match *v { Value::StochRsiValue { k, .. } => k, _ => f64::NAN }
+        match *v {
+            Value::StochRsiValue { k, .. } => k,
+            _ => f64::NAN,
+        }
     });
     engine.register_fn("stoch_d", |v: &mut Value| -> f64 {
-        match *v { Value::StochRsiValue { d, .. } => d, _ => f64::NAN }
+        match *v {
+            Value::StochRsiValue { d, .. } => d,
+            _ => f64::NAN,
+        }
     });
     engine.register_fn("ema_short", |v: &mut Value| -> f64 {
-        match *v { Value::EmaCrossValue { short, .. } => short, _ => f64::NAN }
+        match *v {
+            Value::EmaCrossValue { short, .. } => short,
+            _ => f64::NAN,
+        }
     });
     engine.register_fn("ema_long", |v: &mut Value| -> f64 {
-        match *v { Value::EmaCrossValue { long, .. } => long, _ => f64::NAN }
+        match *v {
+            Value::EmaCrossValue { long, .. } => long,
+            _ => f64::NAN,
+        }
     });
     engine.register_fn("ema_trend", |v: &mut Value| -> bool {
-        match *v { Value::EmaCrossValue { trend, .. } => trend, _ => false }
+        match *v {
+            Value::EmaCrossValue { trend, .. } => trend,
+            _ => false,
+        }
     });
 }
 
@@ -145,7 +172,9 @@ fn register_timed_value(engine: &mut Engine) {
 
 fn register_size_spec(engine: &mut Engine) {
     engine.register_type_with_name::<SizeSpec>("SizeSpec");
-    engine.register_fn("margin_amount", |amount: f64| SizeSpec::MarginAmount(amount));
+    engine.register_fn("margin_amount", |amount: f64| {
+        SizeSpec::MarginAmount(amount)
+    });
     engine.register_fn("margin_pct", |pct: f64| SizeSpec::MarginPct(pct));
     engine.register_fn("raw_size", |sz: f64| SizeSpec::RawSize(sz));
 }
@@ -162,9 +191,18 @@ fn register_liq_side(engine: &mut Engine) {
 
 fn register_triggers(engine: &mut Engine) {
     engine.register_type_with_name::<Triggers>("Triggers");
-    engine.register_fn("triggers", |tp: f64, sl: f64| Triggers { tp: Some(tp), sl: Some(sl) });
-    engine.register_fn("tp_only", |tp: f64| Triggers { tp: Some(tp), sl: None });
-    engine.register_fn("sl_only", |sl: f64| Triggers { tp: None, sl: Some(sl) });
+    engine.register_fn("triggers", |tp: f64, sl: f64| Triggers {
+        tp: Some(tp),
+        sl: Some(sl),
+    });
+    engine.register_fn("tp_only", |tp: f64| Triggers {
+        tp: Some(tp),
+        sl: None,
+    });
+    engine.register_fn("sl_only", |sl: f64| Triggers {
+        tp: None,
+        sl: Some(sl),
+    });
 }
 
 fn register_intent(engine: &mut Engine) {
@@ -175,23 +213,31 @@ fn register_intent(engine: &mut Engine) {
     engine.register_fn("open_market", |side: Side, size: SizeSpec| {
         Intent::open_market(side, size, None)
     });
-    engine.register_fn("open_market", |side: Side, size: SizeSpec, trig: Triggers| {
-        Intent::open_market(side, size, Some(trig))
+    engine.register_fn(
+        "open_market",
+        |side: Side, size: SizeSpec, trig: Triggers| Intent::open_market(side, size, Some(trig)),
+    );
+    engine.register_fn("flatten_market", Intent::flatten_market);
+    engine.register_fn("reduce_market", |size: SizeSpec| {
+        Intent::reduce_market_order(size)
     });
-    engine.register_fn("flatten_market", || Intent::flatten_market());
-    engine.register_fn("reduce_market", |size: SizeSpec| Intent::reduce_market_order(size));
     engine.register_fn("abort", || Intent::Abort);
 
     engine.register_fn("open_limit", |side: Side, size: SizeSpec, limit_px: f64| {
         Intent::open_limit(side, size, limit_px, None, None)
     });
-    engine.register_fn("open_limit", |side: Side, size: SizeSpec, limit_px: f64, trig: Triggers| {
-        Intent::open_limit(side, size, limit_px, None, Some(trig))
-    });
+    engine.register_fn(
+        "open_limit",
+        |side: Side, size: SizeSpec, limit_px: f64, trig: Triggers| {
+            Intent::open_limit(side, size, limit_px, None, Some(trig))
+        },
+    );
     engine.register_fn("reduce_limit", |size: SizeSpec, limit_px: f64| {
         Intent::reduce_limit_order(size, limit_px, None)
     });
-    engine.register_fn("flatten_limit", |limit_px: f64| Intent::flatten_limit(limit_px, None));
+    engine.register_fn("flatten_limit", |limit_px: f64| {
+        Intent::flatten_limit(limit_px, None)
+    });
 
     engine.register_fn("arm", |td: TimeDelta| Intent::Arm(td));
     engine.register_fn("disarm", || Intent::Disarm);
@@ -199,8 +245,12 @@ fn register_intent(engine: &mut Engine) {
 
 fn register_busy_type(engine: &mut Engine) {
     engine.register_type_with_name::<BusyType>("BusyType");
-    engine.register_fn("is_opening", |b: &mut BusyType| matches!(b, BusyType::Opening(_)));
-    engine.register_fn("is_closing", |b: &mut BusyType| matches!(b, BusyType::Closing(_)));
+    engine.register_fn("is_opening", |b: &mut BusyType| {
+        matches!(b, BusyType::Opening(_))
+    });
+    engine.register_fn("is_closing", |b: &mut BusyType| {
+        matches!(b, BusyType::Closing(_))
+    });
 }
 
 fn register_timeframe(engine: &mut Engine) {

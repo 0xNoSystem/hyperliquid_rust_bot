@@ -1,5 +1,5 @@
 #![allow(unused_variables)]
-use log::{info, warn};
+use log::warn;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use crate::signal::{
 };
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, MarketStream, UpdateFrontend};
 use crate::{ExecCommand, ExecControl, ExecEvent, Executor};
-use crate::{MAX_HISTORY, MarketInfo, Wallet};
+use crate::{MarketInfo, Wallet};
 use crate::{OpenPositionLocal, TimeFrame, TradeInfo};
 
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_channel};
@@ -28,7 +28,6 @@ use flume::{Sender as FlumeSender, bounded};
 pub struct Market {
     exchange_client: ExchangeClient,
     cache_tx: Sender<CacheCmdIn>,
-    pub trade_history: Vec<TradeInfo>,
     pub pnl: f64,
     pub lev: usize,
     pub strategy_name: String,
@@ -61,8 +60,7 @@ impl Market {
             ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
 
         //Look up needed tfs for loading
-        let mut active_tfs: HashSet<TimeFrame> =
-            strat_indicators.iter().map(|id| id.1).collect();
+        let mut active_tfs: HashSet<TimeFrame> = strat_indicators.iter().map(|id| id.1).collect();
         if let Some(ref cfg) = config {
             for ind_id in cfg {
                 active_tfs.insert(ind_id.1);
@@ -93,7 +91,6 @@ impl Market {
                 exchange_client,
                 cache_tx,
                 margin,
-                trade_history: Vec::with_capacity(MAX_HISTORY),
                 pnl: 0_f64,
                 lev,
                 strategy_name,
@@ -131,10 +128,6 @@ impl Market {
         let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(self.lev)));
 
         let last_price = self.load_engine(5000).await?;
-        println!(
-            "\nMarket initialized for {} (lev: {}, strategy: {})\n",
-            self.asset.name, self.lev, self.strategy_name
-        );
         Ok(last_price)
     }
 
@@ -143,7 +136,6 @@ impl Market {
             .update_leverage(lev as u32, asset, false, None)
             .await?;
 
-        info!("Update leverage response: {response:?}");
         match response {
             ExchangeResponseStatus::Ok(_) => Ok(lev),
             ExchangeResponseStatus::Err(e) => Err(Error::Custom(e)),
@@ -151,8 +143,6 @@ impl Market {
     }
 
     async fn load_engine(&mut self, candle_count: CandleCount) -> Result<Option<f64>, Error> {
-        info!("---------------Loading Engine---------------");
-
         let request: HashMap<TimeFrame, CandleCount> = self
             .active_tfs
             .iter()
@@ -180,10 +170,6 @@ impl Market {
         }
 
         Ok(last_price)
-    }
-
-    pub fn get_trade_history(&self) -> &Vec<TradeInfo> {
-        &self.trade_history
     }
 }
 
@@ -407,13 +393,10 @@ impl Market {
                 }
 
                 MarketCommand::ReceiveTrade(trade_info) => {
-                    self.trade_history.push(trade_info);
-
                     let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
                         asset.name.clone(),
                         EditMarketInfo::Trade(trade_info),
                     )));
-
                 }
 
                 MarketCommand::UserEvent(event) => {
@@ -447,6 +430,20 @@ impl Market {
                     )));
                 }
 
+                MarketCommand::ManualTradeDetected => {
+                    let _ = self.senders.engine_tx.send(EngineCommand::ExecToggle);
+                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                        UpdateFrontend::UserError(format!(
+                            "Manual trade detected on {}. Market paused — resume when ready.",
+                            asset.name
+                        )),
+                    ));
+                    let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
+                        asset.name.clone(),
+                        EditMarketInfo::Paused(true),
+                    )));
+                }
+
                 MarketCommand::Pause => {
                     let _ = self
                         .senders
@@ -465,24 +462,15 @@ impl Market {
                 }
 
                 MarketCommand::Close => {
-                    info!("\nClosing {} Market...\n", asset.name);
                     let _ = engine_update_tx.send(EngineCommand::Stop);
-                    //shutdown Executor
-                    info!("\nShutting down executor\n");
                     match self.senders.exec_tx.send(Control(ExecControl::Kill)) {
                         Ok(_) => {
                             if let Some(cmd) = self.receivers.market_rv.recv().await {
                                 match cmd {
                                     MarketCommand::ReceiveTrade(trade_info) => {
-                                        info!(
-                                            "\nReceived final trade before shutdown: {:?}\n",
-                                            trade_info
-                                        );
-                                        self.trade_history.push(trade_info);
                                         let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate(
                                             (asset.name.clone(), EditMarketInfo::Trade(trade_info)),
                                         ));
-
                                         break;
                                     }
 
@@ -503,11 +491,6 @@ impl Market {
         let _ = engine_handle.await;
         let _ = executor_handle.await;
         let _ = candle_stream_handle.await;
-        info!(
-            "No. of trade : {}\nPNL: {}",
-            &self.trade_history.len(),
-            &self.pnl
-        );
         Ok(())
     }
 }
@@ -525,6 +508,7 @@ pub enum MarketCommand {
     UpdateMargin(f64),
     UpdateIndicatorData(Vec<IndicatorData>),
     EngineStateChange(EngineView),
+    ManualTradeDetected,
     Resume,
     Pause,
     Close,

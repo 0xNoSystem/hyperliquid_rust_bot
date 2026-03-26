@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 
-use log::info;
 use rhai::Engine;
 use rustc_hash::FxHasher;
 use serde::{Deserialize, Serialize};
@@ -15,8 +14,8 @@ use crate::strategy::{Strat, StratContext, Strategy};
 use crate::trade_setup::TimeFrame;
 use crate::{
     BusyType, EngineOrder, ExecCommand, ExecControl, IndicatorData, Intent, LiqSide,
-    LiveTimeoutInfo, MIN_ORDER_VALUE, MarketCommand, OnTimeout, PositionOp, Side,
-    TimeoutInfo, TriggerKind, Triggers,
+    LiveTimeoutInfo, MIN_ORDER_VALUE, MarketCommand, OnTimeout, PositionOp, Side, TimeoutInfo,
+    TriggerKind, Triggers,
 };
 
 use flume::{Sender, bounded};
@@ -41,6 +40,7 @@ pub struct SignalEngine {
 }
 
 impl SignalEngine {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: Option<Vec<IndexId>>,
         rhai_engine: Arc<Engine>,
@@ -142,20 +142,7 @@ impl SignalEngine {
         values
     }
 
-    pub fn display_values(&self) {
-        for (tf, tracker) in &self.trackers {
-            for (kind, handler) in &tracker.indicators {
-                if handler.is_active {
-                    info!(
-                        "\nKind: {:?} TF: {}\nValue: {:?}\n",
-                        kind,
-                        tf.as_str(),
-                        handler.get_value()
-                    );
-                }
-            }
-        }
-    }
+    pub fn display_values(&self) {}
 
     pub async fn load<I: IntoIterator<Item = Price>>(&mut self, tf: TimeFrame, price_data: I) {
         if let Some(tracker) = self.trackers.get_mut(&tf) {
@@ -649,13 +636,12 @@ impl SignalEngine {
                         }
                     }
 
-                    if init_state != self.state {
-                        if let Some(sender) = &self.data_tx {
-                            let _ = sender
-                                .send(MarketCommand::EngineStateChange(self.state.into()))
-                                .await;
-                        }
-                        info!("Engine transition: {:?} -->{:?}", init_state, self.state);
+                    if init_state != self.state
+                        && let Some(sender) = &self.data_tx
+                    {
+                        let _ = sender
+                            .send(MarketCommand::EngineStateChange(self.state.into()))
+                            .await;
                     }
                 }
 
@@ -664,11 +650,7 @@ impl SignalEngine {
                 }
 
                 EngineCommand::UpdateStrategy(compiled, indicators) => {
-                    self.strategy = Strategy::new(
-                        self.rhai_engine.clone(),
-                        compiled,
-                        indicators,
-                    );
+                    self.strategy = Strategy::new(self.rhai_engine.clone(), compiled, indicators);
                     self.state = EngineState::Idle;
                 }
 
@@ -727,11 +709,8 @@ impl SignalEngine {
         }
     }
 
-    pub fn display_indicators(&mut self, price: f64) {
-        info!("\nPrice => {}\n", price);
-        //let vec = self.get_active_indicators();
+    pub fn display_indicators(&mut self, _price: f64) {
         self.display_values();
-        //Update
     }
 }
 impl SignalEngine {

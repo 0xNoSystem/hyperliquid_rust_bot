@@ -8,6 +8,7 @@ import MarketDetail from "./components/MarketDetail";
 import Login from "./components/Login";
 import RequireAuth from "./components/RequireAuth";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { WebSocketProvider } from "./context/WebSocketContext";
 import ChartProvider from "./chart/ChartContext";
 
 const App: React.FC = () => (
@@ -18,7 +19,9 @@ const App: React.FC = () => (
                 path="/"
                 element={
                     <RequireAuth>
-                        <Layout />
+                        <WebSocketProvider>
+                            <Layout />
+                        </WebSocketProvider>
                     </RequireAuth>
                 }
             >

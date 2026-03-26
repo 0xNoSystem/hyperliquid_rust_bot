@@ -9,8 +9,8 @@ use super::types::{
 };
 use crate::{
     BtAction, BtIntent, BtOrder, CloseOrder, EngineOrder, Error, FillInfo, FillType, OpenOrder,
-    OpenPosInfo, OpenPositionLocal, PositionOp, Price, Side, SignalEngine, TimeFrame,
-    TradeInfo, TriggerKind, Triggers, get_time_now,
+    OpenPosInfo, OpenPositionLocal, PositionOp, Price, Side, SignalEngine, TimeFrame, TradeInfo,
+    TriggerKind, Triggers, get_time_now,
 };
 
 const FUNDING_WINDOW_MS: u64 = 8 * 60 * 60 * 1000;
@@ -791,9 +791,10 @@ impl Backtester {
                 price: px,
                 fill_type,
             },
+            strategy: None,
         };
 
-        self.trades.push(trade);
+        self.trades.push(trade.clone());
         self.position = None;
         self.resting_orders
             .retain(|_, order| matches!(order.kind, RestingKind::Open { .. }));

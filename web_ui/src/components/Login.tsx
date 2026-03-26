@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { type WalletProvider, phantomProvider, authenticateWallet } from "../wallet";
+import {
+    type WalletProvider,
+    phantomProvider,
+    authenticateWallet,
+} from "../wallet";
 import { useAuth } from "../context/AuthContextStore";
 import RotatingCube from "./Cube";
 import { BackgroundFX } from "./BackgroundFX";
@@ -19,7 +23,7 @@ export default function Login() {
         setConnecting(true);
         try {
             if (!wallet.isAvailable()) {
-                setError(`${wallet.name} is not installed`);
+                window.open("https://phantom.app/", "_blank");
                 return;
             }
             const { token, address } = await authenticateWallet(wallet);
@@ -48,7 +52,7 @@ export default function Login() {
                         <h1 className="font-mono text-2xl tracking-[0.22em]">
                             KWANT
                         </h1>
-                        <p className="text-app-text/50 text-[11px] uppercase tracking-widest">
+                        <p className="text-app-text/50 text-[11px] tracking-widest uppercase">
                             Trading Terminal
                         </p>
                     </div>
@@ -82,9 +86,7 @@ export default function Login() {
                                     className="h-8 w-8 rounded-md"
                                 />
                                 <span className="text-sm font-medium">
-                                    {connecting
-                                        ? "Connecting..."
-                                        : wallet.name}
+                                    {connecting ? "Connecting..." : wallet.name}
                                 </span>
                             </button>
                         ))}

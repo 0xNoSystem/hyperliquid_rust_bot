@@ -7,8 +7,10 @@ pub(crate) mod routes;
 pub(crate) mod scripting;
 
 // Re-exports for the binary crate
-pub use app_state::{AppState, CachedStrategy, NonceStore, StrategyCache, WsConnections, broadcast_to_user};
-pub use auth::{spawn_nonce_pruner, AuthUser};
+pub use app_state::{
+    AppState, CachedStrategy, NonceStore, StrategyCache, WsConnections, broadcast_to_user,
+};
+pub use auth::{AuthUser, spawn_nonce_pruner};
 pub use bot_manager::BotManager;
 pub use db::{StrategyRow, TradeRow};
 pub use routes::create_router;

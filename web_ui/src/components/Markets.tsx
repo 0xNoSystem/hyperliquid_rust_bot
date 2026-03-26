@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Power, Pause } from "lucide-react";
+import { Plus, Power, Pause, KeyRound, RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import MarketCard from "./MarketCard";
 import { AddMarket } from "./AddMarket";
 import { CachedMarket } from "./CachedMarket";
@@ -16,7 +17,7 @@ export default function MarketsPage() {
         cachedMarkets,
         totalMargin,
         errorMsg,
-        sendCommand,
+        needsApiKey,
         dismissError,
         cacheMarket,
         deleteCachedMarket,
@@ -24,11 +25,21 @@ export default function MarketsPage() {
         requestToggleMarket,
         requestCloseAll,
         requestPauseAll,
+        requestSyncMargin,
     } = useWebSocketContext();
+
+    const navigate = useNavigate();
 
     const [marketToRemove, setMarketToRemove] = useState<string | null>(null);
     const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
+    const [togglingAssets, setTogglingAssets] = useState<Set<string>>(
+        new Set()
+    );
+    const [addInitialAsset, setAddInitialAsset] = useState<
+        string | undefined
+    >();
     const [showAdd, setShowAdd] = useState(false);
+    const [syncingMargin, setSyncingMargin] = useState(false);
     // TODO: fetch strategies from backend via GET /strategies
     const [strategies] = useState<Strategy[]>([]);
 
@@ -51,41 +62,61 @@ export default function MarketsPage() {
 
     const handleConfirmToggle = (asset: string, isPaused: boolean) => {
         if (isPaused) {
-            requestToggleMarket(asset, false).catch((err) =>
-                console.error("Toggle failed", err)
-            );
+            setTogglingAssets((prev) => new Set(prev).add(asset));
+            requestToggleMarket(asset, false)
+                .catch((err) => console.error("Toggle failed", err))
+                .finally(() =>
+                    setTogglingAssets((prev) => {
+                        const next = new Set(prev);
+                        next.delete(asset);
+                        return next;
+                    })
+                );
         } else {
             setMarketToToggle(asset);
         }
     };
 
     const handleTogglePause = (asset: string) => {
+        setTogglingAssets((prev) => new Set(prev).add(asset));
         requestToggleMarket(asset, true)
             .catch((err) => console.error("Toggle failed", err))
-            .finally(() => setMarketToToggle(null));
+            .finally(() => {
+                setMarketToToggle(null);
+                setTogglingAssets((prev) => {
+                    const next = new Set(prev);
+                    next.delete(asset);
+                    return next;
+                });
+            });
     };
 
     const handleRemove = (asset: string) => {
-        const market = markets.find((m) => m.asset === asset);
-        if (market) {
-            cacheMarket(market);
-        }
+        cacheMarket(asset);
         requestRemoveMarket(asset)
             .catch((err) => console.error("Remove failed", err))
             .finally(() => setMarketToRemove(null));
     };
 
-    const handleRestoreCached = async (asset: string) => {
-        const info = cachedMarkets.find((cm) => cm.asset === asset);
-        if (!info) return;
-        try {
-            const res = await sendCommand({ addMarket: info });
-            if (res.ok) {
-                deleteCachedMarket(asset);
-            }
-        } catch (error) {
-            console.error("Failed to restore market", error);
-        }
+    const openAddModal = useCallback(
+        (initialAsset?: string) => {
+            requestSyncMargin().catch(console.error);
+            setAddInitialAsset(initialAsset);
+            setShowAdd(true);
+        },
+        [requestSyncMargin]
+    );
+
+    const handleCloseAdd = () => {
+        setShowAdd(false);
+        setAddInitialAsset(undefined);
+    };
+
+    const handleSyncMargin = () => {
+        setSyncingMargin(true);
+        requestSyncMargin()
+            .catch(console.error)
+            .finally(() => setTimeout(() => setSyncingMargin(false), 600));
     };
 
     return (
@@ -96,11 +127,29 @@ export default function MarketsPage() {
                 <aside className="border-line-subtle bg-surface-pane/30 shadow-panel h-fit rounded-md border p-4">
                     <div className="flex items-baseline justify-between">
                         <div>
-                            <div className="text-app-text/50 text-[10px] uppercase">
+                            <div className="text-app-text/50 flex items-center gap-1.5 text-[10px] uppercase">
                                 Available Margin
+                                <button
+                                    onClick={handleSyncMargin}
+                                    disabled={syncingMargin}
+                                    className="text-app-text/40 hover:text-app-text/80 transition-colors disabled:opacity-50"
+                                    title="Refresh margin"
+                                >
+                                    <RefreshCw
+                                        className={`h-3 w-3 ${syncingMargin ? "animate-spin" : ""}`}
+                                    />
+                                </button>
                             </div>
                             <div className="font-mono text-3xl tracking-tight tabular-nums">
-                                {totalMargin ? (
+                                {needsApiKey ? (
+                                    <button
+                                        onClick={() => navigate("/settings")}
+                                        className="text-accent-info-link mt-1 flex items-center gap-2 text-sm font-medium hover:underline"
+                                    >
+                                        <KeyRound className="h-4 w-4" />
+                                        Connect API Key
+                                    </button>
+                                ) : totalMargin ? (
                                     `$${totalMargin.toFixed(2)}`
                                 ) : (
                                     <LoadingDots />
@@ -113,7 +162,7 @@ export default function MarketsPage() {
                     <div className="mt-4 grid gap-2">
                         {markets.length !== 0 && (
                             <button
-                                onClick={() => setShowAdd(true)}
+                                onClick={() => openAddModal()}
                                 className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover w-full rounded-md border px-3 py-2"
                             >
                                 <div className="flex items-center justify-center gap-2">
@@ -164,10 +213,10 @@ export default function MarketsPage() {
                                     No cached markets.
                                 </p>
                             ) : (
-                                cachedMarkets.map((m) => (
+                                cachedMarkets.map((asset) => (
                                     <CachedMarket
-                                        key={m.asset}
-                                        market={m}
+                                        key={asset}
+                                        asset={asset}
                                         onAdd={handleRestoreCached}
                                         onRemove={deleteCachedMarket}
                                     />
@@ -181,21 +230,41 @@ export default function MarketsPage() {
                 <main>
                     {markets.length === 0 && (
                         <div className="border-line-subtle bg-surface-pane grid place-items-center rounded-md border p-12 text-center">
-                            <div>
-                                <h2 className="text-2xl font-semibold">
-                                    No markets configured
-                                </h2>
-                                <p className="text-app-text/60 mt-1">
-                                    Add a market to begin streaming quotes and
-                                    executing strategies.
-                                </p>
-                                <button
-                                    onClick={() => setShowAdd(true)}
-                                    className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover mt-5 inline-flex items-center gap-2 rounded-md border px-4 py-2"
-                                >
-                                    <Plus className="h-4 w-4" /> Add Market
-                                </button>
-                            </div>
+                            {needsApiKey ? (
+                                <div>
+                                    <KeyRound className="text-app-text/30 mx-auto h-12 w-12" />
+                                    <h2 className="mt-4 text-2xl font-semibold">
+                                        Connect your API key
+                                    </h2>
+                                    <p className="text-app-text/60 mt-1">
+                                        Add your Hyperliquid API key to start
+                                        trading.
+                                    </p>
+                                    <button
+                                        onClick={() => navigate("/settings")}
+                                        className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover mt-5 inline-flex items-center gap-2 rounded-md border px-4 py-2"
+                                    >
+                                        <KeyRound className="h-4 w-4" /> Go to
+                                        Settings
+                                    </button>
+                                </div>
+                            ) : (
+                                <div>
+                                    <h2 className="text-2xl font-semibold">
+                                        No markets configured
+                                    </h2>
+                                    <p className="text-app-text/60 mt-1">
+                                        Add a market to begin streaming quotes
+                                        and executing strategies.
+                                    </p>
+                                    <button
+                                        onClick={() => openAddModal()}
+                                        className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover mt-5 inline-flex items-center gap-2 rounded-md border px-4 py-2"
+                                    >
+                                        <Plus className="h-4 w-4" /> Add Market
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -221,6 +290,7 @@ export default function MarketsPage() {
                                         onRemove={() =>
                                             setMarketToRemove(m.asset)
                                         }
+                                        isToggling={togglingAssets.has(m.asset)}
                                     />
                                 </motion.div>
                             ))}
@@ -236,17 +306,18 @@ export default function MarketsPage() {
                     {/* Overlay */}
                     <div
                         className="bg-app-overlay absolute inset-0"
-                        onClick={() => setShowAdd(false)}
+                        onClick={handleCloseAdd}
                     />
 
                     {/* Centered Modal */}
                     <div className="absolute inset-0 flex items-center justify-center p-4">
                         <div className="bg-surface-modal rounded-xl shadow-xl">
                             <AddMarket
-                                onClose={() => setShowAdd(false)}
+                                onClose={handleCloseAdd}
                                 totalMargin={totalMargin}
                                 assets={universe}
                                 strategies={strategies}
+                                initialAsset={addInitialAsset}
                             />
                         </div>
                     </div>

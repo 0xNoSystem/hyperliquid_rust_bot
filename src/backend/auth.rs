@@ -3,8 +3,8 @@ use std::sync::Arc;
 use alloy::primitives::Address;
 use alloy_primitives::Signature as AlloySig;
 use axum::extract::FromRequestParts;
-use axum::http::request::Parts;
 use axum::http::StatusCode;
+use axum::http::request::Parts;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 
@@ -33,23 +33,19 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         // Try Authorization header first, then query param `token` (for WebSocket)
         let token = extract_token(parts).ok_or(StatusCode::UNAUTHORIZED)?;
 
-        let claims =
-            verify_jwt(&token, &state.jwt_secret).map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let claims = verify_jwt(&token, &state.jwt_secret).map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-        Ok(AuthUser {
-            pubkey: claims.sub,
-        })
+        Ok(AuthUser { pubkey: claims.sub })
     }
 }
 
 fn extract_token(parts: &Parts) -> Option<String> {
     // 1. Authorization: Bearer <token>
-    if let Some(auth_header) = parts.headers.get("authorization") {
-        if let Ok(value) = auth_header.to_str() {
-            if let Some(token) = value.strip_prefix("Bearer ") {
-                return Some(token.to_string());
-            }
-        }
+    if let Some(auth_header) = parts.headers.get("authorization")
+        && let Ok(value) = auth_header.to_str()
+        && let Some(token) = value.strip_prefix("Bearer ")
+    {
+        return Some(token.to_string());
     }
 
     // 2. Query param ?token=...

@@ -5,6 +5,7 @@ import { KwantChart } from "kwant";
 import { useMemo, useState, useCallback, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
+import { RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatUTC } from "../chart/utils";
 import { MAX_DECIMALS, MIN_ORDER_VALUE } from "../consts";
@@ -102,8 +103,16 @@ export default function MarketDetail() {
         errorMsg,
         dismissError,
         updateMarketStrategy,
+        requestSyncMargin,
     } = useWebSocketContext();
     const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
+    const [syncingMargin, setSyncingMargin] = useState(false);
+    const handleSyncMargin = () => {
+        setSyncingMargin(true);
+        requestSyncMargin()
+            .catch(console.error)
+            .finally(() => setTimeout(() => setSyncingMargin(false), 600));
+    };
 
     const handleConfirmToggle = (asset: string, isPaused: boolean) => {
         if (isPaused) {
@@ -284,7 +293,8 @@ export default function MarketDetail() {
     const currentStrategyName = market.strategyName;
     const pendingStrat = strategies.find((s) => s.id === pendingStrategyId);
     const hasPendingStrategy =
-        pendingStrategyId !== null && pendingStrat?.name !== currentStrategyName;
+        pendingStrategyId !== null &&
+        pendingStrat?.name !== currentStrategyName;
     const showMinOrderWarning =
         market.margin != null &&
         market.lev != null &&
@@ -295,7 +305,9 @@ export default function MarketDetail() {
             setPendingStrategyId(null);
             return;
         }
-        setPendingStrategyId((prev) => (prev === strategyId ? null : strategyId));
+        setPendingStrategyId((prev) =>
+            prev === strategyId ? null : strategyId
+        );
     };
     const cancelStrategyChange = () => setPendingStrategyId(null);
     const applyStrategyChange = async () => {
@@ -464,14 +476,27 @@ export default function MarketDetail() {
                                     </p>
                                 </>
                             )}
-                            <div
-                                className="text-app-text/50 cursor-pointer text-[12px] uppercase"
-                                onClick={() =>
-                                    setMargin(totalMargin + marketMargin)
-                                }
-                            >
-                                Margin (MAX:{" "}
-                                {(totalMargin + marketMargin).toFixed(2)}$)
+                            <div className="flex">
+                                <div
+                                    className="text-app-text/50 cursor-pointer text-[12px] uppercase"
+                                    onClick={() =>
+                                        setMargin(totalMargin + marketMargin)
+                                    }
+                                >
+                                    Margin (MAX:{" "}
+                                    {(totalMargin + marketMargin).toFixed(2)}$)
+                                </div>
+
+                                <button
+                                    onClick={handleSyncMargin}
+                                    disabled={syncingMargin}
+                                    className="text-app-text/40 hover:text-app-text/80 transition-colors disabled:opacity-50"
+                                    title="Refresh margin"
+                                >
+                                    <RefreshCw
+                                        className={`h-3 w-3 ${syncingMargin ? "animate-spin" : ""}`}
+                                    />
+                                </button>
                             </div>
                             <div className="mt-2 items-center gap-2">
                                 <div className="flex flex-col py-4">

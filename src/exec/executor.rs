@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use alloy::signers::local::PrivateKeySigner;
 use flume::Receiver;
-use log::{info, warn};
+use log::warn;
 use tokio::{
     sync::{Mutex, mpsc::Sender},
     time::{Duration, sleep},
@@ -26,6 +26,7 @@ pub struct Executor {
     asset: AssetMeta,
     exchange_client: Arc<ExchangeClient>,
     is_paused: bool,
+    closing: bool,
     resting_orders: HashMap<u64, RestingOrderLocal, BuildHasherDefault<FxHasher>>,
     open_position: Arc<Mutex<Option<OpenPositionLocal>>>,
     decimals: Decimals,
@@ -56,6 +57,7 @@ impl Executor {
             asset,
             exchange_client,
             is_paused: false,
+            closing: false,
             resting_orders: HashMap::default(),
             open_position: Arc::new(Mutex::new(None)),
             decimals,
@@ -79,7 +81,7 @@ impl Executor {
         trigger: Option<TriggerKind>,
     ) -> Result<RestingOrderLocal, Error> {
         let side = order.get_side();
-        let limit_px = dbg!(order.get_px());
+        let limit_px = order.get_px();
         let size = order.get_sz();
 
         let status_res = match order {
@@ -186,35 +188,59 @@ impl Executor {
             })
         }
     }
-    async fn apply_fill(&mut self, fill: TradeFillInfo) -> Option<TradeInfo> {
+    /// Returns (trade_info, is_manual).
+    async fn apply_fill(&mut self, fill: TradeFillInfo) -> (Option<TradeInfo>, bool) {
         let mut clean_up = false;
+        let mut is_manual = false;
 
         if let Some(resting) = self.resting_orders.get_mut(&fill.oid) {
-            assert_eq!(resting.intent, fill.intent);
+            if resting.intent != fill.intent {
+                warn!(
+                    "Resting order intent mismatch: expected {:?}, got {:?}",
+                    resting.intent, fill.intent
+                );
+            }
             if let Some(px) = resting.limit_px
                 && resting.tpsl.is_none()
             {
                 match resting.side {
-                    Side::Long => assert!(fill.price <= px),
-                    Side::Short => assert!(fill.price >= px),
+                    Side::Long => {
+                        if fill.price > px {
+                            warn!("Long fill price {} > limit {}", fill.price, px);
+                        }
+                    }
+                    Side::Short => {
+                        if fill.price < px {
+                            warn!("Short fill price {} < limit {}", fill.price, px);
+                        }
+                    }
                 }
             }
             resting.sz -= fill.sz;
             if roundf!(resting.sz, self.asset.sz_decimals) == 0.0 {
                 clean_up = true;
             }
-        } else if fill.intent != PositionOp::Close {
-            info!("Manual trade opened by the user, will be tracked");
+        } else {
+            is_manual = true;
         }
 
         if clean_up {
             self.resting_orders.remove(&fill.oid);
         }
 
+        let sz_decimals = self.asset.sz_decimals;
         let trade_info = self
             .with_position(|pos| match fill.intent {
                 PositionOp::OpenLong | PositionOp::OpenShort => {
                     if let Some(open_pos) = pos {
+                        if open_pos.side != fill.side {
+                            // Opposite-side fill (e.g. HL reverse) — treat as close.
+                            let trade = open_pos.apply_close_fill(&fill, sz_decimals);
+                            if trade.is_some() {
+                                *pos = None;
+                            }
+                            return trade;
+                        }
                         open_pos.apply_open_fill(&fill);
                     } else {
                         *pos = Some(OpenPositionLocal::new(fill));
@@ -224,7 +250,7 @@ impl Executor {
 
                 PositionOp::Close => {
                     if let Some(open_pos) = pos {
-                        let trade = open_pos.apply_close_fill(&fill, self.asset.sz_decimals);
+                        let trade = open_pos.apply_close_fill(&fill, sz_decimals);
                         if trade.is_some() {
                             *pos = None;
                         }
@@ -236,15 +262,12 @@ impl Executor {
             })
             .await;
 
-        //Clean up resting orders in case of user closing a position manually on HL's interface
+        // Clean up resting orders if user closed position manually on HL
         if trade_info.is_some() && !clean_up {
-            info!(
-                "Trade has been closed manually on the exchange, canceling local resting orders..."
-            );
             let _ = self.cancel_all_resting().await;
         }
 
-        trade_info
+        (trade_info, is_manual)
     }
 
     #[inline]
@@ -270,6 +293,7 @@ impl Executor {
             })
             .await;
         if let Some((side, size)) = params {
+            self.closing = true;
             let asset = self.asset.name.clone();
             let op = PositionOp::Close;
             let trade = Self::into_hl_order(&asset, size, side, None, op, self.decimals);
@@ -292,7 +316,6 @@ impl Executor {
                     if self.is_paused {
                         continue;
                     }
-                    dbg!(&order);
                     let order_params: Option<(Side, f64)> = match order.action {
                         PositionOp::OpenLong => Some((Side::Long, order.size)),
                         PositionOp::OpenShort => Some((Side::Short, order.size)),
@@ -348,24 +371,43 @@ impl Executor {
                 },
 
                 Event(event) => {
+                    if self.is_paused && !self.closing {
+                        continue;
+                    }
                     match event {
-                        ExecEvent::Fill(fill) => match fill.intent {
-                            PositionOp::OpenLong | PositionOp::OpenShort => {
-                                let _ = self.apply_fill(fill).await;
+                        ExecEvent::Fill(fill) => {
+                            let is_open =
+                                matches!(fill.intent, PositionOp::OpenLong | PositionOp::OpenShort);
+                            let is_known = self.resting_orders.contains_key(&fill.oid);
+
+                            // Manual open — ignore entirely, pause & warn
+                            if is_open && !is_known {
+                                self.is_paused = true;
+                                let _ = self.cancel_all_resting().await;
+                                let _ = self
+                                    .market_tx
+                                    .send(MarketCommand::ManualTradeDetected)
+                                    .await;
+                                continue;
                             }
-                            PositionOp::Close => {
-                                if let Some(trade_info) = self.apply_fill(fill).await {
-                                    self.update_market(SendUpdate::Trade(trade_info)).await;
+
+                            let (trade_info, _) = self.apply_fill(fill).await;
+
+                            if let Some(trade_info) = trade_info {
+                                if !is_open {
+                                    self.closing = false;
                                 }
+                                self.update_market(SendUpdate::Trade(trade_info)).await;
                             }
-                        },
+                        }
                         ExecEvent::Funding(funding) => {
-                            self.with_position(|pos|{
-                                if let Some(open_pos) = pos{
+                            self.with_position(|pos| {
+                                if let Some(open_pos) = pos {
                                     open_pos.funding += funding;
-                                }else{
+                                } else {
                                     warn!("Received position funding but there was no OpenPositionLocal");
-                                }}).await;
+                                }
+                            }).await;
                         }
                     }
                 }

@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 
 import { Pause, Play, Trash2, ExternalLink } from "lucide-react";
+import Spinner from "./Spinner";
 import type { MarketInfo, assetMeta, IndicatorName } from "../types";
 import {
     indicatorLabels,
@@ -20,6 +21,7 @@ interface MarketCardProps {
     assetMeta?: assetMeta;
     onTogglePause: (asset: string) => void;
     onRemove: (asset: string) => void;
+    isToggling?: boolean;
 }
 
 const PnlBar = ({ pnl }: { pnl: number | null }) => {
@@ -53,6 +55,7 @@ const MarketCard = ({
     assetMeta,
     onTogglePause,
     onRemove,
+    isToggling,
 }: MarketCardProps) => {
     const {
         asset,
@@ -124,10 +127,13 @@ const MarketCard = ({
                     <div className="flex gap-2">
                         <button
                             onClick={() => onTogglePause(asset)}
-                            className="border-line-subtle bg-glow-4 hover:bg-glow-10 grid h-9 w-9 place-items-center rounded-md border"
+                            disabled={isToggling}
+                            className="border-line-subtle bg-glow-4 hover:bg-glow-10 grid h-9 w-9 place-items-center rounded-md border disabled:opacity-50"
                             title="Toggle"
                         >
-                            {isPaused ? (
+                            {isToggling ? (
+                                <Spinner className="text-app-text/50 h-4 w-4" />
+                            ) : isPaused ? (
                                 <Play className="text-accent-brand-soft h-4 w-4" />
                             ) : (
                                 <Pause className="text-accent-warning-mid h-4 w-4" />
@@ -260,7 +266,9 @@ const MarketCard = ({
                             <div className="text-app-text/50 text-[12px] uppercase">
                                 Strategy
                             </div>
-                            <p className="text-[14px] font-bold">{strategyName}</p>
+                            <p className="text-[14px] font-bold">
+                                {strategyName}
+                            </p>
                         </div>
                     </>
                 )}
