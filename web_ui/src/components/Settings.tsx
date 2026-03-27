@@ -10,7 +10,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContextStore";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
-import { phantomProvider } from "../wallet";
+import { phantomProvider, backpackProvider, type WalletProvider } from "../wallet";
+
+function getActiveProvider(): WalletProvider {
+    const w = window as Record<string, unknown>;
+    const hasBackpack = !!(w.backpack as { ethereum?: unknown } | undefined)?.ethereum;
+    const hasPhantom = !!(w.phantom as { ethereum?: unknown } | undefined)?.ethereum;
+    if (hasBackpack) return backpackProvider;
+    if (hasPhantom) return phantomProvider;
+    throw new Error("No wallet found. Please install Phantom or Backpack.");
+}
 import { API_URL } from "../consts";
 
 function parseSignature(sigHex: string): {
@@ -60,8 +69,10 @@ export default function Settings() {
                 eip712Payload: Record<string, unknown>;
             };
 
-            // 2. Sign — ask Phantom to sign the EIP-712 typed data
-            const sigHex = await phantomProvider.signTypedData(
+            // 2. Sign — detect wallet, reconnect to populate address, then sign
+            const provider = getActiveProvider();
+            await provider.connect();
+            const sigHex = await provider.signTypedData(
                 JSON.stringify(eip712Payload)
             );
             const signature = parseSignature(sigHex);

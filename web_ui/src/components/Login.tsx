@@ -4,13 +4,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
     type WalletProvider,
     phantomProvider,
+    backpackProvider,
     authenticateWallet,
 } from "../wallet";
 import { useAuth } from "../context/AuthContextStore";
 import RotatingCube from "./Cube";
 import { BackgroundFX } from "./BackgroundFX";
 
-const wallets: WalletProvider[] = [phantomProvider];
+const wallets: WalletProvider[] = [phantomProvider, backpackProvider];
 
 export default function Login() {
     const [error, setError] = useState<string | null>(null);
@@ -23,7 +24,7 @@ export default function Login() {
         setConnecting(true);
         try {
             if (!wallet.isAvailable()) {
-                window.open("https://phantom.app/", "_blank");
+                if (wallet.downloadUrl) window.open(wallet.downloadUrl, "_blank");
                 return;
             }
             const { token, address } = await authenticateWallet(wallet);
