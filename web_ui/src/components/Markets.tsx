@@ -1,6 +1,13 @@
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Power, Pause, KeyRound, RefreshCw, CheckCircle } from "lucide-react";
+import {
+    Plus,
+    Power,
+    Pause,
+    KeyRound,
+    RefreshCw,
+    CheckCircle,
+} from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import MarketCard from "./MarketCard";
 import { AddMarket } from "./AddMarket";
@@ -35,7 +42,9 @@ export default function MarketsPage() {
     useEffect(() => {
         const state = location.state as { agentApproved?: boolean } | null;
         if (state?.agentApproved) {
-            setSuccessBanner("Trading agent approved — your API key is secured.");
+            setSuccessBanner(
+                "Trading agent approved — your API key is secured."
+            );
             window.history.replaceState({}, "");
             const timer = setTimeout(() => setSuccessBanner(null), 5000);
             return () => clearTimeout(timer);
@@ -125,9 +134,9 @@ export default function MarketsPage() {
     };
 
     const handleRestoreCached = (asset: string) => {
-        setAddInitialAsset(asset);        
+        setAddInitialAsset(asset);
         setShowAdd(true);
-    }
+    };
 
     const handleSyncMargin = () => {
         setSyncingMargin(true);

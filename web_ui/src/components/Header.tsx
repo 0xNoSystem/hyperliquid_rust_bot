@@ -51,7 +51,7 @@ const Header: React.FC = () => {
                 </Link>
 
                 {/* Desktop nav */}
-                <div className="hidden md:flex items-center gap-2">
+                <div className="hidden items-center gap-2 md:flex">
                     <Link to="/backtest/BTC">
                         <div className="hover:border-accent-brand-strong/60 text-app-text relative w-fit rounded border px-3 py-1 text-sm">
                             BACKTESTING
@@ -81,8 +81,14 @@ const Header: React.FC = () => {
                         className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-glow-5 inline-flex items-center gap-2 rounded-md border px-3 py-1"
                         aria-label={`Switch to ${isLight ? "dark" : "light"} theme`}
                     >
-                        {isLight ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-                        <span className="text-[12px]">{isLight ? "Dark" : "Light"}</span>
+                        {isLight ? (
+                            <Moon className="h-4 w-4" />
+                        ) : (
+                            <Sun className="h-4 w-4" />
+                        )}
+                        <span className="text-[12px]">
+                            {isLight ? "Dark" : "Light"}
+                        </span>
                     </button>
                     <Link
                         to="/settings"
@@ -93,11 +99,17 @@ const Header: React.FC = () => {
                     <button
                         onClick={handleDisconnect}
                         className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-accent-danger-soft/20 hover:text-accent-danger-soft inline-flex items-center gap-2 rounded-md border px-3 py-1"
-                        title={address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "Disconnect"}
+                        title={
+                            address
+                                ? `${address.slice(0, 6)}…${address.slice(-4)}`
+                                : "Disconnect"
+                        }
                     >
                         <LogOut className="h-4 w-4" />
                         <span className="text-[12px]">
-                            {address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "Disconnect"}
+                            {address
+                                ? `${address.slice(0, 6)}…${address.slice(-4)}`
+                                : "Disconnect"}
                         </span>
                     </button>
                 </div>
@@ -105,21 +117,25 @@ const Header: React.FC = () => {
                 {/* Mobile burger */}
                 <button
                     type="button"
-                    className="border-line-subtle bg-app-surface-2 text-app-text md:hidden inline-flex items-center justify-center rounded-md border p-2"
+                    className="border-line-subtle bg-app-surface-2 text-app-text inline-flex items-center justify-center rounded-md border p-2 md:hidden"
                     onClick={() => setMenuOpen((o) => !o)}
                     aria-label="Toggle menu"
                 >
-                    {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                    {menuOpen ? (
+                        <X className="h-5 w-5" />
+                    ) : (
+                        <Menu className="h-5 w-5" />
+                    )}
                 </button>
             </div>
 
             {/* Mobile dropdown */}
             {menuOpen && (
-                <div className="border-line-subtle bg-app-surface-1 md:hidden border-t px-6 py-3 flex flex-col gap-2">
+                <div className="border-line-subtle bg-app-surface-1 flex flex-col gap-2 border-t px-6 py-3 md:hidden">
                     <Link
                         to="/backtest/BTC"
                         onClick={() => setMenuOpen(false)}
-                        className="hover:border-accent-brand-strong/60 text-app-text rounded border px-3 py-2 text-sm text-center"
+                        className="hover:border-accent-brand-strong/60 text-app-text rounded border px-3 py-2 text-center text-sm"
                     >
                         Backtesting
                     </Link>
@@ -143,11 +159,20 @@ const Header: React.FC = () => {
                     </a>
                     <button
                         type="button"
-                        onClick={() => { toggleTheme(); setMenuOpen(false); }}
+                        onClick={() => {
+                            toggleTheme();
+                            setMenuOpen(false);
+                        }}
                         className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-glow-5 inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2"
                     >
-                        {isLight ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-                        <span className="text-[12px]">{isLight ? "Dark" : "Light"}</span>
+                        {isLight ? (
+                            <Moon className="h-4 w-4" />
+                        ) : (
+                            <Sun className="h-4 w-4" />
+                        )}
+                        <span className="text-[12px]">
+                            {isLight ? "Dark" : "Light"}
+                        </span>
                     </button>
                     <Link
                         to="/settings"
@@ -157,12 +182,17 @@ const Header: React.FC = () => {
                         Settings
                     </Link>
                     <button
-                        onClick={() => { setMenuOpen(false); handleDisconnect(); }}
+                        onClick={() => {
+                            setMenuOpen(false);
+                            handleDisconnect();
+                        }}
                         className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-accent-danger-soft/20 hover:text-accent-danger-soft inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2"
                     >
                         <LogOut className="h-4 w-4" />
                         <span className="text-[12px]">
-                            {address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "Disconnect"}
+                            {address
+                                ? `${address.slice(0, 6)}…${address.slice(-4)}`
+                                : "Disconnect"}
                         </span>
                     </button>
                 </div>

@@ -37,7 +37,8 @@ export const phantomProvider: WalletProvider = {
             const accounts = (await provider.request({
                 method: "eth_requestAccounts",
             })) as string[];
-            if (!accounts[0]) throw new Error("No account returned from Phantom");
+            if (!accounts[0])
+                throw new Error("No account returned from Phantom");
             return accounts[0];
         }
 
@@ -60,9 +61,11 @@ export const phantomProvider: WalletProvider = {
         const address = provider.selectedAddress;
         if (!address) throw new Error("Wallet not connected");
 
-        const hex = "0x" + Array.from(new TextEncoder().encode(message))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
+        const hex =
+            "0x" +
+            Array.from(new TextEncoder().encode(message))
+                .map((b) => b.toString(16).padStart(2, "0"))
+                .join("");
 
         return (await provider.request({
             method: "personal_sign",

@@ -134,8 +134,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
             if (res.ok) {
                 deleteCachedMarket(info.asset);
                 onClose();
-            }
-            else console.error("Submit failed");
+            } else console.error("Submit failed");
         } catch (err) {
             console.error("Submit failed", err);
         }

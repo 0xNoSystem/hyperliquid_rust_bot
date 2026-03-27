@@ -24,7 +24,8 @@ export default function Login() {
         setConnecting(true);
         try {
             if (!wallet.isAvailable()) {
-                if (wallet.downloadUrl) window.open(wallet.downloadUrl, "_blank");
+                if (wallet.downloadUrl)
+                    window.open(wallet.downloadUrl, "_blank");
                 return;
             }
             const { token, address } = await authenticateWallet(wallet);
