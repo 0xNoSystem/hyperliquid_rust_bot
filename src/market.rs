@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use rhai::Engine;
 
-use hyperliquid_rust_sdk::{AssetMeta, Error, ExchangeClient, ExchangeResponseStatus};
+use alloy::signers::local::PrivateKeySigner;
+use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, Error, ExchangeClient, ExchangeResponseStatus};
 
 use crate::backend::scripting::CompiledStrategy;
 use crate::broadcast::{CacheCmdIn, CandleCount, CandleSnapshotRequest, PriceData};
@@ -119,10 +120,8 @@ impl Market {
     async fn init(&mut self) -> Result<Option<f64>, Error> {
         //check if lev > max_lev
         let lev = self.lev.min(self.asset.max_leverage);
-        if lev != self.lev {
-            Self::update_lev(&self.exchange_client, self.asset.name.as_str(), lev).await?;
-            self.lev = lev;
-        }
+        Self::update_lev(&self.exchange_client, self.asset.name.as_str(), lev).await?;
+        self.lev = lev;
 
         let engine_tx = self.senders.engine_tx.clone();
         let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(self.lev)));
@@ -444,6 +443,47 @@ impl Market {
                     )));
                 }
 
+                MarketCommand::AuthError(msg) => {
+                    log::warn!("[market:{}] auth error from executor: {msg}", asset.name);
+                    let _ = bot_update_tx.send(MarketUpdate::AuthFailed(msg));
+                }
+
+                MarketCommand::ReloadWallet(signer) => {
+                    match ExchangeClient::new(
+                        None,
+                        signer.clone(),
+                        Some(BaseUrl::Mainnet),
+                        None,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(new_client) => {
+                            self.exchange_client = new_client;
+                            let exec_client = Arc::new(
+                                ExchangeClient::new(
+                                    None,
+                                    signer,
+                                    Some(BaseUrl::Mainnet),
+                                    None,
+                                    None,
+                                )
+                                .await
+                                .expect("ExchangeClient creation failed after first succeeded"),
+                            );
+                            let _ = self
+                                .senders
+                                .exec_tx
+                                .send_async(ExecCommand::ReloadWallet(exec_client))
+                                .await;
+                            log::info!("[market:{}] hot-reloaded wallet", asset.name);
+                        }
+                        Err(e) => {
+                            log::error!("[market:{}] failed to reload wallet: {e}", asset.name);
+                        }
+                    }
+                }
+
                 MarketCommand::Pause => {
                     let _ = self
                         .senders
@@ -509,6 +549,10 @@ pub enum MarketCommand {
     UpdateIndicatorData(Vec<IndicatorData>),
     EngineStateChange(EngineView),
     ManualTradeDetected,
+    #[serde(skip)]
+    ReloadWallet(PrivateKeySigner),
+    #[serde(skip)]
+    AuthError(String),
     Resume,
     Pause,
     Close,
@@ -531,6 +575,7 @@ pub enum MarketUpdate {
     MarginUpdate(AssetMargin),
     MarketInfoUpdate((String, EditMarketInfo)),
     RelayToFrontend(UpdateFrontend),
+    AuthFailed(String),
 }
 
 pub type AssetPrice = (String, f64);

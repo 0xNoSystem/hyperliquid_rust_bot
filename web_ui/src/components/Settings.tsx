@@ -1,19 +1,33 @@
 import { useState } from "react";
 import {
-    Link as LinkIcon,
     ArrowLeft,
     AlertCircle,
     CheckCircle,
     ShieldCheck,
+    ExternalLink,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContextStore";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
+import { phantomProvider } from "../wallet";
 import { API_URL } from "../consts";
 
+function parseSignature(sigHex: string): {
+    r: string;
+    s: string;
+    v: number;
+} {
+    const raw = sigHex.startsWith("0x") ? sigHex.slice(2) : sigHex;
+    const r = "0x" + raw.slice(0, 64);
+    const s = "0x" + raw.slice(64, 128);
+    let v = parseInt(raw.slice(128, 130), 16);
+    if (v < 27) v += 27;
+    return { r, s, v };
+}
+
 export default function Settings() {
-    const [apiKey, setApiKey] = useState("");
+    const [agentName, setAgentName] = useState("");
     const [saving, setSaving] = useState(false);
     const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(
         null
@@ -23,32 +37,62 @@ export default function Settings() {
     const { token } = useAuth();
     const { needsApiKey, setNeedsApiKey } = useWebSocketContext();
 
-    const saveApiKey = async () => {
-        if (!apiKey.trim()) return;
+    const approveAgent = async () => {
         setSaving(true);
         setStatus(null);
         try {
-            const res = await fetch(`${API_URL}/api-key`, {
+            // 1. Prepare — get EIP-712 payload from backend
+            const prepareRes = await fetch(`${API_URL}/agent/prepare`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ api_key: apiKey }),
+                body: JSON.stringify({
+                    agent_name: agentName.trim() || null,
+                }),
             });
-            if (!res.ok) {
-                const text = await res.text();
-                throw new Error(text || `HTTP ${res.status}`);
+            if (!prepareRes.ok) {
+                const text = await prepareRes.text();
+                throw new Error(text || `Prepare failed: ${prepareRes.status}`);
             }
-            setStatus({ ok: true, msg: "API key saved securely" });
+            const { eip712Payload } = (await prepareRes.json()) as {
+                eip712Payload: Record<string, unknown>;
+            };
+
+            // 2. Sign — ask Phantom to sign the EIP-712 typed data
+            const sigHex = await phantomProvider.signTypedData(
+                JSON.stringify(eip712Payload)
+            );
+            const signature = parseSignature(sigHex);
+
+            // 3. Approve — send signature to backend, which POSTs to Hyperliquid
+            const approveRes = await fetch(`${API_URL}/agent/approve`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ signature }),
+            });
+            if (!approveRes.ok) {
+                const text = await approveRes.text();
+                throw new Error(
+                    text || `Approval failed: ${approveRes.status}`
+                );
+            }
+
             setNeedsApiKey(false);
-            setApiKey("");
+            navigate("/", {
+                replace: true,
+                state: { agentApproved: true },
+            });
         } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : "Failed to save";
+            const msg =
+                e instanceof Error ? e.message : "Agent approval failed";
             setStatus({ ok: false, msg });
         } finally {
             setSaving(false);
-            setTimeout(() => setStatus(null), 4000);
         }
     };
 
@@ -67,112 +111,89 @@ export default function Settings() {
             </motion.button>
 
             {needsApiKey ? (
-                <>
-                    <div className="border-line-subtle bg-surface-pane text-app-text/70 my-14 rounded-md border p-5 text-sm">
-                        <h3 className="text-app-text mb-3 text-base font-semibold">
-                            How to generate your API key
-                        </h3>
-                        <ol className="list-inside list-decimal space-y-2">
-                            <li>
-                                Visit the
-                                <a
-                                    href="https://app.hyperliquid.xyz/API"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-accent-info-link ml-1 hover:underline"
-                                >
-                                    Hyperliquid API page
-                                </a>
-                                .
-                            </li>
-                            <li>
-                                Connect your wallet (the same one you logged in
-                                with) to authenticate.
-                            </li>
-                            <li>
-                                Enter an API key name — you can name it whatever
-                                you like.
-                            </li>
-                            <li>
-                                Click "Generate", then click "Authorize API
-                                Wallet".
-                            </li>
-                            <li>
-                                Select the number of days you'd like this key to
-                                be valid for.
-                            </li>
-                            <li>
-                                Copy the generated{" "}
-                                <strong>Private API Key</strong> (shown once
-                                only in a red box). Store it securely.
-                            </li>
-                            <li>
-                                Return to this page, paste the key below, and
-                                click "Save API Key".
-                            </li>
-                        </ol>
-                        <p className="text-accent-danger-soft mt-4 italic">
-                            This key allows the bot to trade on your behalf. It
-                            does not allow fund transfers or withdrawals. You
-                            can revoke it anytime from the Hyperliquid API page.
-                        </p>
-                    </div>
+                <div className="border-line-subtle bg-surface-pane relative mx-auto mt-14 max-w-2xl rounded-md border p-6">
+                    <h2 className="mb-2 text-xl font-semibold">
+                        Authorize Trading Agent
+                    </h2>
+                    <p className="text-app-text/60 mb-6 text-sm">
+                        Sign a message with your wallet to authorize a
+                        restricted trading agent. This agent can place orders on
+                        your behalf but{" "}
+                        <strong>cannot transfer or withdraw funds</strong>.
+                    </p>
 
-                    <div className="border-line-subtle bg-surface-pane relative mx-auto max-w-2xl rounded-md border p-6">
-                        <h2 className="mb-4 text-xl font-semibold">API Key</h2>
-                        <p className="text-app-text/60 mb-6 text-sm">
-                            This key only authorizes trading through the bot. It{" "}
-                            <strong>cannot move funds</strong>. Generate one
-                            from the
-                            <a
-                                href="https://app.hyperliquid.xyz/API"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-accent-info-link ml-1 inline-flex items-center gap-1 hover:underline"
-                            >
-                                Hyperliquid API Page{" "}
-                                <LinkIcon className="h-4 w-4" />
-                            </a>
-                        </p>
-
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-app-text/70 mb-1 block text-sm">
-                                    PRIVATE API KEY
-                                </label>
-                                <input
-                                    type="password"
-                                    className="border-line-subtle bg-app-surface-4 text-app-text w-full rounded-md border px-3 py-2"
-                                    value={apiKey}
-                                    onChange={(e) => setApiKey(e.target.value)}
-                                    placeholder="Enter your Hyperliquid API key"
-                                />
-                            </div>
-
-                            <button
-                                onClick={saveApiKey}
-                                disabled={saving || !apiKey.trim()}
-                                className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover mt-4 w-full rounded-md border px-4 py-2 disabled:opacity-50"
-                            >
-                                {saving ? "Saving..." : "Save API Key"}
-                            </button>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-app-text/70 mb-1 block text-sm">
+                                AGENT NAME{" "}
+                                <span className="text-app-text/40">
+                                    (optional)
+                                </span>
+                            </label>
+                            <input
+                                type="text"
+                                className="border-line-subtle bg-app-surface-4 text-app-text w-full rounded-md border px-3 py-2"
+                                value={agentName}
+                                onChange={(e) => setAgentName(e.target.value)}
+                                placeholder="e.g. my-bot"
+                                disabled={saving}
+                            />
+                            <p className="text-app-text/40 mt-1 text-xs">
+                                Visible on Hyperliquid's API page for key
+                                management
+                            </p>
                         </div>
+
+                        <button
+                            onClick={approveAgent}
+                            disabled={saving}
+                            className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover mt-2 w-full rounded-md border px-4 py-2 disabled:opacity-50"
+                        >
+                            {saving
+                                ? "Waiting for signature..."
+                                : "Approve Agent"}
+                        </button>
                     </div>
-                </>
+
+                    <p className="text-app-text/40 mt-5 text-center text-xs">
+                        You can revoke this agent anytime from the{" "}
+                        <a
+                            href="https://app.hyperliquid.xyz/API"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-accent-info-link inline-flex items-center gap-1 hover:underline"
+                        >
+                            Hyperliquid API page
+                            <ExternalLink className="h-3 w-3" />
+                        </a>
+                    </p>
+                </div>
             ) : (
                 <div className="border-line-subtle bg-surface-pane relative mx-auto mt-14 max-w-2xl rounded-md border p-6">
                     <div className="flex items-center gap-3">
                         <ShieldCheck className="text-accent-success h-8 w-8" />
                         <div>
                             <h2 className="text-xl font-semibold">
-                                API Key Connected
+                                Trading Agent Active
                             </h2>
                             <p className="text-app-text/60 text-sm">
-                                Your Hyperliquid API key is configured and the
-                                bot is running.
+                                Your trading agent is authorized and the bot is
+                                running.
                             </p>
                         </div>
                     </div>
+                    <p className="text-app-text/40 mt-4 text-xs">
+                        Manage your API keys on the{" "}
+                        <a
+                            href="https://app.hyperliquid.xyz/API"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-accent-info-link inline-flex items-center gap-1 hover:underline"
+                        >
+                            Hyperliquid API page
+                            <ExternalLink className="h-3 w-3" />
+                        </a>
+                    </p>
                 </div>
             )}
 

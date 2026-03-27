@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-hyperliquid_rust_sdk = { git = "https://github.com/0xNoSystem/hyperliquid-rust-sdk.git", branch = "main" }
+hyperliquid_rust_sdk = { path = "../../hyperliquid-rust-sdk" }
 kwant = { git = "https://github.com/0xNoSystem/Indicators_rs.git", branch = "main" }
 env_logger = "0.10.0"
 http = "0.2.9"

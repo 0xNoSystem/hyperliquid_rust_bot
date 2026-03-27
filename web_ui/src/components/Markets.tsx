@@ -1,7 +1,7 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Power, Pause, KeyRound, RefreshCw } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Plus, Power, Pause, KeyRound, RefreshCw, CheckCircle } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
 import MarketCard from "./MarketCard";
 import { AddMarket } from "./AddMarket";
 import { CachedMarket } from "./CachedMarket";
@@ -29,6 +29,18 @@ export default function MarketsPage() {
     } = useWebSocketContext();
 
     const navigate = useNavigate();
+    const location = useLocation();
+    const [successBanner, setSuccessBanner] = useState<string | null>(null);
+
+    useEffect(() => {
+        const state = location.state as { agentApproved?: boolean } | null;
+        if (state?.agentApproved) {
+            setSuccessBanner("Trading agent approved — your API key is secured.");
+            window.history.replaceState({}, "");
+            const timer = setTimeout(() => setSuccessBanner(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [location.state]);
 
     const [marketToRemove, setMarketToRemove] = useState<string | null>(null);
     const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
@@ -111,6 +123,11 @@ export default function MarketsPage() {
         setShowAdd(false);
         setAddInitialAsset(undefined);
     };
+
+    const handleRestoreCached = (asset: string) => {
+        setAddInitialAsset(asset);        
+        setShowAdd(true);
+    }
 
     const handleSyncMargin = () => {
         setSyncingMargin(true);
@@ -300,6 +317,22 @@ export default function MarketsPage() {
             </div>
             {/* Error toast */}
             <ErrorBanner message={errorMsg} onDismiss={dismissError} />
+            {/* Success banner */}
+            <AnimatePresence>
+                {successBanner && (
+                    <motion.div
+                        initial={{ y: -16, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: -16, opacity: 0 }}
+                        className="fixed top-6 left-1/2 z-50 -translate-x-1/2"
+                    >
+                        <div className="border-accent-success-strong/40 bg-surface-success text-success-faint flex items-center gap-2 rounded-md border px-4 py-2 shadow">
+                            <CheckCircle className="h-4 w-4" />
+                            <span className="text-sm">{successBanner}</span>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
             {/* Add Market modal */}
             {showAdd && (
                 <div className="fixed inset-0 z-50">

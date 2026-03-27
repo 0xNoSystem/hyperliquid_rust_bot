@@ -8,7 +8,7 @@ use axum::http::request::Parts;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 
-use super::app_state::AppState;
+use super::app_state::{AppState, PendingAgentStore};
 
 /// JWT claims.
 #[derive(Debug, Serialize, Deserialize)]
@@ -159,6 +159,26 @@ pub fn spawn_nonce_pruner(nonces: super::app_state::NonceStore) {
             interval.tick().await;
             let mut store = nonces.write().await;
             store.retain(|_, (_, created_at)| created_at.elapsed().as_secs() < 300);
+        }
+    });
+}
+
+/// Generate a u64 nonce from current timestamp (milliseconds).
+pub fn timestamp_nonce() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+/// Spawn a background task that prunes expired pending agents every 60 seconds.
+pub fn spawn_pending_agent_pruner(store: PendingAgentStore) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let mut s = store.write().await;
+            s.retain(|_, pending| pending.created_at.elapsed().as_secs() < 300);
         }
     });
 }

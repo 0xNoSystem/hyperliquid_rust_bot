@@ -1,9 +1,11 @@
 use crate::HLTradeInfo;
 use hyperliquid_rust_sdk::{
-    ClientLimit, ClientOrder, ClientOrderRequest, ClientTrigger, Error, MarketOrderParams,
+    ClientLimit, ClientOrder, ClientOrderRequest, ClientTrigger, Error, ExchangeClient,
+    MarketOrderParams,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 use crate::{OpenPosInfo, get_time_now, roundf};
 
@@ -12,6 +14,7 @@ pub enum ExecCommand {
     Order(EngineOrder),
     Control(ExecControl),
     Event(ExecEvent),
+    ReloadWallet(Arc<ExchangeClient>),
 }
 
 #[derive(Copy, Clone, Debug)]

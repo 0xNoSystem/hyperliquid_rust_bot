@@ -3,6 +3,7 @@ use hyperliquid_rust_bot::{
     BaseUrl,
     backend::{
         AppState, BotManager, WsConnections, create_engine, create_router, spawn_nonce_pruner,
+        spawn_pending_agent_pruner,
     },
     broadcast::{Broadcaster, CandleCache},
 };
@@ -42,9 +43,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ws_connections: WsConnections = Arc::new(RwLock::new(HashMap::new()));
     let nonces = Arc::new(RwLock::new(HashMap::new()));
+    let pending_agents = Arc::new(RwLock::new(HashMap::new()));
 
-    // Spawn nonce pruner
+    // Spawn pruners
     spawn_nonce_pruner(nonces.clone());
+    spawn_pending_agent_pruner(pending_agents.clone());
 
     let state = Arc::new(AppState {
         pool,
@@ -55,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         jwt_secret,
         encryption_key: encryption_key.try_into().unwrap(),
         nonces,
+        pending_agents,
     });
 
     let app = create_router(state);

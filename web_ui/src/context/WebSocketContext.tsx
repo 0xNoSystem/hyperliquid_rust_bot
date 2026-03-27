@@ -249,7 +249,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
             if ("marketInfoEdit" in payload) {
                 const [asset, edit] = payload.marketInfoEdit;
-                setIsOffline(false);
                 setMarkets((prev) =>
                     prev.map((m) => {
                         if (m.asset !== asset) return m;
@@ -311,7 +310,13 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 return;
             }
 
+            if ("needsApiKey" in payload) {
+                setNeedsApiKey(payload.needsApiKey as boolean);
+                return;
+            }
+
             if ("updateTotalMargin" in payload) {
+                setIsOffline(false);
                 setTotalMargin(payload.updateTotalMargin);
                 setNeedsApiKey(false);
                 return;

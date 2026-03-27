@@ -4,6 +4,7 @@ export interface WalletProvider {
     isAvailable(): boolean;
     connect(): Promise<string>;
     signMessage(message: string): Promise<string>;
+    signTypedData(payload: string): Promise<string>;
 }
 
 export interface ConnectedWallet {

@@ -108,6 +108,7 @@ pub enum UpdateFrontend {
     BacktestResult(Box<BacktestResultUpdate>),
     LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),
     Status(BackendStatus),
+    NeedsApiKey(bool),
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]

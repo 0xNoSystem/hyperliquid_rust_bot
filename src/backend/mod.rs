@@ -10,7 +10,7 @@ pub(crate) mod scripting;
 pub use app_state::{
     AppState, CachedStrategy, NonceStore, StrategyCache, WsConnections, broadcast_to_user,
 };
-pub use auth::{AuthUser, spawn_nonce_pruner};
+pub use auth::{AuthUser, spawn_nonce_pruner, spawn_pending_agent_pruner};
 pub use bot_manager::BotManager;
 pub use db::{StrategyRow, TradeRow};
 pub use routes::create_router;

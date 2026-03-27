@@ -113,6 +113,18 @@ impl BotManager {
         Ok(cmd_tx)
     }
 
+    /// Hot-reload the wallet for an existing bot (e.g. after agent re-approval).
+    /// Returns true if the bot existed and was notified.
+    pub async fn reload_wallet(&self, pubkey: &str, signer: PrivateKeySigner) -> bool {
+        if let Some(handle) = self.bots.get(pubkey) {
+            let _ = handle.cmd_tx.send(BotEvent::ReloadWallet(signer)).await;
+            info!("Sent ReloadWallet to bot for user {}", pubkey);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Remove a bot for a given user (sends Kill event first).
     pub async fn remove_bot(&mut self, pubkey: &str) {
         if let Some(handle) = self.bots.remove(pubkey) {

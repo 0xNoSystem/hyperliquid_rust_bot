@@ -27,7 +27,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     strategies,
     initialAsset,
 }) => {
-    const { sendCommand } = useWebSocketContext();
+    const { sendCommand, deleteCachedMarket } = useWebSocketContext();
     const [asset, setAsset] = useState(initialAsset ?? "");
     const [marginType, setMarginType] = useState<"alloc" | "amount">("alloc");
     const [marginValue, setMarginValue] = useState(0.1);
@@ -131,7 +131,10 @@ export const AddMarket: React.FC<AddMarketProps> = ({
 
         try {
             const res = await sendCommand({ addMarket: info });
-            if (res.ok) onClose();
+            if (res.ok) {
+                deleteCachedMarket(info.asset);
+                onClose();
+            }
             else console.error("Submit failed");
         } catch (err) {
             console.error("Submit failed", err);

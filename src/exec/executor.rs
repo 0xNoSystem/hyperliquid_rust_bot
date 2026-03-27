@@ -349,6 +349,11 @@ impl Executor {
                                 self.resting_orders
                                     .insert(order_response.oid, order_response);
                             }
+                            Err(Error::AuthError(msg)) => {
+                                warn!("[executor] auth error: {msg}");
+                                let _ = self.market_tx.send(MarketCommand::AuthError(msg)).await;
+                                self.is_paused = true;
+                            }
                             Err(e) => warn!("{}", e),
                         }
                     }
@@ -369,6 +374,14 @@ impl Executor {
                         self.kill().await;
                     }
                 },
+
+                ReloadWallet(new_client) => {
+                    log::info!(
+                        "[executor] hot-reloaded exchange client for {}",
+                        self.asset.name
+                    );
+                    self.exchange_client = new_client;
+                }
 
                 Event(event) => {
                     if self.is_paused && !self.closing {

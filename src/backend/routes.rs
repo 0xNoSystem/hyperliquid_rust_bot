@@ -36,7 +36,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/strategies/{id}",
             put(update_strategy).delete(delete_strategy),
         )
-        .route("/api-key", post(set_api_key))
+        // Agent approval
+        .route("/agent/prepare", post(prepare_agent))
+        .route("/agent/approve", post(approve_agent_route))
         // WebSocket
         .route("/ws", get(ws_handler))
         // Middleware
@@ -486,60 +488,277 @@ async fn delete_strategy(
     }
 }
 
-// ── API Key Route ────────────────────────────────────────────────────────────
+// ── Agent Approval Routes ────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-struct SetApiKeyPayload {
-    api_key: String,
-}
-
-async fn set_api_key(
+async fn prepare_agent(
     State(state): State<Arc<AppState>>,
     auth: AuthUser,
-    Json(payload): Json<SetApiKeyPayload>,
+    Json(payload): Json<PrepareAgentPayload>,
 ) -> impl IntoResponse {
-    // Validate: must parse as a valid private key
-    let key = payload.api_key.trim();
-    if key
-        .parse::<alloy::signers::local::PrivateKeySigner>()
-        .is_err()
+    log::info!(
+        "[agent/prepare] user={} requested agent preparation",
+        auth.pubkey
+    );
+
+    let agent = alloy::signers::local::PrivateKeySigner::random();
+    let nonce = auth::timestamp_nonce();
+
+    let valid_until = get_time_now() + 180 * 86_400 * 1000; // 6 months in ms
+    let prefix = payload
+        .agent_name
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "kwant".to_string());
+    let agent_name = format!("{prefix} valid_until {valid_until}");
+    log::info!(
+        "[agent/prepare] agent_name={agent_name}, agent_address={:?}, nonce={nonce}",
+        agent.address()
+    );
+
+    let approve_agent = hyperliquid_rust_sdk::ApproveAgent {
+        signature_chain_id: 1, // Ethereum mainnet for frontend signing
+        hyperliquid_chain: "Mainnet".to_string(),
+        agent_address: agent.address(),
+        agent_name: Some(agent_name.clone()),
+        nonce,
+    };
+
+    let eip712_payload = serde_json::json!({
+        "domain": {
+            "name": "HyperliquidSignTransaction",
+            "version": "1",
+            "chainId": 1,
+            "verifyingContract": "0x0000000000000000000000000000000000000000"
+        },
+        "primaryType": "HyperliquidTransaction:ApproveAgent",
+        "types": {
+            "EIP712Domain": [
+                {"name": "name", "type": "string"},
+                {"name": "version", "type": "string"},
+                {"name": "chainId", "type": "uint256"},
+                {"name": "verifyingContract", "type": "address"}
+            ],
+            "HyperliquidTransaction:ApproveAgent": [
+                {"name": "hyperliquidChain", "type": "string"},
+                {"name": "agentAddress", "type": "address"},
+                {"name": "agentName", "type": "string"},
+                {"name": "nonce", "type": "uint64"}
+            ]
+        },
+        "message": {
+            "hyperliquidChain": "Mainnet",
+            "signatureChainId": "0x1",
+            "agentAddress": format!("{:?}", agent.address()),
+            "agentName": agent_name,
+            "nonce": nonce,
+            "type": "approveAgent"
+        }
+    });
+
     {
-        return (StatusCode::BAD_REQUEST, "Invalid API key format").into_response();
+        let mut store = state.pending_agents.write().await;
+        store.insert(
+            auth.pubkey,
+            super::app_state::PendingAgent {
+                agent_signer: agent,
+                approve_agent,
+                created_at: std::time::Instant::now(),
+            },
+        );
     }
 
-    let encrypted = super::crypto::encrypt(&state.encryption_key, key.as_bytes());
+    Json(serde_json::json!({ "eip712Payload": eip712_payload }))
+}
 
-    if let Err(e) = sqlx::query("UPDATE users SET api_key_enc = $1 WHERE pubkey = $2")
-        .bind(&encrypted)
-        .bind(&auth.pubkey)
-        .execute(&state.pool)
+#[derive(Deserialize)]
+struct PrepareAgentPayload {
+    agent_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApproveAgentPayload {
+    signature: SignaturePayload,
+}
+
+#[derive(Deserialize, Serialize)]
+struct SignaturePayload {
+    r: String,
+    s: String,
+    v: u64,
+}
+
+async fn approve_agent_route(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Json(payload): Json<ApproveAgentPayload>,
+) -> impl IntoResponse {
+    log::info!(
+        "[agent/approve] user={} submitting agent approval",
+        auth.pubkey
+    );
+
+    // 1. Pop pending agent
+    let pending = {
+        let mut store = state.pending_agents.write().await;
+        store.remove(&auth.pubkey)
+    };
+    let Some(pending) = pending else {
+        log::warn!("[agent/approve] no pending agent for user={}", auth.pubkey);
+        return (
+            StatusCode::NOT_FOUND,
+            "No pending agent — call /agent/prepare first",
+        )
+            .into_response();
+    };
+    if pending.created_at.elapsed().as_secs() > 300 {
+        log::warn!(
+            "[agent/approve] pending agent expired for user={}",
+            auth.pubkey
+        );
+        return (
+            StatusCode::GONE,
+            "Pending agent expired — call /agent/prepare again",
+        )
+            .into_response();
+    }
+
+    // 2. Serialize action via SDK's Actions enum
+    let action = match serde_json::to_value(hyperliquid_rust_sdk::Actions::ApproveAgent(
+        pending.approve_agent.clone(),
+    )) {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("Failed to serialize ApproveAgent: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // 3. Build exchange payload
+    let exchange_payload = serde_json::json!({
+        "action": action,
+        "nonce": pending.approve_agent.nonce,
+        "signature": {
+            "r": payload.signature.r,
+            "s": payload.signature.s,
+            "v": payload.signature.v
+        },
+        "expiresAfter": null,
+        "isFrontend": true,
+        "vaultAddress": null
+    });
+
+    // 4. POST to Hyperliquid /exchange
+    let body = serde_json::to_string(&exchange_payload).unwrap();
+    log::debug!("[agent/approve] exchange payload: {body}");
+    let client = reqwest::Client::new();
+    let resp = match client
+        .post("https://api.hyperliquid.xyz/exchange")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
         .await
     {
-        log::error!("Failed to store API key for {}: {}", auth.pubkey, e);
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("Hyperliquid exchange request failed: {}", e);
+            return (StatusCode::BAD_GATEWAY, "Failed to reach Hyperliquid").into_response();
+        }
+    };
+
+    let hl_status = resp.status();
+    let hl_body = resp.text().await.unwrap_or_default();
+    log::info!("[agent/approve] HL /exchange responded: status={hl_status}, body={hl_body}");
+
+    if !hl_status.is_success() {
+        log::error!("[agent/approve] Hyperliquid request failed: {hl_body}");
+        return (
+            StatusCode::BAD_GATEWAY,
+            format!("Hyperliquid rejected: {hl_body}"),
+        )
+            .into_response();
+    }
+
+    // HL returns 200 even on errors — check the JSON status field
+    if let Ok(hl_json) = serde_json::from_str::<serde_json::Value>(&hl_body)
+        && hl_json.get("status").and_then(|s| s.as_str()) == Some("err")
+    {
+        let msg = hl_json
+            .get("response")
+            .and_then(|r| r.as_str())
+            .unwrap_or("Unknown error");
+        log::error!("[agent/approve] Hyperliquid rejected agent approval: {msg}");
+        return (
+            StatusCode::BAD_GATEWAY,
+            format!("Hyperliquid rejected: {msg}"),
+        )
+            .into_response();
+    }
+
+    // 5. Encrypt and store agent private key
+    let agent_key_hex = hex::encode(pending.agent_signer.to_bytes());
+    let encrypted = super::crypto::encrypt(&state.encryption_key, agent_key_hex.as_bytes());
+
+    // valid_until is encoded in agent_name: "{prefix} valid_until {ms_timestamp}"
+    let valid_until: i64 = pending
+        .approve_agent
+        .agent_name
+        .as_deref()
+        .and_then(|n| n.rsplit(' ').next())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    if let Err(e) =
+        sqlx::query("UPDATE users SET api_key_enc = $1, agent_valid_until = $2 WHERE pubkey = $3")
+            .bind(&encrypted)
+            .bind(valid_until)
+            .bind(&auth.pubkey)
+            .execute(&state.pool)
+            .await
+    {
+        log::error!("Failed to store agent key for {}: {}", auth.pubkey, e);
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    // Spawn the bot immediately so the user doesn't have to wait for a command
-    let mut manager = state.bot_manager.write().await;
-    if let Err(e) = manager
-        .get_or_create_bot(
-            &auth.pubkey,
-            &state.pool,
-            &state.encryption_key,
-            state.ws_connections.clone(),
-            state.rhai_engine.clone(),
-            state.strategy_cache.clone(),
-        )
-        .await
+    log::info!(
+        "[agent/approve] agent key stored for user={}, valid_until={}",
+        auth.pubkey,
+        valid_until
+    );
+
+    // 6. Hot-reload existing bot or spawn a new one
     {
-        log::warn!(
-            "Bot creation after API key save failed for {}: {:?}",
-            auth.pubkey,
-            e
-        );
-        // Key is saved, bot will be created on first command — don't fail the request
+        let manager = state.bot_manager.read().await;
+        if manager
+            .reload_wallet(&auth.pubkey, pending.agent_signer)
+            .await
+        {
+            log::info!("[agent/approve] hot-reloaded wallet for existing bot");
+        } else {
+            drop(manager);
+            let mut manager = state.bot_manager.write().await;
+            if let Err(e) = manager
+                .get_or_create_bot(
+                    &auth.pubkey,
+                    &state.pool,
+                    &state.encryption_key,
+                    state.ws_connections.clone(),
+                    state.rhai_engine.clone(),
+                    state.strategy_cache.clone(),
+                )
+                .await
+            {
+                log::warn!(
+                    "Bot creation after agent approval failed for {}: {:?}",
+                    auth.pubkey,
+                    e
+                );
+            }
+        }
     }
 
+    log::info!(
+        "[agent/approve] agent approval complete for user={}",
+        auth.pubkey
+    );
     StatusCode::OK.into_response()
 }
 

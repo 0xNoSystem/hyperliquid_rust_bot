@@ -6,7 +6,7 @@ use crate::{
 use crate::backend::app_state::{StrategyCache, WsConnections, broadcast_to_user};
 use crate::broadcast::{BroadcastCmd, CacheCmdIn, SubReply, SubscribePayload};
 use hyperliquid_rust_sdk::{
-    AssetMeta, AssetPosition, Error, InfoClient, Message, Subscription, UserData,
+    AssetMeta, AssetPosition, BaseUrl, Error, InfoClient, Message, Subscription, UserData,
 };
 use log::warn;
 use rhai::Engine;
@@ -46,6 +46,7 @@ pub struct Bot {
     rhai_engine: Option<Arc<Engine>>,
     strategy_cache: Option<StrategyCache>,
     chain_open_positions: Vec<AssetPosition>,
+    key_valid: bool,
 }
 
 impl Bot {
@@ -78,6 +79,7 @@ impl Bot {
                 rhai_engine: None,
                 strategy_cache: None,
                 chain_open_positions: Vec::new(),
+                key_valid: true,
             },
             bot_tx,
         ))
@@ -315,16 +317,24 @@ impl Bot {
         let margin_market_edit = margin_arc.clone();
         let cancel_token = CancellationToken::new();
 
-        // Margin sync fallback — sends SyncMargin every 30s through the event channel
+        // Margin sync fallback — sends SyncMargin every 30s only if user has active WS
         let margin_token = cancel_token.clone();
         let margin_tx = self._bot_tx.clone();
+        let margin_ws = ws_connections.clone();
+        let margin_pk = pubkey.clone();
         let margin_book_handle = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(30));
             loop {
                 tokio::select! {
                     _ = margin_token.cancelled() => { break; }
                     _ = ticker.tick() => {
-                        let _ = margin_tx.send(BotEvent::SyncMargin).await;
+                        let has_conn = {
+                            let conns = margin_ws.read().await;
+                            conns.get(&margin_pk).is_some_and(|v| !v.is_empty())
+                        };
+                        if has_conn {
+                            let _ = margin_tx.send(BotEvent::SyncMargin).await;
+                        }
                     }
                 }
             }
@@ -335,6 +345,7 @@ impl Bot {
         let upd_ws = ws_connections.clone();
         let upd_pk = pubkey.clone();
         let upd_pool = self.pool.clone();
+        let upd_bot_tx = self._bot_tx.clone();
 
         tokio::spawn(async move {
             while let Some(market_update) = update_rv.recv().await {
@@ -447,6 +458,11 @@ impl Bot {
                     M::RelayToFrontend(cmd) => {
                         broadcast_to_user(&upd_ws, &upd_pk, cmd).await;
                     }
+
+                    M::AuthFailed(msg) => {
+                        log::error!("[bot] auth failed: {msg} — notifying main loop");
+                        let _ = upd_bot_tx.send(BotEvent::AuthFailed(msg)).await;
+                    }
                 }
             }
         });
@@ -516,6 +532,20 @@ impl Bot {
                 },
 
                 Some(event) = self.bot_rv.recv() => {
+                    // Block trading commands when key is invalid
+                    if !self.key_valid {
+                        match &event {
+                            AddMarket(_) | ResumeMarket(_) | ResumeAll | ManualUpdateMargin(_) => {
+                                self.send_to_frontend(UserError(
+                                    "API key expired or revoked. Please re-authorize in Settings.".to_string(),
+                                )).await;
+                                self.send_to_frontend(NeedsApiKey(true)).await;
+                                continue;
+                            }
+                            // Allow ReloadWallet, SyncMargin, PauseAll, PauseMarket, RemoveMarket, GetSession, Kill, etc.
+                            _ => {}
+                        }
+                    }
                     match event {
                         AddMarket(add_market_info) => {
                             let asset = add_market_info.asset.clone();
@@ -654,6 +684,35 @@ impl Bot {
                             }
                         }
 
+                        ReloadWallet(new_signer) => {
+                            log::info!("[bot] reloading wallet for all {} markets", self.markets.len());
+                            self.wallet = Arc::new(
+                                Wallet::new(BaseUrl::Mainnet, self.wallet.pubkey.clone(), new_signer.clone()).await
+                                    .expect("Wallet::new failed during hot-reload"),
+                            );
+                            for (asset, tx) in &self.markets {
+                                if let Err(e) = tx.send(MarketCommand::ReloadWallet(new_signer.clone())).await {
+                                    log::error!("[bot] failed to reload wallet for market {asset}: {e}");
+                                }
+                            }
+                            self.key_valid = true;
+                            self.send_to_frontend(NeedsApiKey(false)).await;
+                            log::info!("[bot] wallet reloaded, key_valid restored");
+                        }
+
+                        AuthFailed(msg) => {
+                            log::error!("[bot] auth failed: {msg} — pausing all markets");
+                            self.key_valid = false;
+                            self.send_to_frontend(NeedsApiKey(true)).await;
+                            self.send_to_frontend(UserError(format!(
+                                "API key rejected: {msg}. Please re-authorize in Settings.",
+                            ))).await;
+                            // Pause all markets
+                            for tx in self.markets.values() {
+                                let _ = tx.send(MarketCommand::Pause).await;
+                            }
+                        }
+
                         ResumeAll => {
                             let mut book = margin_user_edit.lock().await;
                             let blocked: Vec<String> = match book.sync().await {
@@ -779,6 +838,10 @@ pub enum BotEvent {
     MarketComm(BotToMarket),
     ManualUpdateMargin(AssetMargin),
     SyncMargin,
+    #[serde(skip)]
+    ReloadWallet(alloy::signers::local::PrivateKeySigner),
+    #[serde(skip)]
+    AuthFailed(String),
     ResumeAll,
     PauseAll,
     CloseAll,
