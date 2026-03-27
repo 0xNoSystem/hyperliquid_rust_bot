@@ -42,33 +42,14 @@ export const phantomProvider: WalletProvider = {
         }
 
         if (isMobile) {
-            // Mobile flow: redirect to Phantom deeplink
-            const appUrl = window.location.origin; // your DApp URL
-            const deeplink = `https://phantom.app/ul/v1/connect?app_url=${encodeURIComponent(
-                appUrl
-            )}&redirect_link=${encodeURIComponent(appUrl)}`;
-
-            // Redirect user to Phantom app
-            window.location.href = deeplink;
-
-            // Wait for user to come back and resolve address from query param
-            return new Promise<string>((resolve, reject) => {
-                const checkAddress = () => {
-                    const params = new URLSearchParams(window.location.search);
-                    const address = params.get("phantom_address");
-                    if (address) {
-                        resolve(address);
-                    } else {
-                        // Check again in a short interval
-                        setTimeout(checkAddress, 500);
-                    }
-                };
-                // Start checking
-                setTimeout(checkAddress, 500);
-
-                // Timeout fallback after 30 seconds
-                setTimeout(() => reject(new Error("Failed to get Phantom address on mobile")), 30000);
-            });
+            // External mobile browser: open dApp inside Phantom's in-app browser.
+            // Once inside, window.phantom.ethereum is injected and the normal flow runs.
+            // If Phantom is not installed the universal link falls back to phantom.app
+            // where the user can download the app.
+            const current = window.location.href;
+            const ref = window.location.origin;
+            window.location.href = `https://phantom.app/ul/browse/${encodeURIComponent(current)}?ref=${encodeURIComponent(ref)}`;
+            return new Promise<string>(() => {}); // page is navigating away
         }
 
         throw new Error("Phantom wallet is not installed");

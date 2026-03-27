@@ -39,3 +39,4 @@ pub use kwant::indicators::{IndicatorKind, Price, Value};
 
 use arraydeque::{ArrayDeque, behavior::Wrapping};
 pub type CandleHistory = Box<ArrayDeque<Price, { MAX_HISTORY }, Wrapping>>;
+pub type TradeHistory = ArrayDeque<TradeInfo, { MAX_TRADES }, Wrapping>;

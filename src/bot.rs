@@ -412,7 +412,7 @@ impl Bot {
                                     crate::EditMarketInfo::Trade(mut trade) => {
                                         trade.strategy = Some(s.strategy_name.clone());
                                         s.pnl += trade.pnl;
-                                        s.trades.push(trade.clone());
+                                        s.trades.push_back(trade.clone());
 
                                         // Persist to DB
                                         if let Some(ref pool) = upd_pool {

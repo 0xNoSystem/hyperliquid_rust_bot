@@ -64,10 +64,10 @@ impl SignalEngine {
 
         for id in indicators {
             if let Some(tracker) = &mut trackers.get_mut(&id.1) {
-                tracker.add_indicator(id.0, false);
+                tracker.add_indicator(id.0);
             } else {
                 let mut new_tracker = Tracker::new(id.1);
-                new_tracker.add_indicator(id.0, false);
+                new_tracker.add_indicator(id.0);
                 trackers.insert(id.1, Box::new(new_tracker));
             }
         }
@@ -94,10 +94,10 @@ impl SignalEngine {
 
     pub fn add_indicator(&mut self, id: IndexId) {
         if let Some(tracker) = &mut self.trackers.get_mut(&id.1) {
-            tracker.add_indicator(id.0, true);
+            tracker.add_indicator(id.0);
         } else {
             let mut new_tracker = Tracker::new(id.1);
-            new_tracker.add_indicator(id.0, false);
+            new_tracker.add_indicator(id.0);
             self.trackers.insert(id.1, Box::new(new_tracker));
         }
     }
@@ -727,10 +727,10 @@ impl SignalEngine {
 
         for id in &strat_indicators {
             if let Some(tracker) = &mut trackers.get_mut(&id.1) {
-                tracker.add_indicator(id.0, false);
+                tracker.add_indicator(id.0);
             } else {
                 let mut new_tracker = Tracker::new(id.1);
-                new_tracker.add_indicator(id.0, false);
+                new_tracker.add_indicator(id.0);
                 trackers.insert(id.1, Box::new(new_tracker));
             }
         }

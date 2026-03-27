@@ -18,7 +18,7 @@ use crate::signal::{
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, MarketStream, UpdateFrontend};
 use crate::{ExecCommand, ExecControl, ExecEvent, Executor};
 use crate::{MarketInfo, Wallet};
-use crate::{OpenPositionLocal, TimeFrame, TradeInfo};
+use crate::{OpenPositionLocal, TimeFrame, TradeHistory, TradeInfo};
 
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_channel};
 use tokio::sync::{broadcast, oneshot};
@@ -279,11 +279,8 @@ impl Market {
                 MarketCommand::UpdateStrategy(compiled, strat_indicators, name) => {
                     self.strategy_name = name;
 
-                    let new_tfs: HashMap<TimeFrame, CandleCount> = strat_indicators
-                        .iter()
-                        .filter(|(_, tf)| !self.active_tfs.contains(tf))
-                        .map(|(_, tf)| (*tf, 5000))
-                        .collect();
+                    let new_tfs: HashMap<TimeFrame, CandleCount> =
+                        strat_indicators.iter().map(|(_, tf)| (*tf, 5000)).collect();
 
                     let mut map: TimeFrameData = HashMap::default();
                     if !new_tfs.is_empty() {
@@ -342,7 +339,7 @@ impl Market {
                 MarketCommand::EditIndicators(entry_vec) => {
                     let new_tfs: HashMap<TimeFrame, CandleCount> = entry_vec
                         .iter()
-                        .filter(|e| e.edit == EditType::Add && !self.active_tfs.contains(&e.id.1))
+                        .filter(|e| e.edit == EditType::Add)
                         .map(|e| (e.id.1, 5000))
                         .collect();
 
@@ -590,7 +587,7 @@ pub struct MarketState {
     pub is_paused: bool,
     pub position: Option<OpenPositionLocal>,
     pub engine_state: EngineView,
-    pub trades: Vec<TradeInfo>,
+    pub trades: TradeHistory,
 }
 
 impl From<&MarketInfo> for MarketState {
@@ -604,7 +601,7 @@ impl From<&MarketInfo> for MarketState {
             is_paused: info.is_paused,
             position: info.position,
             engine_state: info.engine_state,
-            trades: Vec::new(),
+            trades: TradeHistory::default(),
         }
     }
 }

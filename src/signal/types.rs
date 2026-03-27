@@ -4,13 +4,12 @@ use std::fmt::Debug;
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 
-use arraydeque::{ArrayDeque, behavior::Wrapping};
 use kwant::indicators::*;
 
-use crate::{CandleHistory, IndicatorData, IndicatorKind, MAX_HISTORY, Side, TimeFrame};
+use crate::{IndicatorData, IndicatorKind, Side, TimeFrame};
 use log::warn;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Debug, Copy, Clone)]
 pub struct ExecParams {
@@ -55,25 +54,11 @@ pub enum ExecParam {
     OpenPosition(Option<OpenPosInfo>),
 }
 
-type IndicatorBuffer = Box<ArrayDeque<ArchivedValue, { MAX_HISTORY }, Wrapping>>;
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-pub struct ArchivedValue {
-    pub time: u64,
-    pub value: Value,
-}
-impl ArchivedValue {
-    #[inline]
-    fn new(time: u64, value: Value) -> Self {
-        Self { time, value }
-    }
-}
-
 #[derive(Debug)]
 pub struct Handler {
     pub indicator: Box<dyn Indicator>,
     pub is_active: bool,
     pub closed: bool,
-    pub history: IndicatorBuffer,
 }
 
 impl Handler {
@@ -82,7 +67,6 @@ impl Handler {
             indicator: match_kind(indicator),
             is_active: true,
             closed: false,
-            history: Box::new(ArrayDeque::default()),
         }
     }
 
@@ -98,12 +82,9 @@ impl Handler {
         self.closed = false
     }
 
-    pub fn update_after_close(&mut self, price: Price, prev_close: u64) {
+    pub fn update_after_close(&mut self, price: Price) {
         self.indicator.update_after_close(price);
         self.closed = true;
-        if let Some(v) = self.indicator.get_last() {
-            self.history.push_back(ArchivedValue::new(prev_close, v));
-        }
     }
 
     #[inline]
@@ -151,7 +132,6 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
 
 #[derive(Debug)]
 pub struct Tracker {
-    pub price_data: CandleHistory,
     pub indicators: HashMap<IndicatorKind, Handler, BuildHasherDefault<FxHasher>>,
     tf: TimeFrame,
     prev_close: Option<u64>,
@@ -161,7 +141,6 @@ pub struct Tracker {
 impl Tracker {
     pub fn new(tf: TimeFrame) -> Self {
         Tracker {
-            price_data: Box::new(ArrayDeque::default()),
             indicators: HashMap::default(),
             tf,
             prev_close: None,
@@ -186,8 +165,7 @@ impl Tracker {
                 next += tf_ms;
             }
             self.next_close = Some(next);
-            self.price_data.push_back(price);
-            self.update_indicators_after_close(price, self.prev_close.unwrap());
+            self.update_indicators_after_close(price);
         } else {
             self.update_indicators_before_close(price);
         }
@@ -199,9 +177,9 @@ impl Tracker {
         }
     }
 
-    fn update_indicators_after_close(&mut self, price: Price, prev_close: u64) {
+    fn update_indicators_after_close(&mut self, price: Price) {
         for handler in &mut self.indicators.values_mut() {
-            handler.update_after_close(price, prev_close);
+            handler.update_after_close(price);
         }
     }
 
@@ -228,18 +206,13 @@ impl Tracker {
         let tf_ms = self.tf.to_millis();
         self.prev_close = Some((last.close_time / tf_ms) * tf_ms);
         self.next_close = Some(self.prev_close.unwrap() + tf_ms);
-
-        self.price_data.extend(buffer);
     }
-    pub fn add_indicator(&mut self, kind: IndicatorKind, load: bool) {
+
+    pub fn add_indicator(&mut self, kind: IndicatorKind) {
         if self.indicators.contains_key(&kind) {
             return;
         }
-        let mut handler = Handler::new(kind);
-        if load {
-            handler.load(&*self.price_data);
-        }
-        self.indicators.insert(kind, handler);
+        self.indicators.insert(kind, Handler::new(kind));
     }
 
     pub fn remove_indicator(&mut self, kind: IndicatorKind) {
@@ -282,7 +255,6 @@ impl Tracker {
     }
 
     pub fn reset(&mut self) {
-        self.price_data.clear();
         for handler in self.indicators.values_mut() {
             handler.reset();
         }
