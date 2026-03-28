@@ -57,6 +57,11 @@ const Header: React.FC = () => {
                             BACKTESTING
                         </div>
                     </Link>
+                    <Link to="/lab">
+                        <div className="hover:border-accent-brand-strong/60 text-app-text relative w-fit rounded border px-3 py-1 text-sm">
+                            LAB
+                        </div>
+                    </Link>
                     <a
                         href="https://app.hyperliquid.xyz"
                         target="_blank"
@@ -138,6 +143,13 @@ const Header: React.FC = () => {
                         className="hover:border-accent-brand-strong/60 text-app-text rounded border px-3 py-2 text-center text-sm"
                     >
                         Backtesting
+                    </Link>
+                    <Link
+                        to="/lab"
+                        onClick={() => setMenuOpen(false)}
+                        className="hover:border-accent-brand-strong/60 text-app-text rounded border px-3 py-2 text-center text-sm"
+                    >
+                        Lab
                     </Link>
                     <a
                         href="https://app.hyperliquid.xyz"

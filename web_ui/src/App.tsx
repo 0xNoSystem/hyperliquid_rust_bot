@@ -5,6 +5,7 @@ import Layout from "./components/Layout";
 import Backtest from "./components/Backtest";
 import Settings from "./components/Settings";
 import MarketDetail from "./components/MarketDetail";
+import StratEditor from "./components/StratEditor";
 import Login from "./components/Login";
 import RequireAuth from "./components/RequireAuth";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
@@ -28,6 +29,7 @@ const App: React.FC = () => (
                 <Route index element={<MarketsPage />} />
                 <Route path="asset/:asset" element={<MarketDetail />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="lab" element={<StratEditor />} />
                 <Route
                     path="backtest/:asset"
                     element={

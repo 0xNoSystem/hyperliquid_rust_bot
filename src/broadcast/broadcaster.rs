@@ -164,7 +164,16 @@ impl Broadcaster {
                         log::error!("failed to add subscription: {:?}", e);
                     }
                 }
-                BroadcastCmd::Unsubscribe(asset) => self.unsubscribe_from_feed(asset),
+                BroadcastCmd::Unsubscribe(_asset) => {
+                    /*
+                    //COMMENTED OUT BECAUSE UNSUBSCRIBING WOULD CLEAR CACHE BUILD UP, TODO: ADD A
+                    //FEED IDLE TIMEOUT AND UNSUB AFTER N TIME, OR HAVE A LIST OF LOW VOLUME ASSETS
+                    //THAT GET UNSUBED RIGHT (MAYBE VOLUME THRESHOLD)
+                    if self.is_feed_idle(asset.as_str()){
+                        self.unsubscribe_from_feed(asset);
+                    }
+                    */
+                }
                 BroadcastCmd::SetSubId { asset, sub_id } => self.set_sub_id(&asset, sub_id),
                 BroadcastCmd::CleanUp(asset) => {
                     log::warn!("cleaning up dead feed for {}", &asset);
