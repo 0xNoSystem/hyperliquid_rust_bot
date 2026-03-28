@@ -120,6 +120,7 @@ impl Broadcaster {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn unsubscribe_from_feed(&mut self, asset: String) {
         if let Some(feed) = self.channels.remove(&asset) {
             let _ = self.cache_tx.try_send(CacheCmdIn::DropFeed(asset.clone()));
