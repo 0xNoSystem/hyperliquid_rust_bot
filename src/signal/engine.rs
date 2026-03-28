@@ -686,20 +686,20 @@ impl SignalEngine {
                     self.apply_exec_param(param);
                 }
 
-                EngineCommand::ExecToggle => {
-                    if !self.paused {
-                        self.paused = true;
-                        self.state = EngineState::Idle;
-                        self.pending_orders = None;
+                EngineCommand::ExecPause => {
+                    self.paused = true;
+                    self.state = EngineState::Idle;
+                    self.pending_orders = None;
 
-                        if let Some(sender) = &self.data_tx {
-                            let _ = sender
-                                .send(MarketCommand::EngineStateChange(self.state.into()))
-                                .await;
-                        }
-                    } else {
-                        self.paused = false;
+                    if let Some(sender) = &self.data_tx {
+                        let _ = sender
+                            .send(MarketCommand::EngineStateChange(self.state.into()))
+                            .await;
                     }
+                }
+
+                EngineCommand::ExecResume => {
+                    self.paused = false;
                 }
 
                 EngineCommand::Stop => {
@@ -1010,7 +1010,8 @@ pub enum EngineCommand {
         price_data: Option<TimeFrameData>,
     },
     UpdateExecParams(ExecParam),
-    ExecToggle,
+    ExecPause,
+    ExecResume,
     Stop,
 }
 

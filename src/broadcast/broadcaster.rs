@@ -35,6 +35,7 @@ pub enum BroadcastCmd {
     Subscribe(SubscribePayload),
     Unsubscribe(String),
     SetSubId { asset: String, sub_id: u32 },
+    CleanUp(String),
 }
 
 struct AssetFeed {
@@ -165,6 +166,11 @@ impl Broadcaster {
                 }
                 BroadcastCmd::Unsubscribe(asset) => self.unsubscribe_from_feed(asset),
                 BroadcastCmd::SetSubId { asset, sub_id } => self.set_sub_id(&asset, sub_id),
+                BroadcastCmd::CleanUp(asset) => {
+                    log::warn!("cleaning up dead feed for {}", &asset);
+                    self.channels.remove(&asset);
+                    let _ = self.cache_tx.try_send(CacheCmdIn::DropFeed(asset));
+                }
             }
         }
     }
@@ -271,5 +277,6 @@ async fn spawn_hl_feed(
         }
     }
 
+    let _ = cmd_tx.send(BroadcastCmd::CleanUp(asset));
     Ok(())
 }

@@ -117,15 +117,57 @@ impl Bot {
                 .strategy_cache
                 .as_ref()
                 .ok_or_else(|| Error::Custom("strategy cache not initialized".to_string()))?;
-            let guard = cache.read().await;
-            let entry = guard
-                .get(&sid)
-                .ok_or_else(|| Error::Custom(format!("strategy {} not found in cache", sid)))?;
-            (
-                entry.compiled.clone(),
-                entry.indicators.clone(),
-                entry.name.clone(),
-            )
+
+            // Try cache first
+            let cached = {
+                let guard = cache.read().await;
+                guard.get(&sid).cloned()
+            };
+
+            if let Some(entry) = cached {
+                (entry.compiled, entry.indicators, entry.name)
+            } else {
+                // Cache miss — fetch from DB, compile, and cache
+                let pool = self
+                    .pool
+                    .as_ref()
+                    .ok_or_else(|| Error::Custom("DB pool not initialized".to_string()))?;
+
+                let row = sqlx::query_as::<_, crate::backend::db::StrategyRow>(
+                    "SELECT * FROM strategies WHERE id = $1",
+                )
+                .bind(sid)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| Error::Custom(format!("DB error fetching strategy: {e}")))?
+                .ok_or_else(|| Error::Custom(format!("strategy {sid} not found")))?;
+
+                let compiled = crate::backend::scripting::compile_strategy(
+                    &rhai_engine,
+                    &row.on_idle,
+                    &row.on_open,
+                    &row.on_busy,
+                )
+                .map_err(|e| Error::Custom(format!("strategy {sid} failed to compile: {e}")))?;
+
+                let indicators: Vec<crate::IndexId> =
+                    serde_json::from_value(row.indicators).unwrap_or_default();
+
+                // Cache for next time
+                {
+                    let mut guard = cache.write().await;
+                    guard.insert(
+                        sid,
+                        crate::backend::app_state::CachedStrategy {
+                            compiled: compiled.clone(),
+                            indicators: indicators.clone(),
+                            name: row.name.clone(),
+                        },
+                    );
+                }
+
+                (compiled, indicators, row.name)
+            }
         } else {
             // View-only mode: no trading, just stream price + indicators
             let noop = crate::backend::scripting::CompiledStrategy::noop(&rhai_engine);
@@ -463,6 +505,20 @@ impl Bot {
                         log::error!("[bot] auth failed: {msg} — notifying main loop");
                         let _ = upd_bot_tx.send(BotEvent::AuthFailed(msg)).await;
                     }
+
+                    M::FeedDied(asset) => {
+                        log::warn!("[bot] price feed died for {asset} — removing market");
+                        broadcast_to_user(
+                            &upd_ws,
+                            &upd_pk,
+                            UserError(format!(
+                                "Price feed lost for {}. Market removed — re-add when ready.",
+                                asset
+                            )),
+                        )
+                        .await;
+                        let _ = upd_bot_tx.send(BotEvent::RemoveMarket(asset)).await;
+                    }
                 }
             }
         });
@@ -535,7 +591,7 @@ impl Bot {
                     // Block trading commands when key is invalid
                     if !self.key_valid {
                         match &event {
-                            AddMarket(_) | ResumeMarket(_) | ResumeAll | ManualUpdateMargin(_) => {
+                            AddMarket(_) | ResumeMarket(_) | ResumeAll | ManualUpdateMargin(_) | UpdateMarketStrategy(_) => {
                                 self.send_to_frontend(UserError(
                                     "API key expired or revoked. Please re-authorize in Settings.".to_string(),
                                 )).await;
@@ -626,6 +682,91 @@ impl Bot {
                             }
 
                             self.send_cmd(command.asset, command.cmd).await;
+                        }
+
+                        UpdateMarketStrategy(payload) => {
+                            let rhai_engine = match self.rhai_engine.as_ref() {
+                                Some(e) => e.clone(),
+                                None => {
+                                    self.send_to_frontend(UserError("Engine not initialized".into())).await;
+                                    continue;
+                                }
+                            };
+
+                            let (compiled, indicators, name) = if let Some(sid) = payload.strategy_id {
+                                let cache = match self.strategy_cache.as_ref() {
+                                    Some(c) => c.clone(),
+                                    None => {
+                                        self.send_to_frontend(UserError("Strategy cache not initialized".into())).await;
+                                        continue;
+                                    }
+                                };
+
+                                let cached = { cache.read().await.get(&sid).cloned() };
+                                if let Some(entry) = cached {
+                                    (entry.compiled, entry.indicators, entry.name)
+                                } else {
+                                    let pool = match self.pool.as_ref() {
+                                        Some(p) => p,
+                                        None => {
+                                            self.send_to_frontend(UserError("DB not initialized".into())).await;
+                                            continue;
+                                        }
+                                    };
+                                    let row = match sqlx::query_as::<_, crate::backend::db::StrategyRow>(
+                                        "SELECT * FROM strategies WHERE id = $1",
+                                    )
+                                    .bind(sid)
+                                    .fetch_optional(pool)
+                                    .await
+                                    {
+                                        Ok(Some(r)) => r,
+                                        Ok(None) => {
+                                            self.send_to_frontend(UserError(format!("Strategy {} not found", sid))).await;
+                                            continue;
+                                        }
+                                        Err(e) => {
+                                            self.send_to_frontend(UserError(format!("DB error: {e}"))).await;
+                                            continue;
+                                        }
+                                    };
+                                    let compiled = match crate::backend::scripting::compile_strategy(
+                                        &rhai_engine, &row.on_idle, &row.on_open, &row.on_busy,
+                                    ) {
+                                        Ok(c) => c,
+                                        Err(e) => {
+                                            self.send_to_frontend(UserError(format!("Strategy failed to compile: {e}"))).await;
+                                            continue;
+                                        }
+                                    };
+                                    let indicators: Vec<crate::IndexId> =
+                                        serde_json::from_value(row.indicators).unwrap_or_default();
+                                    {
+                                        let mut guard = cache.write().await;
+                                        guard.insert(sid, crate::backend::app_state::CachedStrategy {
+                                            compiled: compiled.clone(),
+                                            indicators: indicators.clone(),
+                                            name: row.name.clone(),
+                                        });
+                                    }
+                                    (compiled, indicators, row.name)
+                                }
+                            } else {
+                                let noop = crate::backend::scripting::CompiledStrategy::noop(&rhai_engine);
+                                (noop, vec![], "View Only".to_string())
+                            };
+
+                            {
+                                let mut guard = session.lock().await;
+                                if let Some(s) = guard.get_mut(&payload.asset) {
+                                    s.strategy_name = name.clone();
+                                }
+                            }
+
+                            self.send_cmd(
+                                payload.asset,
+                                MarketCommand::UpdateStrategy(compiled, indicators, name),
+                            ).await;
                         }
 
                         ManualUpdateMargin(asset_margin) => {
@@ -836,6 +977,7 @@ pub enum BotEvent {
     PauseMarket(String),
     RemoveMarket(String),
     MarketComm(BotToMarket),
+    UpdateMarketStrategy(UpdateStrategyPayload),
     ManualUpdateMargin(AssetMargin),
     SyncMargin,
     #[serde(skip)]
@@ -847,6 +989,13 @@ pub enum BotEvent {
     CloseAll,
     GetSession,
     Kill,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStrategyPayload {
+    pub asset: String,
+    pub strategy_id: Option<uuid::Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

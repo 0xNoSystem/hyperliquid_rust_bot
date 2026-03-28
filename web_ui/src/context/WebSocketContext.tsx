@@ -6,6 +6,7 @@ import type {
     Message,
     assetMeta,
 } from "../types";
+import type { Strategy } from "../strats";
 import { API_URL, WS_ENDPOINT } from "../consts";
 import type { WebSocketContextValue } from "./WebSocketContextStore";
 import { WebSocketContext } from "./WebSocketContextStore";
@@ -52,6 +53,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [isOffline, setIsOffline] = useState(false);
     const [needsApiKey, setNeedsApiKey] = useState(false);
+    const [strategies, setStrategies] = useState<Strategy[]>([]);
 
     /** ---------- refs for latest state (CRITICAL) ---------- **/
     const marketsRef = useRef<MarketInfo[]>([]);
@@ -376,6 +378,30 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         [setErrorWithTimeout]
     );
 
+    const requestSyncMargin = useCallback(async () => {
+        await sendCommand({ syncMargin: null });
+    }, [sendCommand]);
+
+    const fetchStrategies = useCallback(async () => {
+        if (!tokenRef.current) return;
+        try {
+            const res = await fetch(`${API_URL}/strategies`, {
+                headers: { Authorization: `Bearer ${tokenRef.current}` },
+            });
+            if (res.ok) {
+                const data: Strategy[] = await res.json();
+                setStrategies(data);
+            }
+        } catch {
+            // silent — strategies are non-critical
+        }
+    }, []);
+
+    // Fetch strategies on login
+    useEffect(() => {
+        if (token) fetchStrategies();
+    }, [token, fetchStrategies]);
+
     /** ---------- WS lifecycle ---------- **/
     useEffect(() => {
         if (!token) return;
@@ -395,6 +421,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 if (universeRef.current.length === 0) {
                     sendCommand({ getSession: null }).catch(console.error);
                 }
+                requestSyncMargin();
+                fetchStrategies();
             });
 
             ws.addEventListener("message", handleMessage);
@@ -416,7 +444,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             wsRef.current?.close();
             if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
         };
-    }, [token, handleMessage, sendCommand]);
+    }, [token, handleMessage, sendCommand, fetchStrategies, requestSyncMargin]);
 
     /** ---------- API ---------- **/
     const cacheMarket = useCallback((asset: string) => {
@@ -457,10 +485,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         await sendCommand({ pauseAll: null });
     }, [sendCommand]);
 
-    const requestSyncMargin = useCallback(async () => {
-        await sendCommand({ syncMargin: null });
-    }, [sendCommand]);
-
     const updateMarketStrategy = useCallback(
         (asset: string, strategyName: string) => {
             setMarkets((prev) =>
@@ -482,6 +506,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         universe,
         cachedMarkets,
         backtestRuns,
+        strategies,
         totalMargin,
         isOffline,
         needsApiKey,
@@ -496,6 +521,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         requestCloseAll,
         requestPauseAll,
         requestSyncMargin,
+        fetchStrategies,
         updateMarketStrategy,
     };
 

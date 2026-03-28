@@ -31,14 +31,27 @@ pub struct Market {
     cache_tx: Sender<CacheCmdIn>,
     pub pnl: f64,
     pub lev: usize,
-    pub strategy_name: String,
+    strategy: (String, Vec<IndexId>),
     pub asset: AssetMeta,
     signal_engine: SignalEngine,
     executor: Executor,
     receivers: MarketReceivers,
     senders: MarketSenders,
-    pub active_tfs: HashSet<TimeFrame>,
     pub margin: f64,
+}
+
+/// Filter out indicator removals that conflict with the strategy's required indicators.
+fn filter_edits(required: &[IndexId], edits: &mut Vec<Entry>) -> Vec<IndexId> {
+    let mut blocked = Vec::new();
+    edits.retain(|e| {
+        if e.edit == EditType::Remove && required.contains(&e.id) {
+            blocked.push(e.id);
+            false
+        } else {
+            true
+        }
+    });
+    blocked
 }
 
 impl Market {
@@ -59,14 +72,6 @@ impl Market {
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
         let exchange_client =
             ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
-
-        //Look up needed tfs for loading
-        let mut active_tfs: HashSet<TimeFrame> = strat_indicators.iter().map(|id| id.1).collect();
-        if let Some(ref cfg) = config {
-            for ind_id in cfg {
-                active_tfs.insert(ind_id.1);
-            }
-        }
 
         //setup channels
         let (market_tx, market_rv) = channel::<MarketCommand>(7);
@@ -94,7 +99,7 @@ impl Market {
                 margin,
                 pnl: 0_f64,
                 lev,
-                strategy_name,
+                strategy: (strategy_name, strat_indicators.clone()),
                 asset: asset.clone(),
                 signal_engine: SignalEngine::new(
                     config,
@@ -111,7 +116,6 @@ impl Market {
                     .await?,
                 receivers,
                 senders,
-                active_tfs,
             },
             market_tx,
         ))
@@ -142,11 +146,15 @@ impl Market {
     }
 
     async fn load_engine(&mut self, candle_count: CandleCount) -> Result<Option<f64>, Error> {
-        let request: HashMap<TimeFrame, CandleCount> = self
-            .active_tfs
+        let active = self.signal_engine.get_active_indicators();
+        let requested_tfs: Vec<TimeFrame> = active
             .iter()
-            .map(|tf| (*tf, candle_count))
+            .map(|id| id.1)
+            .collect::<HashSet<_>>()
+            .into_iter()
             .collect();
+        let request: HashMap<TimeFrame, CandleCount> =
+            requested_tfs.iter().map(|tf| (*tf, candle_count)).collect();
 
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cache_tx
@@ -161,6 +169,22 @@ impl Market {
         let tf_data = reply_rx
             .await
             .map_err(|_| Error::Custom("CandleCache reply dropped".into()))??;
+
+        let missing: Vec<_> = requested_tfs
+            .iter()
+            .filter(|tf| !tf_data.contains_key(tf))
+            .collect();
+
+        if !missing.is_empty() {
+            return Err(Error::Custom(format!(
+                "Failed to load candle data for timeframe(s): {}",
+                missing
+                    .iter()
+                    .map(|tf| format!("{tf:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
 
         let mut last_price: Option<f64> = None;
         for (tf, prices) in &tf_data {
@@ -181,7 +205,7 @@ impl Market {
             asset: self.asset.name.clone(),
             lev: self.lev,
             price: last_price.unwrap_or(0.0),
-            strategy_name: self.strategy_name.clone(),
+            strategy_name: self.strategy.0.clone(),
             margin: self.margin,
             pnl: 0.0,
             is_paused: false,
@@ -236,6 +260,8 @@ impl Market {
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         warn!("{} broadcast channel closed", &asset_name);
+                        let _ =
+                            bot_price_update.send(MarketUpdate::FeedDied(asset_name.to_string()));
                         break;
                     }
                 }
@@ -277,38 +303,61 @@ impl Market {
                 }
 
                 MarketCommand::UpdateStrategy(compiled, strat_indicators, name) => {
-                    self.strategy_name = name;
-
                     let new_tfs: HashMap<TimeFrame, CandleCount> =
                         strat_indicators.iter().map(|(_, tf)| (*tf, 5000)).collect();
 
                     let mut map: TimeFrameData = HashMap::default();
+                    let mut failed = false;
                     if !new_tfs.is_empty() {
                         let (reply_tx, reply_rx) = oneshot::channel();
                         let req = CandleSnapshotRequest {
                             asset: asset.name.clone(),
-                            request: new_tfs,
+                            request: new_tfs.clone(),
                             reply: reply_tx,
                         };
                         if self.cache_tx.send(CacheCmdIn::Snapshot(req)).await.is_ok() {
                             match reply_rx.await {
                                 Ok(Ok(data)) => {
-                                    for tf in data.keys() {
-                                        self.active_tfs.insert(*tf);
+                                    let failed_tfs: Vec<_> = new_tfs
+                                        .keys()
+                                        .filter(|tf| data.get(tf).is_none_or(|v| v.is_empty()))
+                                        .copied()
+                                        .collect();
+
+                                    if !failed_tfs.is_empty() {
+                                        failed = true;
+                                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                            UpdateFrontend::UserError(format!(
+                                                "Strategy '{}' requires candle data for: {}\nFailed to load — strategy not applied.",
+                                                name,
+                                                failed_tfs.iter().map(|tf| format!("{tf:?}")).collect::<Vec<_>>().join(", ")
+                                            )),
+                                        ));
+                                    } else {
+                                        map = data;
                                     }
-                                    map = data;
                                 }
                                 Ok(Err(e)) => {
+                                    failed = true;
                                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                                         UpdateFrontend::UserError(format!(
-                                            "Failed to load candle data: {}\nREMOVE CONCERNED INDICATORS AND TRY AGAIN", e
+                                            "Failed to load candle data for strategy '{}': {}",
+                                            name, e
                                         )),
                                     ));
                                 }
-                                Err(_) => {}
+                                Err(_) => {
+                                    failed = true;
+                                }
                             }
                         }
                     }
+
+                    if failed {
+                        continue;
+                    }
+
+                    self.strategy = (name, strat_indicators.clone());
 
                     let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(
                         compiled,
@@ -336,7 +385,21 @@ impl Market {
                         .await;
                 }
 
-                MarketCommand::EditIndicators(entry_vec) => {
+                MarketCommand::EditIndicators(mut entry_vec) => {
+                    let blocked = filter_edits(&self.strategy.1, &mut entry_vec);
+                    if !blocked.is_empty() {
+                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                            UpdateFrontend::UserError(format!(
+                                "Current strategy requires the following indicator(s):\n{}",
+                                blocked
+                                    .iter()
+                                    .map(|id| format!("• {:?}", id))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )),
+                        ));
+                    }
+
                     let new_tfs: HashMap<TimeFrame, CandleCount> = entry_vec
                         .iter()
                         .filter(|e| e.edit == EditType::Add)
@@ -348,16 +411,32 @@ impl Market {
                         let (reply_tx, reply_rx) = oneshot::channel();
                         let req = CandleSnapshotRequest {
                             asset: asset.name.clone(),
-                            request: new_tfs,
+                            request: new_tfs.clone(),
                             reply: reply_tx,
                         };
                         if self.cache_tx.send(CacheCmdIn::Snapshot(req)).await.is_ok() {
                             match reply_rx.await {
                                 Ok(Ok(data)) => {
-                                    for tf in data.keys() {
-                                        self.active_tfs.insert(*tf);
+                                    // Check which requested TFs are missing or empty
+                                    let failed_tfs: Vec<_> = new_tfs
+                                        .keys()
+                                        .filter(|tf| data.get(tf).is_none_or(|v| v.is_empty()))
+                                        .copied()
+                                        .collect();
+
+                                    if !failed_tfs.is_empty() {
+                                        // Remove indicators that depend on failed TFs
+                                        entry_vec.retain(|e| !failed_tfs.contains(&e.id.1));
+                                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                            UpdateFrontend::UserError(format!(
+                                                "Failed to load candle data for: {}\nIndicators on these timeframes were skipped.",
+                                                failed_tfs.iter().map(|tf| format!("{tf:?}")).collect::<Vec<_>>().join(", ")
+                                            )),
+                                        ));
                                     }
-                                    map = data;
+
+                                    // Only keep TFs that have data
+                                    map = data.into_iter().filter(|(_, v)| !v.is_empty()).collect();
                                 }
                                 Ok(Err(e)) => {
                                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
@@ -427,7 +506,7 @@ impl Market {
                 }
 
                 MarketCommand::ManualTradeDetected => {
-                    let _ = self.senders.engine_tx.send(EngineCommand::ExecToggle);
+                    let _ = self.senders.engine_tx.send(EngineCommand::ExecPause);
                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                         UpdateFrontend::UserError(format!(
                             "Manual trade detected on {}. Market paused — resume when ready.",
@@ -487,7 +566,7 @@ impl Market {
                         .exec_tx
                         .send_async(Control(ExecControl::Pause))
                         .await;
-                    let _ = self.senders.engine_tx.send(EngineCommand::ExecToggle);
+                    let _ = self.senders.engine_tx.send(EngineCommand::ExecPause);
                 }
 
                 MarketCommand::Resume => {
@@ -495,6 +574,15 @@ impl Market {
                         .senders
                         .exec_tx
                         .send_async(Control(ExecControl::Resume))
+                        .await;
+                    let _ = self.senders.engine_tx.send(EngineCommand::ExecResume);
+                }
+
+                MarketCommand::ForceClosePosition => {
+                    let _ = self
+                        .senders
+                        .exec_tx
+                        .send_async(Control(ExecControl::ForceClose))
                         .await;
                 }
 
@@ -546,6 +634,7 @@ pub enum MarketCommand {
     UpdateIndicatorData(Vec<IndicatorData>),
     EngineStateChange(EngineView),
     ManualTradeDetected,
+    ForceClosePosition,
     #[serde(skip)]
     ReloadWallet(PrivateKeySigner),
     #[serde(skip)]
@@ -573,6 +662,7 @@ pub enum MarketUpdate {
     MarketInfoUpdate((String, EditMarketInfo)),
     RelayToFrontend(UpdateFrontend),
     AuthFailed(String),
+    FeedDied(String), // asset name — Bot should remove this market
 }
 
 pub type AssetPrice = (String, f64);

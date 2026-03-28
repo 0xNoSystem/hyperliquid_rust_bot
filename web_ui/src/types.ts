@@ -233,13 +233,6 @@ export interface AddMarketInfo {
     config?: IndexId[];
 }
 
-export interface AddMarketProps {
-    onClose: () => void;
-    totalMargin: number;
-    assets: assetMeta[];
-    strategies: import("./strats").Strategy[];
-    initialAsset?: string;
-}
 
 export type BackendLoadSessionPayload =
     | [BackendMarketInfo[], assetMeta[]]

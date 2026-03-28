@@ -43,7 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
 
                 // Check if wallet is still connected with the same address
-                const phantom = (window as Record<string, unknown>).phantom as
+                const phantom = (window as unknown as Record<string, unknown>)
+                    .phantom as
                     | {
                           ethereum?: {
                               request: (a: {
@@ -82,7 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         if (!address) return;
 
-        const phantom = (window as Record<string, unknown>).phantom as
+        const phantom = (window as unknown as Record<string, unknown>)
+            .phantom as
             | {
                   ethereum?: {
                       on: (e: string, h: (...a: unknown[]) => void) => void;

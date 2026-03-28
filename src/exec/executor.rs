@@ -33,6 +33,8 @@ pub struct Executor {
 }
 
 impl Executor {
+    const MAX_RETRIES: usize = 5;
+
     pub async fn new(
         wallet: PrivateKeySigner,
         asset: AssetMeta,
@@ -142,7 +144,7 @@ impl Executor {
                 }
             }
 
-            if retries > 5 {
+            if retries > Self::MAX_RETRIES {
                 return Err(Error::Custom(format!(
                     "Failed to cancle resting order for {} market, please cancel manually on https://app.hyperliquid.xyz/trade/{}",
                     &asset, &asset,
@@ -296,14 +298,29 @@ impl Executor {
             self.closing = true;
             let asset = self.asset.name.clone();
             let op = PositionOp::Close;
-            let trade = Self::into_hl_order(&asset, size, side, None, op, self.decimals);
-            match self.open_trade(trade, op, None).await {
-                Ok(order_response) => {
-                    let _ = self
-                        .resting_orders
-                        .insert(order_response.oid, order_response);
+            let mut retries = 0;
+            loop {
+                let trade = Self::into_hl_order(&asset, size, side, None, op, self.decimals);
+                match self.open_trade(trade, op, None).await {
+                    Ok(order_response) => {
+                        let _ = self
+                            .resting_orders
+                            .insert(order_response.oid, order_response);
+                        break;
+                    }
+                    Err(e) => {
+                        retries += 1;
+                        warn!("kill() close order failed (attempt {}): {}", retries, e);
+                        if retries >= Self::MAX_RETRIES {
+                            warn!(
+                                "kill() exhausted retries for {} — position may still be open on-chain",
+                                &asset
+                            );
+                            break;
+                        }
+                        sleep(Duration::from_millis(100)).await;
+                    }
                 }
-                Err(e) => warn!("{}", e),
             }
         }
     }

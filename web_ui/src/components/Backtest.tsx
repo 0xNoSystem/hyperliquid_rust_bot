@@ -200,7 +200,7 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     const nav = useNavigate();
     const { startTime, endTime, setTimeRange, intervalStartX, intervalEndX } =
         useChartContext();
-    const { universe, backtestRuns } = useWebSocketContext();
+    const { universe, backtestRuns, strategies } = useWebSocketContext();
     const { token } = useAuth();
     const activeAsset = routeAsset ?? "";
     const defaultStartParts = useMemo(
@@ -219,8 +219,6 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     const [selectedMarket, setSelectedMarket] = useState<MarketType>(
         DEFAULT_DATA_SOURCE.market
     );
-    // TODO: fetch strategies from backend via GET /strategies
-    const [strategies, setStrategies] = useState<Strategy[]>([]);
     const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(
         null
     );

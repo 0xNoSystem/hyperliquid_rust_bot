@@ -15,7 +15,6 @@ import { CachedMarket } from "./CachedMarket";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { ErrorBanner } from "./ErrorBanner";
 import LoadingDots from "./Loading";
-import type { Strategy } from "../strats";
 
 export default function MarketsPage() {
     const {
@@ -61,8 +60,6 @@ export default function MarketsPage() {
     >();
     const [showAdd, setShowAdd] = useState(false);
     const [syncingMargin, setSyncingMargin] = useState(false);
-    // TODO: fetch strategies from backend via GET /strategies
-    const [strategies] = useState<Strategy[]>([]);
 
     const sessionPnl = markets.reduce((sum, market) => {
         return sum + (market.pnl ?? 0);
@@ -357,8 +354,6 @@ export default function MarketsPage() {
                             <AddMarket
                                 onClose={handleCloseAdd}
                                 totalMargin={totalMargin}
-                                assets={universe}
-                                strategies={strategies}
                                 initialAsset={addInitialAsset}
                             />
                         </div>

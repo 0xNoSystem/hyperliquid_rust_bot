@@ -17,7 +17,7 @@ import {
 } from "../wallet";
 
 function getActiveProvider(): WalletProvider {
-    const w = window as Record<string, unknown>;
+    const w = window as unknown as Record<string, unknown>;
     const hasBackpack = !!(w.backpack as { ethereum?: unknown } | undefined)
         ?.ethereum;
     const hasPhantom = !!(w.phantom as { ethereum?: unknown } | undefined)

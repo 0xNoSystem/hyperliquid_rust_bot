@@ -1,11 +1,13 @@
 import { createContext, useContext } from "react";
 import type { BacktestRunState, MarketInfo, assetMeta } from "../types";
+import type { Strategy } from "../strats";
 
 export interface WebSocketContextValue {
     markets: MarketInfo[];
     universe: assetMeta[];
     cachedMarkets: string[];
     backtestRuns: Record<string, BacktestRunState>;
+    strategies: Strategy[];
     totalMargin: number;
     errorMsg: string | null;
     isOffline: boolean;
@@ -20,6 +22,7 @@ export interface WebSocketContextValue {
     requestCloseAll: () => Promise<void>;
     requestPauseAll: () => Promise<void>;
     requestSyncMargin: () => Promise<void>;
+    fetchStrategies: () => Promise<void>;
     updateMarketStrategy: (asset: string, strategyName: string) => void;
 }
 

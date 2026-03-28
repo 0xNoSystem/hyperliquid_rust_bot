@@ -116,15 +116,10 @@ impl CandleCache {
         if let Some(tf_map) = self.candles.get(&request.asset) {
             request.request.retain(|tf, count| {
                 if let Some(history) = tf_map.get(tf)
-                    && history.len() >= *count as usize
+                    && !history.is_empty()
                 {
-                    let data: Vec<Price> = history
-                        .iter()
-                        .rev()
-                        .take(*count as usize)
-                        .rev()
-                        .copied()
-                        .collect();
+                    let take = (*count as usize).min(history.len());
+                    let data: Vec<Price> = history.iter().rev().take(take).rev().copied().collect();
                     cached.insert(*tf, data);
                     return false;
                 }
@@ -201,24 +196,56 @@ impl CandleCache {
             let mut backfill: TimeFrameData = HashMap::default();
 
             for (tf, count) in &request.request {
-                match load_candles(&client, &asset, *tf, HL_MAX_CANDLES).await {
-                    Ok(data) => {
-                        let reply_data = if data.len() > *count as usize {
-                            data[data.len() - *count as usize..].to_vec()
-                        } else {
-                            data.clone()
-                        };
-                        result.insert(*tf, reply_data);
-                        backfill.insert(*tf, data);
+                log::info!("Fetching {:?} candles for {}", tf, &asset);
+                let mut last_err = None;
+                for attempt in 0..3 {
+                    match load_candles(&client, &asset, *tf, HL_MAX_CANDLES).await {
+                        Ok(data) if data.is_empty() => {
+                            log::warn!(
+                                "candle fetch returned empty for {} {:?} (attempt {})",
+                                &asset,
+                                tf,
+                                attempt + 1
+                            );
+                            last_err = Some("empty response from HL".to_string());
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        }
+                        Ok(data) => {
+                            let reply_data = if data.len() > *count as usize {
+                                data[data.len() - *count as usize..].to_vec()
+                            } else {
+                                data.clone()
+                            };
+                            result.insert(*tf, reply_data);
+                            backfill.insert(*tf, data);
+                            last_err = None;
+                            break;
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "backfill failed for {} {:?} (attempt {}): {:?}",
+                                &asset,
+                                tf,
+                                attempt + 1,
+                                e
+                            );
+                            last_err = Some(format!("{e:?}"));
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        }
                     }
-                    Err(e) => {
-                        log::warn!("backfill failed for {} {:?}: {:?}", &asset, tf, e);
-                    }
+                }
+                if let Some(err) = last_err {
+                    log::error!(
+                        "candle fetch exhausted retries for {} {:?}: {}",
+                        &asset,
+                        tf,
+                        err
+                    );
                 }
             }
 
-            let _ = request.reply.send(Ok(result));
-
+            // Backfill BEFORE reply — ensures cache is queued for update
+            // before the caller can trigger another Snapshot request
             if !backfill.is_empty() {
                 let _ = cmd_tx
                     .send(CacheCmdIn::Backfill {
@@ -227,6 +254,8 @@ impl CandleCache {
                     })
                     .await;
             }
+
+            let _ = request.reply.send(Ok(result));
         });
     }
 

@@ -33,7 +33,6 @@ import type {
     TimeFrame,
     TradeInfo,
 } from "../types";
-import type { Strategy } from "../strats.ts";
 import { ArrowLeft, Plus, Minus, X } from "lucide-react";
 
 const formatPrice = (n: number) => {
@@ -104,6 +103,7 @@ export default function MarketDetail() {
         dismissError,
         updateMarketStrategy,
         requestSyncMargin,
+        strategies,
     } = useWebSocketContext();
     const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
     const [syncingMargin, setSyncingMargin] = useState(false);
@@ -156,8 +156,13 @@ export default function MarketDetail() {
     const [pendingStrategyId, setPendingStrategyId] = useState<string | null>(
         null
     );
-    // TODO: fetch strategies from backend via GET /strategies
-    const [strategies, setStrategies] = useState<Strategy[]>([]);
+    const [confirmForceClose, setConfirmForceClose] = useState(false);
+
+    const handleForceClose = async () => {
+        if (!market) return;
+        await sendMarketCmd(market.asset, "forceClosePosition");
+        setConfirmForceClose(false);
+    };
 
     const maxLev = meta?.maxLeverage ?? 1;
     const eqIndexId = (a: IndexId, b: IndexId) =>
@@ -292,16 +297,21 @@ export default function MarketDetail() {
     const marketMargin = market.margin ?? 0;
     const currentStrategyName = market.strategyName;
     const pendingStrat = strategies.find((s) => s.id === pendingStrategyId);
+    const VIEW_ONLY = "__view_only__";
+    const pendingName =
+        pendingStrategyId === VIEW_ONLY ? "View Only" : pendingStrat?.name;
     const hasPendingStrategy =
-        pendingStrategyId !== null &&
-        pendingStrat?.name !== currentStrategyName;
+        pendingStrategyId !== null && pendingName !== currentStrategyName;
     const showMinOrderWarning =
         market.margin != null &&
         market.lev != null &&
         market.margin * market.lev < MIN_ORDER_VALUE;
     const handleStrategySelect = (strategyId: string) => {
-        const strat = strategies.find((s) => s.id === strategyId);
-        if (!strat || strat.name === currentStrategyName) {
+        const targetName =
+            strategyId === VIEW_ONLY
+                ? "View Only"
+                : strategies.find((s) => s.id === strategyId)?.name;
+        if (!targetName || targetName === currentStrategyName) {
             setPendingStrategyId(null);
             return;
         }
@@ -311,16 +321,22 @@ export default function MarketDetail() {
     };
     const cancelStrategyChange = () => setPendingStrategyId(null);
     const applyStrategyChange = async () => {
-        if (!pendingStrat || pendingStrat.name === currentStrategyName) return;
+        if (!pendingName || pendingName === currentStrategyName) return;
         try {
-            await sendMarketCmd(market.asset, {
-                updateStrategy: pendingStrategyId,
+            await sendCommand({
+                updateMarketStrategy: {
+                    asset: market.asset,
+                    strategyId:
+                        pendingStrategyId === VIEW_ONLY
+                            ? null
+                            : pendingStrategyId,
+                },
             });
         } catch (err) {
             console.error("Update strategy failed", err);
             return;
         }
-        updateMarketStrategy(market.asset, pendingStrat.name);
+        updateMarketStrategy(market.asset, pendingName);
         setPendingStrategyId(null);
     };
 
@@ -552,7 +568,13 @@ export default function MarketDetail() {
                                 {currentStrategyName}
                             </p>
                             <div className="mt-2 grid gap-2">
-                                {strategies.map((strat) => {
+                                {[
+                                    {
+                                        id: VIEW_ONLY,
+                                        name: "View Only",
+                                    },
+                                    ...strategies,
+                                ].map((strat) => {
                                     const isCurrent =
                                         strat.name === currentStrategyName;
                                     const isPending =
@@ -580,7 +602,7 @@ export default function MarketDetail() {
                             {hasPendingStrategy && (
                                 <>
                                     <div className="text-accent-warning-mid text-center text-[11px] uppercase">
-                                        Pending: {pendingStrat?.name}
+                                        Pending: {pendingName}
                                     </div>
                                     <div className="border-accent-warning/40 bg-surface-warning rounded-md border px-2 py-1 text-[11px]">
                                         <span className="text-accent-warning-mid font-semibold">
@@ -844,13 +866,25 @@ export default function MarketDetail() {
                                         No open position
                                     </p>
                                 ) : (
-                                    <PositionTable
-                                        position={market.position}
-                                        price={market.price}
-                                        lev={market.lev}
-                                        szDecimals={meta?.szDecimals ?? 3}
-                                        formatPrice={formatPrice}
-                                    />
+                                    <>
+                                        <PositionTable
+                                            position={market.position}
+                                            price={market.price}
+                                            lev={market.lev}
+                                            szDecimals={meta?.szDecimals ?? 3}
+                                            formatPrice={formatPrice}
+                                        />
+                                        <div className="mt-2 flex justify-center">
+                                            <button
+                                                className="text-accent-danger-muted bg-accent-danger-strong/30 hover:bg-accent-danger-strong/50 rounded px-3 py-1 text-xs font-medium transition-colors"
+                                                onClick={() =>
+                                                    setConfirmForceClose(true)
+                                                }
+                                            >
+                                                Force Close
+                                            </button>
+                                        </div>
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -1092,6 +1126,53 @@ export default function MarketDetail() {
                                     }
                                 >
                                     Yes
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            <AnimatePresence>
+                {confirmForceClose && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50"
+                    >
+                        <div
+                            className="bg-app-overlay absolute inset-0"
+                            onClick={() => setConfirmForceClose(false)}
+                        />
+                        <motion.div
+                            initial={{ y: 24, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            exit={{ y: 10, opacity: 0 }}
+                            className="border-accent-danger/40 bg-surface-danger-soft relative mx-auto mt-28 w-full max-w-md rounded-md border p-6"
+                        >
+                            <h3 className="text-lg font-semibold">
+                                Force close{" "}
+                                <span className="text-accent-danger-muted">
+                                    {market?.asset}
+                                </span>{" "}
+                                position?
+                            </h3>
+                            <p className="text-danger-soft/80 mt-1">
+                                This will immediately close the open position at
+                                market price.
+                            </p>
+                            <div className="mt-6 flex justify-end gap-2">
+                                <button
+                                    className="border-line-weak hover:bg-glow-10 rounded-md border px-4 py-2"
+                                    onClick={() => setConfirmForceClose(false)}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    className="text-on-accent bg-accent-danger-strong hover:bg-accent-danger-deep rounded-md px-4 py-2"
+                                    onClick={handleForceClose}
+                                >
+                                    Yes, close
                                 </button>
                             </div>
                         </motion.div>

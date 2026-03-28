@@ -5,7 +5,7 @@ use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use log::info;
@@ -34,7 +34,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/strategies", get(list_strategies).post(save_strategy))
         .route(
             "/strategies/{id}",
-            put(update_strategy).delete(delete_strategy),
+            get(get_strategy)
+                .put(update_strategy)
+                .delete(delete_strategy),
         )
         // Agent approval
         .route("/agent/prepare", post(prepare_agent))
@@ -321,8 +323,8 @@ async fn list_strategies(
     State(state): State<Arc<AppState>>,
     auth: AuthUser,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let rows = sqlx::query_as::<_, super::db::StrategyRow>(
-        "SELECT * FROM strategies WHERE pubkey = $1 ORDER BY updated_at DESC",
+    let rows = sqlx::query_as::<_, super::db::StrategySummary>(
+        "SELECT id, name, is_active FROM strategies WHERE pubkey = $1 ORDER BY updated_at DESC",
     )
     .bind(&auth.pubkey)
     .fetch_all(&state.pool)
@@ -330,6 +332,24 @@ async fn list_strategies(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(rows))
+}
+
+async fn get_strategy(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(id): Path<sqlx::types::Uuid>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let row = sqlx::query_as::<_, super::db::StrategyRow>(
+        "SELECT * FROM strategies WHERE id = $1 AND pubkey = $2",
+    )
+    .bind(id)
+    .bind(&auth.pubkey)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(row))
 }
 
 #[derive(Deserialize)]

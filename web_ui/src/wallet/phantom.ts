@@ -11,7 +11,7 @@ interface PhantomEthereum {
 
 function getProvider(): PhantomEthereum | null {
     if (typeof window === "undefined") return null;
-    const w = window as Record<string, unknown>;
+    const w = window as unknown as Record<string, unknown>;
     const phantom = w.phantom as { ethereum?: PhantomEthereum } | undefined;
     if (phantom?.ethereum?.isPhantom) return phantom.ethereum;
     const eth = w.ethereum as PhantomEthereum | undefined;

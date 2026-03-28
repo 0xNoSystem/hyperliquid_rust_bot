@@ -22,6 +22,15 @@ pub struct TradeRow {
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategySummary {
+    pub id: sqlx::types::Uuid,
+    pub name: String,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct StrategyRow {
     pub id: sqlx::types::Uuid,
     pub pubkey: String,

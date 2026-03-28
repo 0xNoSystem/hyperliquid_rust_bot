@@ -107,7 +107,7 @@ impl Strat for Strategy {
 fn indicators_to_map(values: &ValuesMap) -> Map {
     let mut map = Map::new();
     for ((kind, tf), timed_value) in values.iter() {
-        let key = format!("{}:{}", kind.key(), tf.as_str()).into();
+        let key = format!("{}_{}", kind.key(), tf.as_str()).into();
         map.insert(key, Dynamic::from(*timed_value));
     }
     map

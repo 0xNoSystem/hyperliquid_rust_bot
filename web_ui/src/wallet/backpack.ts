@@ -11,7 +11,7 @@ interface BackpackEthereum {
 
 function getProvider(): BackpackEthereum | null {
     if (typeof window === "undefined") return null;
-    const w = window as Record<string, unknown>;
+    const w = window as unknown as Record<string, unknown>;
     const backpack = w.backpack as { ethereum?: BackpackEthereum } | undefined;
     if (backpack?.ethereum?.isBackpack) return backpack.ethereum;
     const eth = w.ethereum as BackpackEthereum | undefined;

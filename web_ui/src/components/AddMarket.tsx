@@ -8,26 +8,30 @@ import {
     indicatorKinds,
 } from "../types";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
+import type { Strategy } from "../strats";
 import type {
     AddMarketInfo,
     IndexId,
     IndicatorKind,
     IndicatorName,
-    AddMarketProps,
 } from "../types";
-import type { Strategy } from "../strats";
 
 type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
 type ConfigDraft = [IndicatorKind, TimeframeKey];
 
+interface AddMarketProps {
+    onClose: () => void;
+    totalMargin: number;
+    initialAsset?: string;
+}
+
 export const AddMarket: React.FC<AddMarketProps> = ({
     onClose,
     totalMargin,
-    assets,
-    strategies,
     initialAsset,
 }) => {
-    const { sendCommand, deleteCachedMarket } = useWebSocketContext();
+    const { sendCommand, deleteCachedMarket, strategies, universe } =
+        useWebSocketContext();
     const [asset, setAsset] = useState(initialAsset ?? "");
     const [marginType, setMarginType] = useState<"alloc" | "amount">("alloc");
     const [marginValue, setMarginValue] = useState(0.1);
@@ -176,7 +180,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             <option value="" disabled>
                                 -- select an asset --
                             </option>
-                            {assets.map((u) => (
+                            {universe.map((u) => (
                                 <option key={u.name} value={u.name}>
                                     {u.name}
                                 </option>
@@ -241,13 +245,13 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                     <div className="col-span-2">
                         <label className="text-app-text block text-center text-sm">
                             Leverage: {lev} (MAX:{" "}
-                            {assets.find((u) => u.name === asset)?.maxLeverage})
+                            {universe.find((u) => u.name === asset)?.maxLeverage})
                         </label>
                         <input
                             type="range"
                             min={1}
                             max={
-                                assets.find((u) => u.name === asset)
+                                universe.find((u) => u.name === asset)
                                     ?.maxLeverage
                             }
                             step={1}
@@ -257,13 +261,13 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             style={{
                                 background: `linear-gradient(to right, rgb(var(--range-fill-start)) 0%, rgb(var(--range-fill)) ${
                                     ((lev - 1) /
-                                        ((assets.find((u) => u.name === asset)
+                                        ((universe.find((u) => u.name === asset)
                                             ?.maxLeverage ?? 1) -
                                             1)) *
                                     100
                                 }%, rgb(var(--range-remaining)) ${
                                     ((lev - 1) /
-                                        ((assets.find((u) => u.name === asset)
+                                        ((universe.find((u) => u.name === asset)
                                             ?.maxLeverage ?? 1) -
                                             1)) *
                                     100
