@@ -3,7 +3,7 @@
 // Keeps the same backend interactions and batching behavior.
 import { KwantChart } from "kwant";
 import { useMemo, useState, useCallback, useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -105,6 +105,7 @@ export default function MarketDetail() {
         requestSyncMargin,
         strategies,
     } = useWebSocketContext();
+    const navigate = useNavigate();
     const [marketToToggle, setMarketToToggle] = useState<string | null>(null);
     const [syncingMargin, setSyncingMargin] = useState(false);
     const handleSyncMargin = () => {
@@ -567,6 +568,27 @@ export default function MarketDetail() {
                             <p className="text-center text-[14px] font-semibold">
                                 {currentStrategyName}
                             </p>
+                            {currentStrategyName &&
+                                currentStrategyName !== "View Only" && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const strat = strategies.find(
+                                                (s) =>
+                                                    s.name ===
+                                                    currentStrategyName
+                                            );
+                                            navigate("/lab", {
+                                                state: {
+                                                    strategyId: strat?.id,
+                                                },
+                                            });
+                                        }}
+                                        className="text-accent-brand-soft hover:bg-glow-5 border-line-subtle mx-auto block rounded border px-2 py-0.5 text-[10px] uppercase"
+                                    >
+                                        Open in Lab
+                                    </button>
+                                )}
                             <div className="mt-2 grid gap-2">
                                 {[
                                     {

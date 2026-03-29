@@ -1,10 +1,12 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import {
     Plus,
     Save,
     Trash2,
     ChevronRight,
     FlaskConical,
+    Pencil,
     X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -61,10 +63,12 @@ const EMPTY_DETAIL: StrategyDetail = {
 export default function StratEditor() {
     const { token } = useAuth();
     const { strategies, fetchStrategies } = useWebSocketContext();
+    const location = useLocation();
 
     // Currently selected / editing strategy
     const [active, setActive] = useState<StrategyDetail | null>(null);
     const [isNew, setIsNew] = useState(false);
+    const [editing, setEditing] = useState(false);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -125,6 +129,7 @@ export default function StratEditor() {
                 const detail: StrategyDetail = await res.json();
                 setActive(detail);
                 setIsNew(false);
+                setEditing(false);
                 setName(detail.name);
                 setOnIdle(detail.onIdle);
                 setOnOpen(detail.onOpen);
@@ -141,9 +146,22 @@ export default function StratEditor() {
         [token]
     );
 
+    // Auto-load strategy from navigation state (e.g. "Open in Lab" from MarketDetail)
+    useEffect(() => {
+        const state = location.state as { strategyId?: string } | null;
+        if (!state?.strategyId || !strategies.length) return;
+        const strat = strategies.find((s) => s.id === state.strategyId);
+        if (strat && active?.id !== strat.id) {
+            loadStrategy(strat);
+            // Clear state so refresh doesn't re-trigger
+            window.history.replaceState({}, "");
+        }
+    }, [location.state, strategies, loadStrategy, active?.id]);
+
     const startNew = () => {
         setActive(EMPTY_DETAIL);
         setIsNew(true);
+        setEditing(true);
         setName("");
         setOnIdle("");
         setOnOpen("");
@@ -203,6 +221,7 @@ export default function StratEditor() {
             const saved: StrategyDetail = await res.json();
             setActive(saved);
             setIsNew(false);
+            setEditing(false);
             setName(saved.name);
             setOnIdle(saved.onIdle);
             setOnOpen(saved.onOpen);
@@ -352,28 +371,46 @@ export default function StratEditor() {
                     <>
                         {/* Top bar: name + actions */}
                         <div className="border-line-subtle flex items-center gap-3 border-b px-6 py-3">
-                            <input
-                                type="text"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                placeholder="Strategy name"
-                                className="bg-transparent text-app-text flex-1 text-lg font-semibold outline-none placeholder:text-app-text/30"
-                            />
-                            <button
-                                onClick={handleSave}
-                                disabled={saving}
-                                className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
-                            >
-                                <Save className="h-3.5 w-3.5" />
-                                {saving ? "Saving..." : "Save"}
-                            </button>
-                            {!isNew && (
+                            {editing ? (
+                                <input
+                                    type="text"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    placeholder="Strategy name"
+                                    className="bg-transparent text-app-text flex-1 text-lg font-semibold outline-none placeholder:text-app-text/30"
+                                />
+                            ) : (
+                                <span className="text-app-text flex-1 text-lg font-semibold">
+                                    {name || "Untitled"}
+                                </span>
+                            )}
+                            {editing ? (
+                                <>
+                                    <button
+                                        onClick={handleSave}
+                                        disabled={saving}
+                                        className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+                                    >
+                                        <Save className="h-3.5 w-3.5" />
+                                        {saving ? "Saving..." : "Save"}
+                                    </button>
+                                    {!isNew && (
+                                        <button
+                                            onClick={handleDelete}
+                                            className="border-accent-danger-soft/40 text-accent-danger-soft hover:bg-accent-danger-soft/10 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm"
+                                        >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                            Delete
+                                        </button>
+                                    )}
+                                </>
+                            ) : (
                                 <button
-                                    onClick={handleDelete}
-                                    className="border-accent-danger-soft/40 text-accent-danger-soft hover:bg-accent-danger-soft/10 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm"
+                                    onClick={() => setEditing(true)}
+                                    className="border-line-subtle text-accent-brand-soft hover:bg-glow-5 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm"
                                 >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                    Delete
+                                    <Pencil className="h-3.5 w-3.5" />
+                                    Edit
                                 </button>
                             )}
                         </div>
@@ -406,14 +443,16 @@ export default function StratEditor() {
                                 <span className="text-app-text/50 text-xs font-medium uppercase tracking-wide">
                                     Indicators
                                 </span>
-                                <button
-                                    onClick={() =>
-                                        setShowIndicatorPicker((p) => !p)
-                                    }
-                                    className="text-accent-brand-soft text-xs hover:underline"
-                                >
-                                    + Add
-                                </button>
+                                {editing && (
+                                    <button
+                                        onClick={() =>
+                                            setShowIndicatorPicker((p) => !p)
+                                        }
+                                        className="text-accent-brand-soft text-xs hover:underline"
+                                    >
+                                        + Add
+                                    </button>
+                                )}
                             </div>
                             <div className="flex flex-wrap gap-2">
                                 {indicators.length === 0 && (
@@ -444,14 +483,16 @@ export default function StratEditor() {
                                                 {get_params(ind)}{" "}
                                                 {fromTimeFrame(tf)}
                                             </button>
-                                            <button
-                                                onClick={() =>
-                                                    removeIndicator(i)
-                                                }
-                                                className="text-accent-danger-strong cursor-pointer text-sm leading-none"
-                                            >
-                                                x
-                                            </button>
+                                            {editing && (
+                                                <button
+                                                    onClick={() =>
+                                                        removeIndicator(i)
+                                                    }
+                                                    className="text-accent-danger-strong cursor-pointer text-sm leading-none"
+                                                >
+                                                    x
+                                                </button>
+                                            )}
                                         </div>
                                     );
                                 })}
@@ -591,8 +632,13 @@ export default function StratEditor() {
                                         onChange={(e) =>
                                             setter(e.target.value)
                                         }
+                                        readOnly={!editing}
                                         spellCheck={false}
-                                        className="bg-app-surface-4 text-app-text flex-1 resize-none px-4 py-3 font-mono text-sm leading-relaxed outline-none placeholder:text-app-text/20"
+                                        className={`flex-1 resize-none px-4 py-3 font-mono text-sm leading-relaxed outline-none placeholder:text-app-text/20 ${
+                                            editing
+                                                ? "bg-app-surface-4 text-app-text"
+                                                : "bg-app-surface-4/50 text-app-text/60 cursor-default"
+                                        }`}
                                         placeholder={`// ${label.replace("_", " ")} logic`}
                                     />
                                 </div>

@@ -187,6 +187,9 @@ fn register_liq_side(engine: &mut Engine) {
     engine.register_fn("TAKER", || LiqSide::Taker);
     engine.register_fn("FORCE", || OnTimeout::Force);
     engine.register_fn("CANCEL", || OnTimeout::Cancel);
+    engine.register_fn("timeout", |action: OnTimeout, duration: TimeDelta| {
+        TimeoutInfo { action, duration }
+    });
 }
 
 fn register_triggers(engine: &mut Engine) {
@@ -232,11 +235,32 @@ fn register_intent(engine: &mut Engine) {
             Intent::open_limit(side, size, limit_px, None, Some(trig))
         },
     );
+    engine.register_fn(
+        "open_limit",
+        |side: Side, size: SizeSpec, limit_px: f64, ttl: TimeoutInfo| {
+            Intent::open_limit(side, size, limit_px, Some(ttl), None)
+        },
+    );
+    engine.register_fn(
+        "open_limit",
+        |side: Side, size: SizeSpec, limit_px: f64, ttl: TimeoutInfo, trig: Triggers| {
+            Intent::open_limit(side, size, limit_px, Some(ttl), Some(trig))
+        },
+    );
     engine.register_fn("reduce_limit", |size: SizeSpec, limit_px: f64| {
         Intent::reduce_limit_order(size, limit_px, None)
     });
+    engine.register_fn(
+        "reduce_limit",
+        |size: SizeSpec, limit_px: f64, ttl: TimeoutInfo| {
+            Intent::reduce_limit_order(size, limit_px, Some(ttl))
+        },
+    );
     engine.register_fn("flatten_limit", |limit_px: f64| {
         Intent::flatten_limit(limit_px, None)
+    });
+    engine.register_fn("flatten_limit", |limit_px: f64, ttl: TimeoutInfo| {
+        Intent::flatten_limit(limit_px, Some(ttl))
     });
 
     engine.register_fn("arm", |td: TimeDelta| Intent::Arm(td));
