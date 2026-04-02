@@ -15,7 +15,8 @@ use tower_http::trace::TraceLayer;
 
 use super::app_state::{AppState, CachedStrategy, broadcast_to_user};
 use super::auth::{self, AuthUser};
-use crate::backtest::BacktestRunRequest;
+use super::db::{BacktestResultRow, BacktestRunRow};
+use crate::backtest::{BacktestResult, BacktestRunRequest};
 use crate::{
     BacktestProgressUpdate, BacktestResultUpdate, BacktestRunError, BacktestRunPayload,
     BacktestRunResponse, Backtester, BotEvent, UpdateFrontend, get_time_now,
@@ -29,6 +30,12 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // Bot commands (authenticated)
         .route("/command", post(execute_command))
         .route("/backtest", post(run_backtest))
+        // Backtest history
+        .route("/backtest/history", get(list_backtest_history))
+        .route(
+            "/backtest/history/{id}",
+            get(get_backtest_result).delete(delete_backtest_run),
+        )
         // Data queries (authenticated)
         .route("/trades/{market}", get(get_trades))
         .route("/strategies", get(list_strategies).post(save_strategy))
@@ -168,6 +175,7 @@ async fn execute_command(
 
 // ── Backtest Route ───────────────────────────────────────────────────────────
 
+#[inline]
 fn make_backtest_run_id(asset: &str) -> String {
     format!("bt-{}-{}", asset.to_lowercase(), get_time_now())
 }
@@ -217,14 +225,62 @@ async fn run_backtest(
     }
 
     request.run_id = Some(run_id.clone());
-    let mut backtester = Backtester::from_request(request);
+
+    // Per-user concurrency guard: only 1 active backtest per user
+    {
+        let active = state.active_backtests.read().await;
+        if active.contains(&auth.pubkey) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(
+                    serde_json::to_value(BacktestRunError {
+                        run_id,
+                        message: "A backtest is already running".to_string(),
+                        progress: Vec::new(),
+                    })
+                    .unwrap(),
+                ),
+            )
+                .into_response();
+        }
+    }
+    {
+        let mut active = state.active_backtests.write().await;
+        active.insert(auth.pubkey.clone());
+    }
+
+    let mut backtester = match Backtester::from_request(
+        request,
+        state.rhai_engine.clone(),
+        state.strategy_cache.clone(),
+        &state.pool,
+        state.candle_store.clone(),
+    )
+    .await
+    {
+        Ok(bt) => bt,
+        Err(e) => {
+            // Remove from active set on failure
+            let mut active = state.active_backtests.write().await;
+            active.remove(&auth.pubkey);
+            return Json(
+                serde_json::to_value(BacktestRunError {
+                    run_id,
+                    message: e.to_string(),
+                    progress: Vec::new(),
+                })
+                .unwrap(),
+            )
+            .into_response();
+        }
+    };
     let mut progress = Vec::new();
 
     let ws_conns = state.ws_connections.clone();
     let pubkey = auth.pubkey.clone();
     let progress_run_id = run_id.clone();
 
-    match backtester
+    let response = match backtester
         .run_with_progress(|evt| {
             progress.push(evt.clone());
             let conns = ws_conns.clone();
@@ -247,6 +303,19 @@ async fn run_backtest(
     {
         Ok(mut result) => {
             result.run_id = run_id.clone();
+
+            // Save to DB (fire-and-forget)
+            let pool = state.pool.clone();
+            let pk_save = auth.pubkey.clone();
+            let strat_cache = state.strategy_cache.clone();
+            let result_for_db = result.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    save_backtest_to_db(&pool, &pk_save, &strat_cache, &result_for_db).await
+                {
+                    log::warn!("failed to save backtest to DB: {e}");
+                }
+            });
 
             let ws_conns = state.ws_connections.clone();
             let pk = auth.pubkey.clone();
@@ -283,7 +352,15 @@ async fn run_backtest(
             .unwrap(),
         )
         .into_response(),
+    };
+
+    // Always remove from active set when done
+    {
+        let mut active = state.active_backtests.write().await;
+        active.remove(&auth.pubkey);
     }
+
+    response
 }
 
 // ── Trades Route ─────────────────────────────────────────────────────────────
@@ -845,4 +922,253 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>, pubkey: String) {
     }
 
     info!("WebSocket disconnected for user {}", pubkey);
+}
+
+// ── Backtest Persistence ────────────────────────────────────────────────────
+
+async fn save_backtest_to_db(
+    pool: &sqlx::PgPool,
+    pubkey: &str,
+    strategy_cache: &super::app_state::StrategyCache,
+    result: &BacktestResult,
+) -> Result<(), String> {
+    let cfg = &result.config;
+    let s = &result.summary;
+
+    // Resolve strategy name from cache or DB
+    let strategy_name = {
+        let guard = strategy_cache.read().await;
+        guard.get(&cfg.strategy_id).map(|c| c.name.clone())
+    };
+    let strategy_name = match strategy_name {
+        Some(name) => name,
+        None => sqlx::query_scalar::<_, String>("SELECT name FROM strategies WHERE id = $1")
+            .bind(cfg.strategy_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "Unknown".to_string()),
+    };
+
+    let exchange_str = cfg.source.exchange.name();
+    let market_str = cfg.source.market.as_str();
+
+    // Insert into backtest_runs
+    let run_row_id = sqlx::query_scalar::<_, sqlx::types::Uuid>(
+        "INSERT INTO backtest_runs (
+            pubkey, strategy_id, strategy_name, asset, resolution,
+            exchange, market, margin, lev, start_time, end_time,
+            net_pnl, return_pct, max_drawdown_pct, total_trades,
+            win_rate_pct, profit_factor, sharpe_ratio,
+            started_at, finished_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+            $12, $13, $14, $15, $16, $17, $18, $19, $20
+        ) RETURNING id",
+    )
+    .bind(pubkey)
+    .bind(cfg.strategy_id)
+    .bind(&strategy_name)
+    .bind(&cfg.asset)
+    .bind(cfg.resolution.to_string())
+    .bind(exchange_str)
+    .bind(market_str)
+    .bind(cfg.margin)
+    .bind(cfg.lev as i32)
+    .bind(cfg.start_time as i64)
+    .bind(cfg.end_time as i64)
+    .bind(s.net_pnl)
+    .bind(s.return_pct)
+    .bind(s.max_drawdown_pct)
+    .bind(s.total_trades as i32)
+    .bind(s.win_rate_pct)
+    .bind(s.profit_factor)
+    .bind(s.sharpe_ratio)
+    .bind(result.started_at as i64)
+    .bind(result.finished_at as i64)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("insert backtest_runs: {e}"))?;
+
+    // Insert into backtest_results
+    let trades_json =
+        serde_json::to_value(&result.trades).map_err(|e| format!("serialize trades: {e}"))?;
+    let equity_json =
+        serde_json::to_value(&result.equity_curve).map_err(|e| format!("serialize equity: {e}"))?;
+    let snapshots_json =
+        serde_json::to_value(&result.snapshots).map_err(|e| format!("serialize snapshots: {e}"))?;
+
+    sqlx::query(
+        "INSERT INTO backtest_results (
+            run_id, initial_equity, final_equity,
+            gross_profit, gross_loss, avg_win, avg_loss, expectancy,
+            wins, losses, candles_loaded, candles_processed,
+            max_drawdown_abs, trades, equity_curve, snapshots
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+        )",
+    )
+    .bind(run_row_id)
+    .bind(s.initial_equity)
+    .bind(s.final_equity)
+    .bind(s.gross_profit)
+    .bind(s.gross_loss)
+    .bind(s.avg_win)
+    .bind(s.avg_loss)
+    .bind(s.expectancy)
+    .bind(s.wins as i32)
+    .bind(s.losses as i32)
+    .bind(result.candles_loaded as i64)
+    .bind(result.candles_processed as i64)
+    .bind(s.max_drawdown_abs)
+    .bind(&trades_json)
+    .bind(&equity_json)
+    .bind(&snapshots_json)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("insert backtest_results: {e}"))?;
+
+    info!(
+        "backtest saved: run={} asset={} strategy={}",
+        run_row_id, cfg.asset, strategy_name
+    );
+    Ok(())
+}
+
+// ── Backtest History Routes ─────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct BacktestHistoryQuery {
+    asset: Option<String>,
+    strategy_id: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+async fn list_backtest_history(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Query(params): Query<BacktestHistoryQuery>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let limit = params.limit.unwrap_or(50).min(200);
+    let offset = params.offset.unwrap_or(0);
+
+    let rows = match (&params.asset, &params.strategy_id) {
+        (Some(asset), Some(sid)) => {
+            let strategy_id: uuid::Uuid = sid.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+            sqlx::query_as::<_, BacktestRunRow>(
+                "SELECT * FROM backtest_runs
+                 WHERE pubkey = $1 AND asset = $2 AND strategy_id = $3
+                 ORDER BY created_at DESC LIMIT $4 OFFSET $5",
+            )
+            .bind(&auth.pubkey)
+            .bind(asset.to_uppercase())
+            .bind(strategy_id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&state.pool)
+            .await
+        }
+        (Some(asset), None) => {
+            sqlx::query_as::<_, BacktestRunRow>(
+                "SELECT * FROM backtest_runs
+                 WHERE pubkey = $1 AND asset = $2
+                 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            )
+            .bind(&auth.pubkey)
+            .bind(asset.to_uppercase())
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&state.pool)
+            .await
+        }
+        (None, Some(sid)) => {
+            let strategy_id: uuid::Uuid = sid.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+            sqlx::query_as::<_, BacktestRunRow>(
+                "SELECT * FROM backtest_runs
+                 WHERE pubkey = $1 AND strategy_id = $2
+                 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            )
+            .bind(&auth.pubkey)
+            .bind(strategy_id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&state.pool)
+            .await
+        }
+        (None, None) => {
+            sqlx::query_as::<_, BacktestRunRow>(
+                "SELECT * FROM backtest_runs
+                 WHERE pubkey = $1
+                 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            )
+            .bind(&auth.pubkey)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&state.pool)
+            .await
+        }
+    };
+
+    match rows {
+        Ok(rows) => Ok(Json(serde_json::to_value(rows).unwrap())),
+        Err(e) => {
+            log::warn!("list_backtest_history error: {e}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn get_backtest_result(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<impl IntoResponse, StatusCode> {
+    // Verify ownership
+    let owns = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM backtest_runs WHERE id = $1 AND pubkey = $2)",
+    )
+    .bind(id)
+    .bind(&auth.pubkey)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if !owns {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let row =
+        sqlx::query_as::<_, BacktestResultRow>("SELECT * FROM backtest_results WHERE run_id = $1")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match row {
+        Some(r) => Ok(Json(serde_json::to_value(r).unwrap())),
+        None => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+async fn delete_backtest_run(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    let result = sqlx::query("DELETE FROM backtest_runs WHERE id = $1 AND pubkey = $2")
+        .bind(id)
+        .bind(&auth.pubkey)
+        .execute(&state.pool)
+        .await;
+
+    match result {
+        Ok(r) if r.rows_affected() > 0 => StatusCode::NO_CONTENT,
+        Ok(_) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            log::warn!("delete_backtest_run error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }

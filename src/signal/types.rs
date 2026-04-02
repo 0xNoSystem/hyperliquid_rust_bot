@@ -258,6 +258,8 @@ impl Tracker {
         for handler in self.indicators.values_mut() {
             handler.reset();
         }
+        self.prev_close = None;
+        self.next_close = None;
     }
 }
 

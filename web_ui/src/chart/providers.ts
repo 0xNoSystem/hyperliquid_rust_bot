@@ -7,14 +7,7 @@ export const EXCHANGE_OPTIONS: {
 }[] = [
     { value: "binance", label: "Binance", markets: ["spot", "futures"] },
     { value: "bybit", label: "Bybit", markets: ["spot", "futures"] },
-    { value: "okx", label: "OKX", markets: ["spot", "futures"] },
-    { value: "coinbase", label: "Coinbase", markets: ["spot"] },
-    { value: "kraken", label: "Kraken", markets: ["spot", "futures"] },
-    { value: "kucoin", label: "KuCoin", markets: ["spot", "futures"] },
-    { value: "bitget", label: "Bitget", markets: ["spot", "futures"] },
-    { value: "gateio", label: "Gate.io", markets: ["spot", "futures"] },
     { value: "htx", label: "HTX", markets: ["spot", "futures"] },
-    { value: "mexc", label: "MEXC", markets: ["spot", "futures"] },
 ];
 
 export const MARKET_OPTIONS: { value: MarketType; label: string }[] = [

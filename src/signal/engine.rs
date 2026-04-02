@@ -92,6 +92,13 @@ impl SignalEngine {
         }
     }
 
+    pub fn reset_for_backtest(&mut self) {
+        self.reset();
+        self.state = EngineState::Idle;
+        self.pending_orders = None;
+        self.strategy.reset_scope();
+    }
+
     pub fn add_indicator(&mut self, id: IndexId) {
         if let Some(tracker) = &mut self.trackers.get_mut(&id.1) {
             tracker.add_indicator(id.0);

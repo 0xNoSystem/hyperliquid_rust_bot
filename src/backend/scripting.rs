@@ -1,4 +1,4 @@
-use rhai::{AST, Engine};
+use rhai::{AST, Dynamic, Engine, Scope};
 
 use crate::strategy::{
     BusyType, Intent, LimitOptions, LiqSide, OnTimeout, Order, ReduceOrder, SizeSpec, TimeoutInfo,
@@ -33,6 +33,8 @@ impl CompiledStrategy {
 /// helper functions that strategy scripts can use.
 pub fn create_engine() -> Engine {
     let mut engine = Engine::new();
+    engine.set_optimization_level(rhai::OptimizationLevel::Full);
+    engine.set_strict_variables(true);
 
     // Limit script execution to prevent abuse
     engine.set_max_operations(100_000);
@@ -56,22 +58,63 @@ pub fn create_engine() -> Engine {
     engine
 }
 
+/// Build a Rhai scope declaring all variables a strategy script may reference.
+/// The values are dummies — only the *names* matter for strict-variable checking.
+fn validation_scope(extra: &[&str]) -> Scope<'static> {
+    let mut scope = Scope::new();
+
+    // Constants (sides + timeframes + liquidity + timeout actions)
+    scope.push_constant("LONG", Side::Long);
+    scope.push_constant("SHORT", Side::Short);
+    scope.push_constant("MIN1", TimeFrame::Min1);
+    scope.push_constant("MIN3", TimeFrame::Min3);
+    scope.push_constant("MIN5", TimeFrame::Min5);
+    scope.push_constant("MIN15", TimeFrame::Min15);
+    scope.push_constant("MIN30", TimeFrame::Min30);
+    scope.push_constant("HOUR1", TimeFrame::Hour1);
+    scope.push_constant("HOUR2", TimeFrame::Hour2);
+    scope.push_constant("HOUR4", TimeFrame::Hour4);
+    scope.push_constant("HOUR12", TimeFrame::Hour12);
+    scope.push_constant("DAY1", TimeFrame::Day1);
+    scope.push_constant("TAKER", LiqSide::Taker);
+    scope.push_constant("FORCE", OnTimeout::Force);
+    scope.push_constant("CANCEL", OnTimeout::Cancel);
+
+    // Context variables present in every script
+    scope.push("free_margin", 0.0_f64);
+    scope.push("lev", 0_i64);
+    scope.push("last_price", Dynamic::UNIT);
+    scope.push("indicators", Dynamic::UNIT);
+    scope.push("state", Dynamic::UNIT);
+
+    // Script-specific variables
+    for name in extra {
+        scope.push(*name, Dynamic::UNIT);
+    }
+    scope
+}
+
 /// Compile three strategy scripts (on_idle, on_open, on_busy) and return
-/// compiled ASTs. Returns an error string describing which script(s) failed.
+/// compiled ASTs. With strict variables enabled, the compiler rejects any
+/// reference to an undefined variable across ALL code branches.
 pub fn compile_strategy(
     engine: &Engine,
     on_idle: &str,
     on_open: &str,
     on_busy: &str,
 ) -> Result<CompiledStrategy, String> {
+    let idle_scope = validation_scope(&["is_armed"]);
+    let open_scope = validation_scope(&["open_position"]);
+    let busy_scope = validation_scope(&["busy_reason"]);
+
     let ast_on_idle = engine
-        .compile(on_idle)
+        .compile_with_scope(&idle_scope, on_idle)
         .map_err(|e| format!("on_idle compile error: {}", e))?;
     let ast_on_open = engine
-        .compile(on_open)
+        .compile_with_scope(&open_scope, on_open)
         .map_err(|e| format!("on_open compile error: {}", e))?;
     let ast_on_busy = engine
-        .compile(on_busy)
+        .compile_with_scope(&busy_scope, on_busy)
         .map_err(|e| format!("on_busy compile error: {}", e))?;
 
     Ok(CompiledStrategy {

@@ -1,10 +1,13 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use log::warn;
 use rhai::{Dynamic, Engine, Map, Scope};
+use rustc_hash::FxHasher;
+use std::hash::BuildHasherDefault;
 
 use crate::backend::scripting::CompiledStrategy;
 use crate::signal::ValuesMap;
@@ -31,47 +34,113 @@ pub type Armed = Option<u64>; //expiry time
 
 // ── Strategy (Rhai-powered Strat implementation) ────────────────────────────
 
+/// Pre-computed mapping from `IndexId` → Rhai map key string.
+/// Built once at construction, reused every tick to avoid per-tick `format!` allocations.
+type IndicatorKeyMap = HashMap<IndexId, String, BuildHasherDefault<FxHasher>>;
+
+fn build_indicator_keys(indicators: &[IndexId]) -> IndicatorKeyMap {
+    indicators
+        .iter()
+        .map(|(kind, tf)| {
+            let key = format!("{}_{}", kind.key(), tf.as_str());
+            ((*kind, *tf), key)
+        })
+        .collect()
+}
+
 pub struct Strategy {
     engine: Arc<Engine>,
     compiled: CompiledStrategy,
     indicators: Vec<IndexId>,
+    indicator_keys: IndicatorKeyMap,
     scope: Scope<'static>,
+    /// Number of constants pushed at the start of scope; rewind target.
+    scope_base: usize,
 }
 
 impl Strategy {
     pub fn new(engine: Arc<Engine>, compiled: CompiledStrategy, indicators: Vec<IndexId>) -> Self {
+        let indicator_keys = build_indicator_keys(&indicators);
+        let mut scope = Scope::new();
+        push_scope_constants(&mut scope);
+        scope.push("state", Map::new());
+        let scope_base = scope.len();
         Self {
             engine,
             compiled,
             indicators,
-            scope: Scope::new(),
+            indicator_keys,
+            scope,
+            scope_base,
         }
     }
 
-    fn push_context(&mut self, ctx: &StratContext) {
-        self.scope.set_or_push("free_margin", ctx.free_margin);
-        self.scope.set_or_push("lev", ctx.lev as i64);
-        self.scope.set_or_push("last_price", ctx.last_price);
-        self.scope
-            .set_or_push("indicators", indicators_to_map(ctx.indicators));
+    pub fn reset_scope(&mut self) {
+        self.scope = Scope::new();
+        push_scope_constants(&mut self.scope);
+        self.scope.push("state", Map::new());
     }
 
-    fn eval_ast(&mut self, ast: &rhai::AST) -> Option<Intent> {
-        match self
-            .engine
-            .eval_ast_with_scope::<Dynamic>(&mut self.scope, ast)
-        {
-            Ok(result) => {
-                if result.is_unit() {
-                    None
-                } else {
-                    result.try_cast::<Intent>()
-                }
+    /// Rewind scope to empty, then push fresh context variables.
+    /// This avoids the per-variable linear name scan of `set_or_push`.
+    fn push_context(&mut self, ctx: &StratContext) {
+        self.scope.rewind(self.scope_base);
+        self.scope.push("free_margin", ctx.free_margin);
+        self.scope.push("lev", ctx.lev as i64);
+        self.scope.push("last_price", ctx.last_price);
+        self.scope
+            .push("indicators", self.indicators_to_map(ctx.indicators));
+    }
+
+    /// Build the Rhai indicator map using pre-computed keys (no `format!` per tick).
+    fn indicators_to_map(&self, values: &ValuesMap) -> Map {
+        let mut map = Map::new();
+        for ((kind, tf), timed_value) in values.iter() {
+            if let Some(key) = self.indicator_keys.get(&(*kind, *tf)) {
+                map.insert(key.as_str().into(), Dynamic::from(*timed_value));
             }
-            Err(e) => {
-                warn!("Rhai eval error: {}", e);
+        }
+        map
+    }
+}
+
+/// Push trading-domain constants into a scope so scripts can reference them
+/// as bare identifiers (e.g. `MIN15` instead of `MIN15()`).
+fn push_scope_constants(scope: &mut Scope) {
+    // Sides
+    scope.push_constant("LONG", Side::Long);
+    scope.push_constant("SHORT", Side::Short);
+
+    // Timeframes
+    scope.push_constant("MIN1", TimeFrame::Min1);
+    scope.push_constant("MIN3", TimeFrame::Min3);
+    scope.push_constant("MIN5", TimeFrame::Min5);
+    scope.push_constant("MIN15", TimeFrame::Min15);
+    scope.push_constant("MIN30", TimeFrame::Min30);
+    scope.push_constant("HOUR1", TimeFrame::Hour1);
+    scope.push_constant("HOUR2", TimeFrame::Hour2);
+    scope.push_constant("HOUR4", TimeFrame::Hour4);
+    scope.push_constant("HOUR12", TimeFrame::Hour12);
+    scope.push_constant("DAY1", TimeFrame::Day1);
+
+    // Liquidity / timeout actions
+    scope.push_constant("TAKER", LiqSide::Taker);
+    scope.push_constant("FORCE", OnTimeout::Force);
+    scope.push_constant("CANCEL", OnTimeout::Cancel);
+}
+
+fn eval_ast(engine: &Engine, scope: &mut Scope, ast: &rhai::AST) -> Option<Intent> {
+    match engine.eval_ast_with_scope::<Dynamic>(scope, ast) {
+        Ok(result) => {
+            if result.is_unit() {
                 None
+            } else {
+                result.try_cast::<Intent>()
             }
+        }
+        Err(e) => {
+            warn!("Rhai eval error: {}", e);
+            None
         }
     }
 }
@@ -80,37 +149,25 @@ impl Strat for Strategy {
     fn on_idle(&mut self, ctx: StratContext, is_armed: Armed) -> Option<Intent> {
         self.push_context(&ctx);
         self.scope
-            .set_or_push("is_armed", is_armed.map(|t| t as i64).unwrap_or(-1_i64));
-        let ast = self.compiled.ast_on_idle.clone();
-        self.eval_ast(&ast)
+            .push("is_armed", is_armed.map(|t| t as i64).unwrap_or(-1_i64));
+        eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_idle)
     }
 
     fn on_open(&mut self, ctx: StratContext, open_pos: &OpenPosInfo) -> Option<Intent> {
         self.push_context(&ctx);
-        self.scope.set_or_push("open_position", *open_pos);
-        let ast = self.compiled.ast_on_open.clone();
-        self.eval_ast(&ast)
+        self.scope.push("open_position", *open_pos);
+        eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_open)
     }
 
     fn on_busy(&mut self, ctx: StratContext, busy_reason: BusyType) -> Option<Intent> {
         self.push_context(&ctx);
-        self.scope.set_or_push("busy_reason", busy_reason);
-        let ast = self.compiled.ast_on_busy.clone();
-        self.eval_ast(&ast)
+        self.scope.push("busy_reason", busy_reason);
+        eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_busy)
     }
 
     fn required_indicators(&self) -> Vec<IndexId> {
         self.indicators.clone()
     }
-}
-
-fn indicators_to_map(values: &ValuesMap) -> Map {
-    let mut map = Map::new();
-    for ((kind, tf), timed_value) in values.iter() {
-        let key = format!("{}_{}", kind.key(), tf.as_str()).into();
-        map.insert(key, Dynamic::from(*timed_value));
-    }
-    map
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

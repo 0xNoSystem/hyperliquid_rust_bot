@@ -1,14 +1,16 @@
-use crate::{Error, Price, TimeFrame};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use log::warn;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
-use std::sync::OnceLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep};
+
+use super::candle_store::{CandleKey, CandleStore};
+use crate::{Error, Price, TimeFrame};
 
 const MAX_HTTP_RETRIES: usize = 5;
 const RETRY_BASE_DELAY_MS: u64 = 500;
@@ -60,7 +62,7 @@ pub enum MarketType {
 }
 
 impl MarketType {
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             MarketType::Spot => "spot",
             MarketType::Futures => "futures",
@@ -73,19 +75,15 @@ impl MarketType {
 pub enum Exchange {
     Binance,
     Bybit,
-    Mexc,
     Htx,
-    Coinbase,
 }
 
 impl Exchange {
-    fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             Exchange::Binance => "Binance",
             Exchange::Bybit => "Bybit",
-            Exchange::Mexc => "MEXC",
             Exchange::Htx => "HTX",
-            Exchange::Coinbase => "Coinbase",
         }
     }
 }
@@ -136,17 +134,17 @@ impl DataSource {
         self.quote_asset = Self::normalize_quote(quote_asset.into());
     }
 
-    pub fn cache_key(&self, asset: &str, tf: TimeFrame) -> String {
-        let asset = asset.trim().to_uppercase();
-        format!(
-            "{}:{}:{}:{}:{}",
-            self.exchange.name(),
-            self.market.as_str(),
-            asset,
-            self.quote_asset,
-            tf
-        )
-        .to_uppercase()
+    pub fn candle_key(&self, asset: &str, tf: TimeFrame) -> CandleKey {
+        CandleKey {
+            exchange: self.exchange.name().to_uppercase(),
+            market: self.market.as_str().to_uppercase(),
+            asset_quote: format!(
+                "{}_{}",
+                asset.trim().to_uppercase(),
+                self.quote_asset.to_uppercase()
+            ),
+            tf: tf.to_string().to_uppercase(),
+        }
     }
 
     fn normalize_quote(quote_asset: String) -> String {
@@ -230,28 +228,6 @@ impl DataSource {
             (TimeFrame::Week, "W"),
             (TimeFrame::Month, "M"),
         ];
-        const MEXC_SPOT: &[(TimeFrame, &str)] = &[
-            (TimeFrame::Min1, "1m"),
-            (TimeFrame::Min5, "5m"),
-            (TimeFrame::Min15, "15m"),
-            (TimeFrame::Min30, "30m"),
-            (TimeFrame::Hour1, "60m"),
-            (TimeFrame::Hour4, "4h"),
-            (TimeFrame::Day1, "1d"),
-            (TimeFrame::Week, "1w"),
-            (TimeFrame::Month, "1M"),
-        ];
-        const MEXC_FUTURES: &[(TimeFrame, &str)] = &[
-            (TimeFrame::Min1, "Min1"),
-            (TimeFrame::Min5, "Min5"),
-            (TimeFrame::Min15, "Min15"),
-            (TimeFrame::Min30, "Min30"),
-            (TimeFrame::Hour1, "Min60"),
-            (TimeFrame::Hour4, "Hour4"),
-            (TimeFrame::Day1, "Day1"),
-            (TimeFrame::Week, "Week1"),
-            (TimeFrame::Month, "Month1"),
-        ];
         const HTX: &[(TimeFrame, &str)] = &[
             (TimeFrame::Min1, "1min"),
             (TimeFrame::Min5, "5min"),
@@ -263,30 +239,10 @@ impl DataSource {
             (TimeFrame::Week, "1week"),
             (TimeFrame::Month, "1mon"),
         ];
-        const COINBASE_SPOT: &[(TimeFrame, &str)] = &[
-            (TimeFrame::Min1, "60"),
-            (TimeFrame::Min5, "300"),
-            (TimeFrame::Min15, "900"),
-            (TimeFrame::Hour1, "3600"),
-            (TimeFrame::Day1, "86400"),
-        ];
-
         let map = match self.exchange {
             Exchange::Binance => BINANCE,
             Exchange::Bybit => BYBIT,
-            Exchange::Mexc => match self.market {
-                MarketType::Spot => MEXC_SPOT,
-                MarketType::Futures => MEXC_FUTURES,
-            },
             Exchange::Htx => HTX,
-            Exchange::Coinbase => match self.market {
-                MarketType::Spot => COINBASE_SPOT,
-                MarketType::Futures => {
-                    return Err(Error::Custom(
-                        "Coinbase futures not supported for candles".to_string(),
-                    ));
-                }
-            },
         };
 
         Ok(map)
@@ -297,7 +253,6 @@ impl DataSource {
             (Exchange::Binance, MarketType::Spot) => Some(1000),
             (Exchange::Binance, MarketType::Futures) => Some(1500),
             (Exchange::Bybit, _) => Some(1000),
-            (Exchange::Mexc, MarketType::Spot) => Some(1000),
             _ => None,
         }
     }
@@ -331,14 +286,6 @@ impl DataSource {
                     "https://api.bybit.com/v5/market/kline?category={category}&symbol={symbol}&interval={interval}&start={start}&end={end}&limit=1000"
                 )
             }
-            Exchange::Mexc => match self.market {
-                MarketType::Spot => format!(
-                    "https://api.mexc.com/api/v3/klines?symbol={symbol}&interval={interval}&startTime={start}&endTime={end}&limit=1000"
-                ),
-                MarketType::Futures => format!(
-                    "https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}&start={start}&end={end}"
-                ),
-            },
             Exchange::Htx => {
                 let base_ms = base_tf.to_millis();
                 let size = Self::calc_htx_size(start, end, base_ms);
@@ -354,20 +301,6 @@ impl DataSource {
                 };
                 format!("{base_url}?{symbol_key}={symbol}&period={interval}&size={size}")
             }
-            Exchange::Coinbase => match self.market {
-                MarketType::Spot => {
-                    let start_iso = Self::unix_ms_to_rfc3339(start);
-                    let end_iso = Self::unix_ms_to_rfc3339(end);
-                    format!(
-                        "https://api.coinbase.com/api/v3/brokerage/products/{symbol}/candles?granularity={interval}&start={start_iso}&end={end_iso}"
-                    )
-                }
-                MarketType::Futures => {
-                    return Err(Error::Custom(
-                        "Coinbase futures not supported for candles".to_string(),
-                    ));
-                }
-            },
         };
 
         Ok(url)
@@ -376,16 +309,8 @@ impl DataSource {
     fn format_asset(&self, asset: &str) -> Result<String, Error> {
         let (separator, lowercase) = match (self.exchange, self.market) {
             (Exchange::Binance, _) | (Exchange::Bybit, _) => ("", false),
-            (Exchange::Mexc, MarketType::Spot) => ("", false),
-            (Exchange::Mexc, MarketType::Futures) => ("_", false),
             (Exchange::Htx, MarketType::Spot) => ("", true),
             (Exchange::Htx, MarketType::Futures) => ("-", false),
-            (Exchange::Coinbase, MarketType::Spot) => ("-", false),
-            (Exchange::Coinbase, MarketType::Futures) => {
-                return Err(Error::Custom(
-                    "Coinbase futures not supported for candles".to_string(),
-                ));
-            }
         };
 
         let base = asset.trim().to_uppercase();
@@ -406,10 +331,7 @@ impl DataSource {
     }
 
     fn format_start_end(&self, start: u64, end: u64) -> (u64, u64) {
-        match (self.exchange, self.market) {
-            (Exchange::Mexc, MarketType::Futures) => (start / 1000, end / 1000),
-            _ => (start, end),
-        }
+        (start, end)
     }
 
     fn parse_candles(&self, body: &str, base_tf: TimeFrame) -> Result<Vec<Price>, Error> {
@@ -420,12 +342,7 @@ impl DataSource {
         match self.exchange {
             Exchange::Binance => parse_binance_like(&json, interval_ms),
             Exchange::Bybit => parse_bybit(&json, interval_ms),
-            Exchange::Mexc => match self.market {
-                MarketType::Spot => parse_binance_like(&json, interval_ms),
-                MarketType::Futures => parse_mexc_futures(&json, interval_ms),
-            },
             Exchange::Htx => parse_htx(&json, interval_ms),
-            Exchange::Coinbase => parse_coinbase(&json, interval_ms),
         }
     }
 
@@ -438,23 +355,6 @@ impl DataSource {
         size = size.saturating_add(10);
         size.clamp(1, 2000)
     }
-
-    fn unix_ms_to_rfc3339(ms: u64) -> String {
-        let secs = (ms / 1000) as i64;
-        let millis = (ms % 1000) as u32;
-        let days = secs.div_euclid(86_400);
-        let secs_of_day = secs.rem_euclid(86_400);
-
-        let (year, month, day) = civil_from_days(days);
-        let hour = (secs_of_day / 3600) as u32;
-        let minute = ((secs_of_day % 3600) / 60) as u32;
-        let second = (secs_of_day % 60) as u32;
-
-        format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-            year, month, day, hour, minute, second, millis
-        )
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -464,110 +364,25 @@ struct IntervalPlan {
     group_size: u64,
 }
 
-type CacheKey = String;
-
-#[derive(Clone, Default)]
-pub struct CandleCache {
-    inner: Arc<RwLock<HashMap<CacheKey, BTreeMap<u64, Price>>>>,
-}
-
-impl CandleCache {
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    pub fn session() -> Self {
-        static SESSION_CACHE: OnceLock<CandleCache> = OnceLock::new();
-        SESSION_CACHE.get_or_init(CandleCache::new).clone()
-    }
-
-    async fn lookup_range(
-        &self,
-        key: &str,
-        normalized_start: u64,
-        normalized_end: u64,
-        candle_interval_ms: u64,
-    ) -> CacheLookup {
-        let mut guard = self.inner.write().await;
-        let series = guard.entry(key.to_string()).or_insert_with(BTreeMap::new);
-
-        let cached_in_range =
-            count_cached_range(series, normalized_start, normalized_end, candle_interval_ms);
-        let (missing, has_cached) =
-            collect_missing(series, normalized_start, normalized_end, candle_interval_ms);
-        let cached = if missing.is_empty() && has_cached {
-            Some(cache_range_to_vec(series, normalized_start, normalized_end))
-        } else {
-            None
-        };
-
-        CacheLookup {
-            missing,
-            cached,
-            cached_in_range,
-        }
-    }
-
-    async fn insert_many(&self, key: &str, prices: Vec<Price>) {
-        let mut guard = self.inner.write().await;
-        let series = guard.entry(key.to_string()).or_insert_with(BTreeMap::new);
-        for price in prices {
-            series.insert(price.open_time, price);
-        }
-    }
-
-    async fn count_range(&self, key: &str, start: u64, end: u64, step: u64) -> u64 {
-        let guard = self.inner.read().await;
-        guard
-            .get(key)
-            .map(|series| count_cached_range(series, start, end, step))
-            .unwrap_or(0)
-    }
-
-    async fn range_to_vec(&self, key: &str, start: u64, end: u64) -> Vec<Price> {
-        let guard = self.inner.read().await;
-        guard
-            .get(key)
-            .map(|series| cache_range_to_vec(series, start, end))
-            .unwrap_or_default()
-    }
-}
-
-struct CacheLookup {
-    missing: Vec<MissingSegment>,
-    cached: Option<Vec<Price>>,
-    cached_in_range: u64,
-}
-
 pub struct Fetcher {
     client: Client,
     pub current_source: DataSource,
-    cache: CandleCache,
+    store: Arc<CandleStore>,
     request_limiter: Option<RequestLimiter>,
 }
 
 impl Fetcher {
-    pub fn new(current_source: DataSource) -> Self {
-        Self::with_cache(current_source, CandleCache::session())
-    }
-
-    pub fn with_cache(current_source: DataSource, cache: CandleCache) -> Self {
+    pub fn new(current_source: DataSource, store: Arc<CandleStore>) -> Self {
         Self {
             client: Client::new(),
             current_source,
-            cache,
+            store,
             request_limiter: None,
         }
     }
 
     pub fn set_source(&mut self, source: DataSource) {
         self.current_source = source;
-    }
-
-    pub fn set_cache(&mut self, cache: CandleCache) {
-        self.cache = cache;
     }
 
     pub(crate) fn set_request_limiter(&mut self, limiter: Option<RequestLimiter>) {
@@ -624,16 +439,25 @@ impl Fetcher {
         let estimated_total =
             estimate_points_in_range(normalized_start, normalized_end, candle_interval_ms).max(1);
 
-        let cache_key = self.current_source.cache_key(&asset, tf);
-        let lookup = self
-            .cache
-            .lookup_range(
-                &cache_key,
-                normalized_start,
-                normalized_end,
-                candle_interval_ms,
-            )
+        let candle_key = self.current_source.candle_key(&asset, tf);
+
+        // Acquire per-key lock. If another task is already fetching this key,
+        // we subscribe to its progress and wait — avoiding duplicate HTTP calls.
+        let guard = self
+            .store
+            .acquire_key(&candle_key, |loaded, total| {
+                on_progress(loaded, total);
+            })
             .await;
+
+        // If we waited on another fetcher, data should now be cached.
+        // Do a fresh lookup either way.
+        let lookup = self.store.lookup_range(
+            &candle_key,
+            normalized_start,
+            normalized_end,
+            candle_interval_ms,
+        );
         let missing = lookup.missing;
         let cached = lookup.cached;
         let cached_in_range = lookup.cached_in_range;
@@ -647,6 +471,11 @@ impl Fetcher {
             return Ok(values);
         }
 
+        if !guard.is_first() {
+            // We waited but data is still incomplete — partial overlap.
+            // Fall through to fetch remaining segments while holding no lock.
+        }
+
         let mut loaded = cached_in_range.min(estimated_total);
         for segment in missing {
             let segment_total =
@@ -658,25 +487,20 @@ impl Fetcher {
                         .saturating_add(segment_loaded.min(segment_total))
                         .min(estimated_total);
                     on_progress(progress, estimated_total);
+                    guard.send_progress(progress, estimated_total);
                 })
                 .await?;
-            self.cache.insert_many(&cache_key, data).await;
+            self.store.insert_many(&candle_key, &data);
             loaded = self
-                .cache
-                .count_range(
-                    &cache_key,
-                    normalized_start,
-                    normalized_end,
-                    candle_interval_ms,
-                )
-                .await;
+                .store
+                .count_range(&candle_key, normalized_start, normalized_end);
             on_progress(loaded.min(estimated_total), estimated_total);
+            guard.send_progress(loaded.min(estimated_total), estimated_total);
         }
 
         let out = self
-            .cache
-            .range_to_vec(&cache_key, normalized_start, normalized_end)
-            .await;
+            .store
+            .range_to_vec(&candle_key, normalized_start, normalized_end);
         on_progress(out.len() as u64, estimated_total.max(out.len() as u64));
         Ok(out)
     }
@@ -751,42 +575,7 @@ impl Fetcher {
                 }
                 out
             }
-            Exchange::Mexc => {
-                if self.current_source.market == MarketType::Spot {
-                    let limit = self.current_source.request_limit().unwrap_or(1000);
-                    let mut cursor = start;
-                    let mut out = Vec::new();
-                    let mut loaded = 0_u64;
-                    while cursor < end {
-                        let data = self
-                            .fetch_once(asset, plan.base_tf, plan.interval, cursor, end)
-                            .await?;
-                        if data.is_empty() {
-                            break;
-                        }
-                        let last_start = data.iter().map(|p| p.open_time).max().unwrap_or(cursor);
-                        let count = data.len();
-                        out.extend(data);
-                        loaded = loaded.saturating_add(count as u64);
-                        on_segment_progress(loaded);
-                        if last_start <= cursor {
-                            break;
-                        }
-                        cursor = last_start + 1;
-                        if count < limit {
-                            break;
-                        }
-                    }
-                    out
-                } else {
-                    let out = self
-                        .fetch_once(asset, plan.base_tf, plan.interval, start, end)
-                        .await?;
-                    on_segment_progress(out.len() as u64);
-                    out
-                }
-            }
-            Exchange::Htx | Exchange::Coinbase => {
+            Exchange::Htx => {
                 let out = self
                     .fetch_once(asset, plan.base_tf, plan.interval, start, end)
                     .await?;
@@ -916,12 +705,6 @@ impl Fetcher {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MissingSegment {
-    start: u64,
-    end: u64,
-}
-
 fn normalize_range(start_ms: u64, end_ms: u64, candle_interval_ms: u64) -> (u64, u64) {
     let normalized_start = start_ms.saturating_sub(start_ms % candle_interval_ms);
     let normalized_end = std::cmp::max(
@@ -930,60 +713,6 @@ fn normalize_range(start_ms: u64, end_ms: u64, candle_interval_ms: u64) -> (u64,
     );
 
     (normalized_start, normalized_end)
-}
-
-fn collect_missing(
-    cache: &BTreeMap<u64, Price>,
-    normalized_start: u64,
-    normalized_end: u64,
-    candle_interval_ms: u64,
-) -> (Vec<MissingSegment>, bool) {
-    let mut missing = Vec::new();
-    let mut gap_start: Option<u64> = None;
-    let mut has_cached = false;
-
-    let mut ts = normalized_start;
-    while ts < normalized_end {
-        if cache.contains_key(&ts) {
-            has_cached = true;
-            if let Some(start) = gap_start.take() {
-                missing.push(MissingSegment { start, end: ts });
-            }
-        } else if gap_start.is_none() {
-            gap_start = Some(ts);
-        }
-        ts = ts.saturating_add(candle_interval_ms);
-    }
-
-    if let Some(start) = gap_start {
-        missing.push(MissingSegment {
-            start,
-            end: normalized_end,
-        });
-    }
-
-    (missing, has_cached)
-}
-
-#[cfg(test)]
-fn cache_to_vec(cache: &BTreeMap<u64, Price>) -> Vec<Price> {
-    cache.values().copied().collect()
-}
-
-fn cache_range_to_vec(cache: &BTreeMap<u64, Price>, start: u64, end: u64) -> Vec<Price> {
-    cache.range(start..end).map(|(_, p)| *p).collect()
-}
-
-fn count_cached_range(cache: &BTreeMap<u64, Price>, start: u64, end: u64, step: u64) -> u64 {
-    let mut count = 0_u64;
-    let mut ts = start;
-    while ts < end {
-        if cache.contains_key(&ts) {
-            count += 1;
-        }
-        ts = ts.saturating_add(step);
-    }
-    count
 }
 
 fn estimate_points_in_range(start: u64, end: u64, step: u64) -> u64 {
@@ -1151,60 +880,6 @@ fn parse_bybit(json: &Value, interval_ms: u64) -> Result<Vec<Price>, Error> {
     Ok(out)
 }
 
-fn parse_mexc_futures(json: &Value, interval_ms: u64) -> Result<Vec<Price>, Error> {
-    let data = json
-        .get("data")
-        .ok_or_else(|| Error::Custom("Missing data".to_string()))?;
-    let times = data
-        .get("time")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::Custom("Missing time array".to_string()))?;
-    let open = data
-        .get("open")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::Custom("Missing open array".to_string()))?;
-    let high = data
-        .get("high")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::Custom("Missing high array".to_string()))?;
-    let low = data
-        .get("low")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::Custom("Missing low array".to_string()))?;
-    let close = data
-        .get("close")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::Custom("Missing close array".to_string()))?;
-    let vol = data
-        .get("vol")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::Custom("Missing vol array".to_string()))?;
-
-    let len = times.len();
-    let mut out = Vec::with_capacity(len);
-    for idx in 0..len {
-        let start_sec = parse_u64(&times[idx])?;
-        let start = start_sec * 1000;
-        let open = parse_f64(&open[idx])?;
-        let high = parse_f64(&high[idx])?;
-        let low = parse_f64(&low[idx])?;
-        let close = parse_f64(&close[idx])?;
-        let volume = parse_f64(&vol[idx])?;
-        out.push(build_price(
-            start,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            interval_ms,
-            None,
-        ));
-    }
-
-    Ok(out)
-}
-
 fn parse_htx(json: &Value, interval_ms: u64) -> Result<Vec<Price>, Error> {
     let list = json
         .get("data")
@@ -1252,84 +927,6 @@ fn parse_htx(json: &Value, interval_ms: u64) -> Result<Vec<Price>, Error> {
             interval_ms,
             None,
         ));
-    }
-
-    Ok(out)
-}
-
-fn parse_coinbase(json: &Value, interval_ms: u64) -> Result<Vec<Price>, Error> {
-    let list = json
-        .get("candles")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::Custom("Missing candles".to_string()))?;
-
-    let mut out = Vec::with_capacity(list.len());
-    for item in list {
-        match item {
-            Value::Array(arr) => {
-                if arr.len() < 6 {
-                    return Err(Error::Custom("Invalid candle format".to_string()));
-                }
-                let start = parse_u64(&arr[0])? * 1000;
-                let low = parse_f64(&arr[1])?;
-                let high = parse_f64(&arr[2])?;
-                let open = parse_f64(&arr[3])?;
-                let close = parse_f64(&arr[4])?;
-                let volume = parse_f64(&arr[5])?;
-                out.push(build_price(
-                    start,
-                    open,
-                    high,
-                    low,
-                    close,
-                    volume,
-                    interval_ms,
-                    None,
-                ));
-            }
-            Value::Object(obj) => {
-                let start_val = obj
-                    .get("start")
-                    .ok_or_else(|| Error::Custom("Missing start".to_string()))?;
-                let start = if let Some(s) = start_val.as_str() {
-                    parse_rfc3339_to_ms(s)
-                        .ok_or_else(|| Error::Custom("Invalid start timestamp".to_string()))?
-                } else {
-                    parse_u64(start_val)? * 1000
-                };
-                let open = parse_f64(
-                    obj.get("open")
-                        .ok_or_else(|| Error::Custom("Missing open".to_string()))?,
-                )?;
-                let high = parse_f64(
-                    obj.get("high")
-                        .ok_or_else(|| Error::Custom("Missing high".to_string()))?,
-                )?;
-                let low = parse_f64(
-                    obj.get("low")
-                        .ok_or_else(|| Error::Custom("Missing low".to_string()))?,
-                )?;
-                let close = parse_f64(
-                    obj.get("close")
-                        .ok_or_else(|| Error::Custom("Missing close".to_string()))?,
-                )?;
-                let volume = parse_f64(
-                    obj.get("volume")
-                        .ok_or_else(|| Error::Custom("Missing volume".to_string()))?,
-                )?;
-                out.push(build_price(
-                    start,
-                    open,
-                    high,
-                    low,
-                    close,
-                    volume,
-                    interval_ms,
-                    None,
-                ));
-            }
-            _ => return Err(Error::Custom("Invalid candle entry".to_string())),
-        }
     }
 
     Ok(out)
@@ -1387,90 +984,6 @@ fn parse_f64(value: &Value) -> Result<f64, Error> {
     Err(Error::Custom("Invalid float".to_string()))
 }
 
-fn parse_rfc3339_to_ms(input: &str) -> Option<u64> {
-    let bytes = input.as_bytes();
-    if bytes.len() < 20 {
-        return None;
-    }
-    let year = parse_int_range(input, 0, 4)? as i32;
-    let month = parse_int_range(input, 5, 7)? as u32;
-    let day = parse_int_range(input, 8, 10)? as u32;
-    let hour = parse_int_range(input, 11, 13)? as u32;
-    let minute = parse_int_range(input, 14, 16)? as u32;
-    let second = parse_int_range(input, 17, 19)? as u32;
-
-    let mut millis = 0u32;
-    if bytes.get(19) == Some(&b'.') {
-        let mut idx = 20;
-        let mut factor = 100;
-        while idx < bytes.len() {
-            let b = bytes[idx];
-            if b == b'Z' {
-                break;
-            }
-            if !b.is_ascii_digit() {
-                return None;
-            }
-            if factor > 0 {
-                millis += (b - b'0') as u32 * factor;
-                factor /= 10;
-            }
-            idx += 1;
-        }
-    }
-
-    if !input.ends_with('Z') {
-        return None;
-    }
-
-    let days = days_from_civil(year, month, day)?;
-    let secs = days
-        .checked_mul(86_400)?
-        .checked_add(hour as i64 * 3600)?
-        .checked_add(minute as i64 * 60)?
-        .checked_add(second as i64)?;
-    let ms = secs.checked_mul(1000)?.checked_add(millis as i64)?;
-    if ms < 0 { None } else { Some(ms as u64) }
-}
-
-fn parse_int_range(input: &str, start: usize, end: usize) -> Option<u32> {
-    input.get(start..end)?.parse::<u32>().ok()
-}
-
-fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let mut y = year as i64;
-    let m = month as i64;
-    let d = day as i64;
-    y -= if m <= 2 { 1 } else { 0 };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = m + if m > 2 { -3 } else { 9 };
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    Some(era * 146_097 + doe - 719_468)
-}
-
-fn civil_from_days(days: i64) -> (i32, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 {
-        z / 146_097
-    } else {
-        (z - 146_096) / 146_097
-    };
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let mut y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = mp + if mp < 10 { 3 } else { -9 };
-    y += if m <= 2 { 1 } else { 0 };
-    (y as i32, m as u32, d as u32)
-}
-
 fn div_ceil(value: u64, divisor: u64) -> u64 {
     if divisor == 0 {
         return 0;
@@ -1491,10 +1004,13 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn test_cache_key_includes_quote() {
+    fn test_candle_key_includes_quote() {
         let source = DataSource::with_quote(Exchange::Binance, MarketType::Spot, "usdc");
-        let key = source.cache_key("btc", TimeFrame::Hour1);
-        assert_eq!(key, "BINANCE:SPOT:BTC:USDC:1H");
+        let key = source.candle_key("btc", TimeFrame::Hour1);
+        assert_eq!(key.exchange, "BINANCE");
+        assert_eq!(key.market, "SPOT");
+        assert_eq!(key.asset_quote, "BTC_USDC");
+        assert_eq!(key.tf, "1H");
     }
 
     #[test]
@@ -1502,55 +1018,8 @@ mod tests {
         let binance = DataSource::with_quote(Exchange::Binance, MarketType::Spot, "usdc");
         assert_eq!(binance.format_asset("btc").unwrap(), "BTCUSDC");
 
-        let coinbase = DataSource::with_quote(Exchange::Coinbase, MarketType::Spot, "usd");
-        assert_eq!(coinbase.format_asset("eth").unwrap(), "ETH-USD");
-
         let htx = DataSource::with_quote(Exchange::Htx, MarketType::Spot, "usdt");
         assert_eq!(htx.format_asset("btc").unwrap(), "btcusdt");
-
-        let mexc = DataSource::with_quote(Exchange::Mexc, MarketType::Futures, "usdt");
-        assert_eq!(mexc.format_asset("eth").unwrap(), "ETH_USDT");
-    }
-
-    #[test]
-    fn test_interval_plan_fallback() {
-        let source = DataSource::with_quote(Exchange::Coinbase, MarketType::Spot, "usd");
-        let plan = source.interval_plan(TimeFrame::Min3).unwrap();
-        assert_eq!(plan.base_tf, TimeFrame::Min1);
-        assert_eq!(plan.group_size, 3);
-        assert_eq!(plan.interval, "60");
-    }
-
-    #[test]
-    fn test_collect_missing_segments() {
-        let mut cache = BTreeMap::new();
-        let interval = 60_000;
-        cache.insert(0, build_price(0, 1.0, 1.0, 1.0, 1.0, 1.0, interval, None));
-        cache.insert(
-            interval,
-            build_price(interval, 1.0, 1.0, 1.0, 1.0, 1.0, interval, None),
-        );
-
-        let (missing, has_cached) = collect_missing(&cache, 0, interval * 3, interval);
-        assert!(has_cached);
-        assert_eq!(
-            missing,
-            vec![MissingSegment {
-                start: interval * 2,
-                end: interval * 3
-            }]
-        );
-    }
-
-    #[test]
-    fn test_cache_to_vec() {
-        let mut cache = BTreeMap::new();
-        cache.insert(2, build_price(2, 1.0, 1.0, 1.0, 1.0, 1.0, 1, None));
-        cache.insert(1, build_price(1, 1.0, 1.0, 1.0, 1.0, 1.0, 1, None));
-        let values = cache_to_vec(&cache);
-        assert_eq!(values.len(), 2);
-        assert_eq!(values[0].open_time, 1);
-        assert_eq!(values[1].open_time, 2);
     }
 
     #[test]
@@ -1584,26 +1053,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_mexc_futures() {
-        let json = json!({
-            "data": {
-                "time": [1, 2],
-                "open": ["1", "2"],
-                "high": ["2", "3"],
-                "low": ["0.5", "1.5"],
-                "close": ["1.5", "2.5"],
-                "vol": ["10", "20"]
-            }
-        });
-        let out = parse_mexc_futures(&json, 60_000).unwrap();
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].open_time, 1000);
-        assert_eq!(out[1].open_time, 2000);
-        assert_eq!(out[0].close, 1.5);
-        assert_eq!(out[1].vlm, 20.0);
-    }
-
-    #[test]
     fn test_parse_htx() {
         let json = json!({
             "data": [
@@ -1616,20 +1065,6 @@ mod tests {
         assert_eq!(price.open_time, 1000);
         assert_eq!(price.close_time, 61_000);
         assert_eq!(price.high, 2.0);
-        assert_eq!(price.vlm, 10.0);
-    }
-
-    #[test]
-    fn test_parse_coinbase_array() {
-        let json = json!({"candles": [[1, 0.5, 2, 1, 1.5, 10]]});
-        let out = parse_coinbase(&json, 60_000).unwrap();
-        assert_eq!(out.len(), 1);
-        let price = out[0];
-        assert_eq!(price.open_time, 1000);
-        assert_eq!(price.open, 1.0);
-        assert_eq!(price.high, 2.0);
-        assert_eq!(price.low, 0.5);
-        assert_eq!(price.close, 1.5);
         assert_eq!(price.vlm, 10.0);
     }
 }

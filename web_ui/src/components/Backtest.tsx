@@ -3,9 +3,6 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
     TIMEFRAME_CAMELCASE,
     TF_TO_MS,
-    fromTimeFrame,
-    formatPrice,
-    num,
     sanitizeAsset,
 } from "../types";
 import type { BacktestProgress, BacktestResult, TimeFrame } from "../types";
@@ -25,12 +22,12 @@ import {
     getMarketsForExchange,
 } from "../chart/providers";
 import AssetIcon from "../chart/visual/AssetIcon";
-import { formatUTC } from "../chart/utils";
 import type { CandleData } from "../chart/utils";
 import { useChartContext } from "../chart/ChartContextStore";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { useAuth } from "../context/AuthContextStore";
 import type { Strategy } from "../strats";
+import BacktestResultView from "./BacktestResult";
 
 type RangePreset = "24H" | "7D" | "30D" | "YTD" | "CUSTOM";
 
@@ -82,7 +79,7 @@ const QUOTE_ASSET_OPTIONS = ["USDT", "USDC"] as const;
 type QuoteAsset = (typeof QUOTE_ASSET_OPTIONS)[number];
 const BACKTEST_RESOLUTION: TimeFrame = "min1";
 
-type BacktestExchange = "binance" | "bybit" | "mexc" | "htx" | "coinbase";
+type BacktestExchange = "binance" | "bybit" | "htx";
 
 type BacktestRunRequestPayload = {
     runId: string;
@@ -119,21 +116,17 @@ type BacktestRunErrorPayload = {
     progress?: BacktestProgress[];
 };
 
-function toBacktestExchange(exchange: ExchangeId): BacktestExchange | null {
-    switch (exchange) {
-        case "binance":
-        case "bybit":
-        case "mexc":
-        case "htx":
-        case "coinbase":
-            return exchange;
-        default:
-            return null;
-    }
+function toBacktestExchange(exchange: ExchangeId): BacktestExchange {
+    return exchange;
 }
 
 function formatUtcMinute(ts: number): string {
     return new Date(ts).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
+/** Convert epoch ms to the `YYYY-MM-DDTHH:MM` format that datetime-local inputs expect (UTC). */
+function msToDatetimeLocal(ms: number): string {
+    return new Date(ms).toISOString().slice(0, 16);
 }
 
 function getDaysInMonth(year: number, month: number): number {
@@ -368,22 +361,13 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
 
     const canRunBacktest = useMemo(() => {
         if (!routeAsset) return false;
-        if (!selectedBacktestExchange) return false;
         if (!backtestWindow) return false;
         if (!Number.isFinite(margin) || margin <= 0) return false;
         if (!Number.isFinite(lev) || lev < 1) return false;
         if (!Number.isFinite(warmupCandles) || warmupCandles < 0) return false;
         if (isSubmittingBacktest) return false;
         return true;
-    }, [
-        routeAsset,
-        selectedBacktestExchange,
-        backtestWindow,
-        margin,
-        lev,
-        warmupCandles,
-        isSubmittingBacktest,
-    ]);
+    }, [routeAsset, backtestWindow, margin, lev, warmupCandles, isSubmittingBacktest]);
 
     const activeRun = useMemo(
         () => (activeRunId ? (backtestRuns[activeRunId] ?? null) : null),
@@ -434,12 +418,6 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
 
         if (!routeAsset) {
             setBacktestError("Select an asset before running the backtest.");
-            return;
-        }
-        if (!selectedBacktestExchange) {
-            setBacktestError(
-                "Selected exchange is not supported by backend backtesting yet."
-            );
             return;
         }
         if (!backtestWindow) {
@@ -801,40 +779,73 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                         </label>
                     </div>
 
-                    <div className="flex flex-col gap-2 p-2 text-sm md:flex-row md:items-center md:justify-between">
-                        <div className="text-app-text/70">
-                            Range:{" "}
-                            <span className="text-app-text font-medium">
+                    <div className="flex flex-col gap-2 p-2 text-sm">
+                        <div className="flex flex-wrap items-end gap-3">
+                            <label className="text-app-text/75 flex flex-col gap-1">
+                                Start (UTC)
+                                <input
+                                    type="datetime-local"
+                                    value={msToDatetimeLocal(
+                                        backtestWindow?.start ?? startTime
+                                    )}
+                                    onChange={(e) => {
+                                        const ms = new Date(
+                                            e.target.value + "Z"
+                                        ).getTime();
+                                        if (!Number.isNaN(ms)) {
+                                            setTimeRange(
+                                                ms,
+                                                backtestWindow?.end ?? endTime
+                                            );
+                                        }
+                                    }}
+                                    className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                                />
+                            </label>
+                            <label className="text-app-text/75 flex flex-col gap-1">
+                                End (UTC)
+                                <input
+                                    type="datetime-local"
+                                    value={msToDatetimeLocal(
+                                        backtestWindow?.end ?? endTime
+                                    )}
+                                    onChange={(e) => {
+                                        const ms = new Date(
+                                            e.target.value + "Z"
+                                        ).getTime();
+                                        if (!Number.isNaN(ms)) {
+                                            setTimeRange(
+                                                backtestWindow?.start ??
+                                                    startTime,
+                                                ms
+                                            );
+                                        }
+                                    }}
+                                    className="border-line-muted bg-ink-80 text-app-text rounded border px-2 py-1"
+                                />
+                            </label>
+                            <div className="text-app-text/50 pb-1 text-xs">
                                 {backtestWindowLabel}
-                            </span>
-                            {intervalOn && (
-                                <span className="text-app-text/60 ml-2">
-                                    (from interval window)
-                                </span>
-                            )}
+                                {intervalOn && " (interval)"}
+                            </div>
                         </div>
 
-                        <button
-                            onClick={() => void runBacktest()}
-                            disabled={!canRunBacktest}
-                            className={`rounded border px-4 py-1.5 text-sm font-semibold transition ${
-                                canRunBacktest
-                                    ? "border-accent-brand-strong text-accent-brand hover:bg-accent-brand-strong/20"
-                                    : "border-line-weak text-app-text/35 cursor-not-allowed"
-                            }`}
-                        >
-                            {isSubmittingBacktest
-                                ? "Running..."
-                                : "Run Backtest"}
-                        </button>
+                        <div className="flex items-center justify-end">
+                            <button
+                                onClick={() => void runBacktest()}
+                                disabled={!canRunBacktest}
+                                className={`rounded border px-4 py-1.5 text-sm font-semibold transition ${
+                                    canRunBacktest
+                                        ? "border-accent-brand-strong text-accent-brand hover:bg-accent-brand-strong/20"
+                                        : "border-line-weak text-app-text/35 cursor-not-allowed"
+                                }`}
+                            >
+                                {isSubmittingBacktest
+                                    ? "Running..."
+                                    : "Run Backtest"}
+                            </button>
+                        </div>
                     </div>
-
-                    {!selectedBacktestExchange && (
-                        <p className="text-accent-danger-soft px-2 text-xs">
-                            Selected exchange is chart-only for now. Backtesting
-                            supports Binance, Bybit, MEXC, HTX, Coinbase.
-                        </p>
-                    )}
 
                     {backtestError && (
                         <p className="text-accent-danger-soft px-2 text-xs">
@@ -1123,406 +1134,10 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                             </div>
                         )}
 
-                        {resultViewState === "result" && (
-                            <div className="border-line-muted bg-ink-80 mx-auto mt-2 flex min-h-0 w-full flex-1 flex-col rounded border p-4 text-sm">
-                                {activeRunId && (
-                                    <p className="text-app-text/70 font-mono text-xs">
-                                        Run ID: {activeRunId}
-                                    </p>
-                                )}
-
-                                {resultToRender && (
-                                    <>
-                                        <div className="border-line-subtle mt-3 rounded border p-3">
-                                            <p className="text-app-text/50 text-xs uppercase">
-                                                Run Config
-                                            </p>
-                                            <div className="mt-2 grid grid-cols-1 gap-2 text-xs md:grid-cols-2 lg:grid-cols-3">
-                                                <div>
-                                                    <p className="text-app-text/50">
-                                                        Asset
-                                                    </p>
-                                                    <p className="text-app-text">
-                                                        {
-                                                            resultToRender
-                                                                .config.asset
-                                                        }
-                                                    </p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-app-text/50">
-                                                        Source
-                                                    </p>
-                                                    <p className="text-app-text">
-                                                        {resultToRender.config.source.exchange.toUpperCase()}{" "}
-                                                        /{" "}
-                                                        {resultToRender.config.source.market.toUpperCase()}{" "}
-                                                        /{" "}
-                                                        {
-                                                            resultToRender
-                                                                .config.source
-                                                                .quoteAsset
-                                                        }
-                                                    </p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-app-text/50">
-                                                        Strategy
-                                                    </p>
-                                                    <p className="text-app-text">
-                                                        {
-                                                            resultToRender
-                                                                .config
-                                                                .strategyId
-                                                        }
-                                                    </p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-app-text/50">
-                                                        Resolution
-                                                    </p>
-                                                    <p className="text-app-text">
-                                                        {fromTimeFrame(
-                                                            resultToRender
-                                                                .config
-                                                                .resolution
-                                                        )}
-                                                    </p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-app-text/50">
-                                                        Window (UTC)
-                                                    </p>
-                                                    <p className="text-app-text">
-                                                        {formatUtcMinute(
-                                                            resultToRender
-                                                                .config
-                                                                .startTime
-                                                        )}{" "}
-                                                        -{" "}
-                                                        {formatUtcMinute(
-                                                            resultToRender
-                                                                .config.endTime
-                                                        )}
-                                                    </p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-app-text/50">
-                                                        Margin / Leverage
-                                                    </p>
-                                                    <p className="text-app-text">
-                                                        {num(
-                                                            resultToRender
-                                                                .config.margin,
-                                                            2
-                                                        )}{" "}
-                                                        /{" "}
-                                                        {
-                                                            resultToRender
-                                                                .config.lev
-                                                        }
-                                                        x
-                                                    </p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-app-text/50">
-                                                        Fees (bps)
-                                                    </p>
-                                                    <p className="text-app-text">
-                                                        taker{" "}
-                                                        {
-                                                            resultToRender
-                                                                .config
-                                                                .takerFeeBps
-                                                        }{" "}
-                                                        / maker{" "}
-                                                        {
-                                                            resultToRender
-                                                                .config
-                                                                .makerFeeBps
-                                                        }
-                                                    </p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-app-text/50">
-                                                        Funding (bps / 8h)
-                                                    </p>
-                                                    <p className="text-app-text">
-                                                        {num(
-                                                            resultToRender
-                                                                .config
-                                                                .fundingRateBpsPer8h,
-                                                            4
-                                                        )}
-                                                    </p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-app-text/50">
-                                                        Snapshot Interval
-                                                    </p>
-                                                    <p className="text-app-text">
-                                                        {
-                                                            resultToRender
-                                                                .config
-                                                                .snapshotIntervalCandles
-                                                        }{" "}
-                                                        candles
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
-                                            <div className="border-line-subtle rounded border p-2">
-                                                <p className="text-app-text/50 text-xs">
-                                                    Trades
-                                                </p>
-                                                <p>
-                                                    {
-                                                        resultToRender.summary
-                                                            .totalTrades
-                                                    }
-                                                </p>
-                                            </div>
-                                            <div className="border-line-subtle rounded border p-2">
-                                                <p className="text-app-text/50 text-xs">
-                                                    Net PnL
-                                                </p>
-                                                <p
-                                                    className={
-                                                        resultToRender.summary
-                                                            .netPnl >= 0
-                                                            ? "text-accent-success"
-                                                            : "text-accent-danger-soft"
-                                                    }
-                                                >
-                                                    {resultToRender.summary
-                                                        .netPnl >= 0
-                                                        ? "+"
-                                                        : ""}
-                                                    {num(
-                                                        resultToRender.summary
-                                                            .netPnl,
-                                                        2
-                                                    )}
-                                                </p>
-                                            </div>
-                                            <div className="border-line-subtle rounded border p-2">
-                                                <p className="text-app-text/50 text-xs">
-                                                    Return %
-                                                </p>
-                                                <p>
-                                                    {num(
-                                                        resultToRender.summary
-                                                            .returnPct,
-                                                        2
-                                                    )}
-                                                    %
-                                                </p>
-                                            </div>
-                                            <div className="border-line-subtle rounded border p-2">
-                                                <p className="text-app-text/50 text-xs">
-                                                    Sharpe
-                                                </p>
-                                                <p>
-                                                    {resultToRender.summary
-                                                        .sharpeRatio == null
-                                                        ? "—"
-                                                        : num(
-                                                              resultToRender
-                                                                  .summary
-                                                                  .sharpeRatio,
-                                                              3
-                                                          )}
-                                                </p>
-                                            </div>
-                                            <div className="border-line-subtle rounded border p-2">
-                                                <p className="text-app-text/50 text-xs">
-                                                    Win Rate
-                                                </p>
-                                                <p>
-                                                    {num(
-                                                        resultToRender.summary
-                                                            .winRatePct,
-                                                        2
-                                                    )}
-                                                    %
-                                                </p>
-                                            </div>
-                                            <div className="border-line-subtle rounded border p-2">
-                                                <p className="text-app-text/50 text-xs">
-                                                    Profit Factor
-                                                </p>
-                                                <p>
-                                                    {resultToRender.summary
-                                                        .profitFactor == null
-                                                        ? "—"
-                                                        : num(
-                                                              resultToRender
-                                                                  .summary
-                                                                  .profitFactor,
-                                                              2
-                                                          )}
-                                                </p>
-                                            </div>
-                                            <div className="border-line-subtle rounded border p-2">
-                                                <p className="text-app-text/50 text-xs">
-                                                    Max DD %
-                                                </p>
-                                                <p>
-                                                    {num(
-                                                        resultToRender.summary
-                                                            .maxDrawdownPct,
-                                                        2
-                                                    )}
-                                                    %
-                                                </p>
-                                            </div>
-                                            <div className="border-line-subtle rounded border p-2">
-                                                <p className="text-app-text/50 text-xs">
-                                                    Candles
-                                                </p>
-                                                <p>
-                                                    {
-                                                        resultToRender.candlesProcessed
-                                                    }
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <div className="mt-4 min-h-0 flex-1 overflow-auto">
-                                            <table className="w-full min-w-[760px] text-left text-xs">
-                                                <thead className="text-app-text/60 border-line-subtle border-b uppercase">
-                                                    <tr>
-                                                        <th className="py-2 pr-4 text-left">
-                                                            Side
-                                                        </th>
-                                                        <th className="py-2 pr-4 text-right">
-                                                            Open
-                                                        </th>
-                                                        <th className="py-2 pr-4 text-right">
-                                                            Close
-                                                        </th>
-                                                        <th className="py-2 pr-4 text-right">
-                                                            PnL
-                                                        </th>
-                                                        <th className="py-2 pr-4 text-right">
-                                                            Size
-                                                        </th>
-                                                        <th className="py-2 pr-4 text-right">
-                                                            Fee
-                                                        </th>
-                                                        <th className="py-2 pr-4 text-right">
-                                                            Funding
-                                                        </th>
-                                                        <th className="py-2 text-right">
-                                                            Open Time - Close
-                                                            Time
-                                                        </th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {resultToRender.trades
-                                                        .length === 0 ? (
-                                                        <tr>
-                                                            <td
-                                                                colSpan={8}
-                                                                className="text-app-text/45 p-3 text-center"
-                                                            >
-                                                                No trades in
-                                                                this run.
-                                                            </td>
-                                                        </tr>
-                                                    ) : (
-                                                        resultToRender.trades.map(
-                                                            (trade, idx) => (
-                                                                <tr
-                                                                    key={`${resultToRender.runId}-${idx}`}
-                                                                    className="border-line-subtle border-b last:border-b-0"
-                                                                >
-                                                                    <td
-                                                                        className={`py-2 pr-4 font-semibold uppercase ${
-                                                                            trade.side ===
-                                                                            "long"
-                                                                                ? "text-accent-success-strong"
-                                                                                : "text-accent-danger"
-                                                                        }`}
-                                                                    >
-                                                                        {
-                                                                            trade.side
-                                                                        }
-                                                                    </td>
-                                                                    <td className="py-2 pr-4 text-right">
-                                                                        {formatPrice(
-                                                                            trade
-                                                                                .open
-                                                                                .price
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="py-2 pr-4 text-right">
-                                                                        {formatPrice(
-                                                                            trade
-                                                                                .close
-                                                                                .price
-                                                                        )}
-                                                                    </td>
-                                                                    <td
-                                                                        className={`py-2 pr-4 text-right ${
-                                                                            trade.pnl >=
-                                                                            0
-                                                                                ? "text-accent-success"
-                                                                                : "text-accent-danger-soft"
-                                                                        }`}
-                                                                    >
-                                                                        {num(
-                                                                            trade.pnl,
-                                                                            2
-                                                                        )}
-                                                                        $
-                                                                    </td>
-                                                                    <td className="py-2 pr-4 text-right">
-                                                                        {num(
-                                                                            trade.size,
-                                                                            4
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="py-2 pr-4 text-right">
-                                                                        {num(
-                                                                            trade.fees,
-                                                                            4
-                                                                        )}
-                                                                        $
-                                                                    </td>
-                                                                    <td className="py-2 pr-4 text-right">
-                                                                        {num(
-                                                                            trade.funding,
-                                                                            4
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="py-2 text-right">
-                                                                        {formatUTC(
-                                                                            trade
-                                                                                .open
-                                                                                .time
-                                                                        )}{" "}
-                                                                        -{" "}
-                                                                        {formatUTC(
-                                                                            trade
-                                                                                .close
-                                                                                .time
-                                                                        )}
-                                                                    </td>
-                                                                </tr>
-                                                            )
-                                                        )
-                                                    )}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                        )}
+                        {resultViewState === "result" &&
+                            resultToRender && (
+                                <BacktestResultView result={resultToRender} />
+                            )}
                     </div>
                 </div>
             </div>

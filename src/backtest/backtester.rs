@@ -1,12 +1,17 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::Arc;
 
 use log::{info, warn};
+use rhai::Engine;
+use sqlx::PgPool;
 
+use super::downsample::{cap_snapshots, lttb_equity};
 use super::fetcher::{DataSource, Fetcher, RequestLimiter};
 use super::types::{
-    BacktestConfig, BacktestProgress, BacktestResult, BacktestRunRequest, BacktestSummary,
-    CandlePoint, EquityPoint, PositionSnapshot, SnapshotReason,
+    BacktestProgress, BacktestResult, BacktestRunRequest, BacktestSummary, CandlePoint,
+    EquityPoint, PositionSnapshot, SnapshotReason,
 };
+use crate::backend::app_state::StrategyCache;
 use crate::{
     BtAction, BtIntent, BtOrder, CloseOrder, EngineOrder, Error, FillInfo, FillType, OpenOrder,
     OpenPosInfo, OpenPositionLocal, PositionOp, Price, Side, SignalEngine, TimeFrame, TradeInfo,
@@ -97,6 +102,7 @@ struct WorkerResult {
 pub struct Backtester {
     request: BacktestRunRequest,
     fetcher: Fetcher,
+    candle_store: Arc<super::candle_store::CandleStore>,
     engine: SignalEngine,
     next_order_id: u64,
     next_snapshot_id: u64,
@@ -110,13 +116,85 @@ pub struct Backtester {
 }
 
 impl Backtester {
-    // TODO: backtester needs rework for Rhai strategy architecture
-    pub fn from_config(_config: BacktestConfig) -> Self {
-        todo!("backtester needs rework for Rhai strategy architecture")
-    }
+    pub async fn from_request(
+        request: BacktestRunRequest,
+        rhai_engine: Arc<Engine>,
+        strategy_cache: StrategyCache,
+        pool: &PgPool,
+        candle_store: Arc<super::candle_store::CandleStore>,
+    ) -> Result<Self, Error> {
+        let sid = request.config.strategy_id;
+        let margin = request.config.margin;
+        let lev = request.config.lev;
+        let source = request.config.source.clone();
 
-    pub fn from_request(_request: BacktestRunRequest) -> Self {
-        todo!("backtester needs rework for Rhai strategy architecture")
+        // Cache is kept in sync on save/update/delete — prefer it over DB
+        let (compiled, strat_indicators) = {
+            let cached = {
+                let guard = strategy_cache.read().await;
+                guard.get(&sid).cloned()
+            };
+
+            if let Some(entry) = cached {
+                (entry.compiled, entry.indicators)
+            } else {
+                // Cache miss — fetch from DB, compile, and cache
+                let row = sqlx::query_as::<_, crate::backend::db::StrategyRow>(
+                    "SELECT * FROM strategies WHERE id = $1",
+                )
+                .bind(sid)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| Error::Custom(format!("DB error fetching strategy: {e}")))?
+                .ok_or_else(|| Error::Custom(format!("strategy {sid} not found")))?;
+
+                let compiled = crate::backend::scripting::compile_strategy(
+                    &rhai_engine,
+                    &row.on_idle,
+                    &row.on_open,
+                    &row.on_busy,
+                )
+                .map_err(|e| Error::Custom(format!("strategy {sid} failed to compile: {e}")))?;
+
+                let indicators: Vec<crate::IndexId> =
+                    serde_json::from_value(row.indicators).unwrap_or_default();
+
+                {
+                    let mut guard = strategy_cache.write().await;
+                    guard.insert(
+                        sid,
+                        crate::backend::app_state::CachedStrategy {
+                            compiled: compiled.clone(),
+                            indicators: indicators.clone(),
+                            name: row.name,
+                        },
+                    );
+                }
+
+                (compiled, indicators)
+            }
+        };
+
+        let engine =
+            SignalEngine::new_backtest(margin, lev, rhai_engine, compiled, strat_indicators);
+
+        let fetcher = Fetcher::new(source, candle_store.clone());
+
+        Ok(Self {
+            request,
+            fetcher,
+            candle_store,
+            engine,
+            next_order_id: 1,
+            next_snapshot_id: 1,
+            balance: margin,
+            position: None,
+            resting_orders: HashMap::new(),
+            trades: Vec::new(),
+            equity_curve: Vec::new(),
+            snapshots: Vec::new(),
+            next_funding_time: None,
+        })
     }
 
     pub fn request(&self) -> &BacktestRunRequest {
@@ -134,7 +212,6 @@ impl Backtester {
     where
         F: FnMut(BacktestProgress),
     {
-        self.update_snapshot_interval_from_strategy();
         self.reset_runtime();
         self.fetcher.set_source(self.request.config.source.clone());
 
@@ -230,6 +307,7 @@ impl Backtester {
             MAX_FETCH_WORKERS,
             loading_tx,
             window_tx,
+            self.candle_store.clone(),
         ));
 
         let mut fatal_error: Option<Error> = None;
@@ -531,16 +609,20 @@ impl Backtester {
         Ok(result)
     }
 
-    fn update_snapshot_interval_from_strategy(&mut self) {
-        // TODO: rework for Rhai strategy architecture
-    }
-
     fn reset_runtime(&mut self) {
-        // TODO: rework for Rhai strategy architecture
-        todo!("backtester reset_runtime needs rework for Rhai strategy architecture")
+        self.engine.reset_for_backtest();
+        self.position = None;
+        self.resting_orders.clear();
+        self.trades.clear();
+        self.equity_curve.clear();
+        self.snapshots.clear();
+        self.next_order_id = 1;
+        self.next_snapshot_id = 1;
+        self.balance = self.request.config.margin;
+        self.next_funding_time = None;
     }
 
-    fn process_candle(&mut self, candle: Price, idx: u64) -> bool {
+    fn process_candle(&mut self, candle: Price, _idx: u64) -> bool {
         self.apply_funding_if_due(candle);
 
         let actions = self.engine.tick_backtest(candle);
@@ -564,11 +646,6 @@ impl Backtester {
 
         self.sync_engine_position();
         self.push_equity_point(candle);
-
-        let interval = self.request.config.snapshot_interval_candles.max(1);
-        if (idx + 1).is_multiple_of(interval) {
-            self.capture_snapshot(candle, SnapshotReason::Interval);
-        }
         false
     }
 
@@ -584,16 +661,21 @@ impl Backtester {
             BtAction::ForceCloseMarket => {
                 self.resting_orders.clear();
                 let _ =
-                    self.fill_close_at_px(None, candle.open, candle.open_time, FillType::Market);
+                    self.fill_close_at_px(None, candle.close, candle.close_time, FillType::Market);
             }
         }
     }
 
     fn submit_open_order(&mut self, open: OpenOrder, _intent: BtIntent, candle: Price) {
         if open.order.limit.is_none() {
-            self.fill_open_at_px(open.order, candle.open, candle.open_time, FillType::Market);
+            self.fill_open_at_px(
+                open.order,
+                candle.close,
+                candle.close_time,
+                FillType::Market,
+            );
             if let Some(triggers) = open.triggers {
-                self.attach_triggers_after_open(triggers, open.order.size, candle.open_time);
+                self.attach_triggers_after_open(triggers, open.order.size, candle.close_time);
             }
             return;
         }
@@ -615,8 +697,8 @@ impl Backtester {
         if close.order.limit.is_none() {
             let _ = self.fill_close_at_px(
                 Some(close.order),
-                candle.open,
-                candle.open_time,
+                candle.close,
+                candle.close_time,
                 FillType::Market,
             );
             return;
@@ -652,20 +734,18 @@ impl Backtester {
                 continue;
             }
 
-            if !touches_limit(candle, limit.limit_px) {
+            let pos_side = self.position.map(|p| p.side);
+            let above = is_trigger_above_market(&resting.order, pos_side, candle.open);
+            if !trigger_hit(candle, limit.limit_px, above) {
                 continue;
             }
+            let fill_px = trigger_fill_px(candle, limit.limit_px, above);
 
             let fill_type = order_fill_type(resting.order);
             match resting.kind {
                 RestingKind::Open { triggers } => {
                     let _ = self.resting_orders.remove(&id);
-                    self.fill_open_at_px(
-                        resting.order,
-                        limit.limit_px,
-                        candle.open_time,
-                        fill_type,
-                    );
+                    self.fill_open_at_px(resting.order, fill_px, candle.open_time, fill_type);
                     if let Some(t) = triggers {
                         self.attach_triggers_after_open(t, resting.order.size, candle.open_time);
                     }
@@ -674,12 +754,7 @@ impl Backtester {
                 RestingKind::Close => {
                     let _ = self.resting_orders.remove(&id);
                     if self
-                        .fill_close_at_px(
-                            Some(resting.order),
-                            limit.limit_px,
-                            candle.open_time,
-                            fill_type,
-                        )
+                        .fill_close_at_px(Some(resting.order), fill_px, candle.open_time, fill_type)
                         .is_some()
                     {
                         fill_count += 1;
@@ -1064,6 +1139,9 @@ impl Backtester {
             );
         }
 
+        let equity_curve = lttb_equity(&self.equity_curve, self.request.config.max_equity_points);
+        let snapshots = cap_snapshots(&self.snapshots, self.request.config.max_snapshots);
+
         BacktestResult {
             run_id: format!(
                 "bt-{}-{}",
@@ -1077,8 +1155,8 @@ impl Backtester {
             config: self.request.config.clone(),
             summary,
             trades: self.trades.clone(),
-            equity_curve: self.equity_curve.clone(),
-            snapshots: self.snapshots.clone(),
+            equity_curve,
+            snapshots,
         }
     }
 
@@ -1102,6 +1180,7 @@ async fn stream_fetch_windows_parallel(
     max_workers: usize,
     loading_tx: tokio::sync::mpsc::UnboundedSender<(u64, u64)>,
     window_tx: tokio::sync::mpsc::Sender<FetchWindowEvent>,
+    candle_store: Arc<super::candle_store::CandleStore>,
 ) {
     let windows = build_fetch_windows(fetch_start, fetch_end, window_span_ms);
     if windows.is_empty() {
@@ -1136,6 +1215,7 @@ async fn stream_fetch_windows_parallel(
             request_limiter.clone(),
             progress_tx.clone(),
             run_id.clone(),
+            candle_store.clone(),
         );
         next_spawn += 1;
     }
@@ -1226,6 +1306,7 @@ async fn stream_fetch_windows_parallel(
                         request_limiter.clone(),
                         progress_tx.clone(),
                         run_id.clone(),
+                        candle_store.clone(),
                     );
                     next_spawn += 1;
                 }
@@ -1286,6 +1367,7 @@ fn spawn_fetch_worker(
     request_limiter: Option<RequestLimiter>,
     progress_tx: tokio::sync::mpsc::UnboundedSender<WorkerProgress>,
     run_id: String,
+    candle_store: Arc<super::candle_store::CandleStore>,
 ) {
     joinset.spawn(async move {
         fetch_window_worker(
@@ -1296,11 +1378,13 @@ fn spawn_fetch_worker(
             request_limiter,
             progress_tx,
             run_id,
+            candle_store,
         )
         .await
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fetch_window_worker(
     window: FetchWindow,
     source: DataSource,
@@ -1309,8 +1393,9 @@ async fn fetch_window_worker(
     request_limiter: Option<RequestLimiter>,
     progress_tx: tokio::sync::mpsc::UnboundedSender<WorkerProgress>,
     run_id: String,
+    candle_store: Arc<super::candle_store::CandleStore>,
 ) -> WorkerResult {
-    let mut fetcher = Fetcher::new(source);
+    let mut fetcher = Fetcher::new(source, candle_store);
     fetcher.set_request_limiter(request_limiter);
     let result = fetcher
         .fetch_with_progress(&asset, tf, window.start, window.end, |loaded, total| {
@@ -1574,8 +1659,47 @@ fn order_fill_type(order: EngineOrder) -> FillType {
     }
 }
 
-fn touches_limit(candle: Price, limit_px: f64) -> bool {
-    candle.low <= limit_px && candle.high >= limit_px
+/// Check whether a resting order at `limit_px` is triggered by this candle.
+/// `is_above_market`: true when the trigger sits above current price (Long TP, Short SL).
+fn trigger_hit(candle: Price, limit_px: f64, is_above_market: bool) -> bool {
+    if is_above_market {
+        candle.high >= limit_px
+    } else {
+        candle.low <= limit_px
+    }
+}
+
+/// Fill price accounting for gap-through. If candle opens past the trigger, fill at open (slippage).
+fn trigger_fill_px(candle: Price, limit_px: f64, is_above_market: bool) -> f64 {
+    if is_above_market {
+        if candle.open >= limit_px {
+            candle.open
+        } else {
+            limit_px
+        }
+    } else {
+        if candle.open <= limit_px {
+            candle.open
+        } else {
+            limit_px
+        }
+    }
+}
+
+/// Determine whether a resting order's trigger sits above the current market.
+fn is_trigger_above_market(order: &EngineOrder, pos_side: Option<Side>, candle_open: f64) -> bool {
+    if let Some(tk) = order.is_tpsl()
+        && let Some(side) = pos_side
+    {
+        return match (side, tk) {
+            (Side::Long, TriggerKind::Tp) => true,
+            (Side::Long, TriggerKind::Sl) => false,
+            (Side::Short, TriggerKind::Tp) => false,
+            (Side::Short, TriggerKind::Sl) => true,
+        };
+    }
+    // Fallback for regular limit orders: compare to candle open
+    order.limit.is_some_and(|l| l.limit_px >= candle_open)
 }
 
 fn calc_trigger_px(side: Side, trigger: TriggerKind, delta: f64, ref_px: f64, lev: usize) -> f64 {

@@ -254,7 +254,7 @@ export type BacktestProgress =
     | { kind: "failed"; message: string };
 
 export interface BacktestSource {
-    exchange: "binance" | "bybit" | "mexc" | "htx" | "coinbase";
+    exchange: "binance" | "bybit" | "htx";
     market: "spot" | "futures";
     quoteAsset: "USDT" | "USDC" | string;
 }
@@ -272,6 +272,8 @@ export interface BacktestConfig {
     startTime: number;
     endTime: number;
     snapshotIntervalCandles: number;
+    maxEquityPoints?: number;
+    maxSnapshots?: number;
 }
 
 export interface CandlePoint {
@@ -298,8 +300,7 @@ export type SnapshotReason =
     | "close"
     | "forceClose"
     | "cancelResting"
-    | "fill"
-    | "interval";
+    | "fill";
 
 export interface PositionSnapshot {
     id: number;
@@ -342,6 +343,53 @@ export interface BacktestResult {
     candlesProcessed: number;
     config: BacktestConfig;
     summary: BacktestSummary;
+    trades: TradeInfo[];
+    equityCurve: EquityPoint[];
+    snapshots: PositionSnapshot[];
+}
+
+/** Lightweight row from `backtest_runs` table — used for history list */
+export interface BacktestRunEntry {
+    id: string;
+    pubkey: string;
+    strategyId: string;
+    strategyName: string;
+    asset: string;
+    resolution: string;
+    exchange: string;
+    market: string;
+    margin: number;
+    lev: number;
+    startTime: number;
+    endTime: number;
+    netPnl: number;
+    returnPct: number;
+    maxDrawdownPct: number;
+    totalTrades: number;
+    winRatePct: number;
+    profitFactor: number | null;
+    sharpeRatio: number | null;
+    startedAt: number;
+    finishedAt: number;
+    createdAt: string;
+}
+
+/** Full result from `backtest_results` table — fetched on click */
+export interface BacktestResultDetail {
+    id: string;
+    runId: string;
+    initialEquity: number;
+    finalEquity: number;
+    grossProfit: number;
+    grossLoss: number;
+    avgWin: number;
+    avgLoss: number;
+    expectancy: number;
+    wins: number;
+    losses: number;
+    candlesLoaded: number;
+    candlesProcessed: number;
+    maxDrawdownAbs: number;
     trades: TradeInfo[];
     equityCurve: EquityPoint[];
     snapshots: PositionSnapshot[];

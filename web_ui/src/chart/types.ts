@@ -4,17 +4,7 @@ export type { TimeFrame };
 
 export type MarketType = "spot" | "futures";
 
-export type ExchangeId =
-    | "binance"
-    | "bybit"
-    | "okx"
-    | "coinbase"
-    | "kraken"
-    | "kucoin"
-    | "bitget"
-    | "gateio"
-    | "htx"
-    | "mexc";
+export type ExchangeId = "binance" | "bybit" | "htx";
 
 export type DataSource = {
     exchange: ExchangeId;

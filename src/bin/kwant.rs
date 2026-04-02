@@ -5,11 +5,12 @@ use hyperliquid_rust_bot::{
         AppState, BotManager, WsConnections, create_engine, create_router, spawn_nonce_pruner,
         spawn_pending_agent_pruner,
     },
+    backtest::CandleStore,
     broadcast::{Broadcaster, CandleCache},
 };
 use log::info;
 use sqlx::postgres::PgPoolOptions;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -49,12 +50,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     spawn_nonce_pruner(nonces.clone());
     spawn_pending_agent_pruner(pending_agents.clone());
 
+    let candle_store =
+        Arc::new(CandleStore::open("./data/candles").expect("failed to open candle store"));
+
     let state = Arc::new(AppState {
         pool,
         ws_connections,
         bot_manager: Arc::new(RwLock::new(bot_manager)),
         rhai_engine,
         strategy_cache: Arc::new(RwLock::new(HashMap::new())),
+        candle_store,
+        active_backtests: Arc::new(RwLock::new(HashSet::new())),
         jwt_secret,
         encryption_key: encryption_key.try_into().unwrap(),
         nonces,

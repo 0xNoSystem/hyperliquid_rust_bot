@@ -24,6 +24,18 @@ pub struct BacktestConfig {
     pub start_time: u64,
     pub end_time: u64,
     pub snapshot_interval_candles: u64,
+    #[serde(default = "default_max_equity_points")]
+    pub max_equity_points: usize,
+    #[serde(default = "default_max_snapshots")]
+    pub max_snapshots: usize,
+}
+
+fn default_max_equity_points() -> usize {
+    2000
+}
+
+fn default_max_snapshots() -> usize {
+    500
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,6 +13,7 @@ use hyperliquid_rust_sdk::ApproveAgent;
 
 use super::bot_manager::BotManager;
 use super::scripting::CompiledStrategy;
+use crate::backtest::CandleStore;
 use crate::{IndexId, UpdateFrontend};
 
 /// Per-user list of WebSocket senders (one per connected device).
@@ -48,6 +49,8 @@ pub struct AppState {
     pub bot_manager: Arc<RwLock<BotManager>>,
     pub rhai_engine: Arc<Engine>,
     pub strategy_cache: StrategyCache,
+    pub candle_store: Arc<CandleStore>,
+    pub active_backtests: Arc<RwLock<HashSet<String>>>,
     pub jwt_secret: String,
     pub encryption_key: [u8; 32],
     pub nonces: NonceStore,
