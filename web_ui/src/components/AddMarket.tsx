@@ -245,7 +245,11 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                     <div className="col-span-2">
                         <label className="text-app-text block text-center text-sm">
                             Leverage: {lev} (MAX:{" "}
-                            {universe.find((u) => u.name === asset)?.maxLeverage})
+                            {
+                                universe.find((u) => u.name === asset)
+                                    ?.maxLeverage
+                            }
+                            )
                         </label>
                         <input
                             type="range"

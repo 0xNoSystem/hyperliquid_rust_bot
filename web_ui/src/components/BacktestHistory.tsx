@@ -3,10 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { num } from "../types";
 import type { BacktestRunEntry } from "../types";
 import { useAuth } from "../context/AuthContextStore";
-import {
-    fetchBacktestHistory,
-    deleteBacktestRun,
-} from "../api/backtest";
+import { fetchBacktestHistory, deleteBacktestRun } from "../api/backtest";
 
 const PAGE_SIZE = 50;
 
@@ -86,9 +83,7 @@ export default function BacktestHistory({
                 </button>
             </div>
 
-            {loading && (
-                <p className="text-app-text/50 text-xs">Loading...</p>
-            )}
+            {loading && <p className="text-app-text/50 text-xs">Loading...</p>}
             {error && (
                 <p className="text-accent-danger-soft text-xs">{error}</p>
             )}
@@ -116,9 +111,7 @@ export default function BacktestHistory({
                                 <th className="py-2 pr-3 text-right">
                                     Max DD %
                                 </th>
-                                <th className="py-2 pr-3 text-right">
-                                    Trades
-                                </th>
+                                <th className="py-2 pr-3 text-right">Trades</th>
                                 <th className="py-2 pr-3 text-right">
                                     Win Rate
                                 </th>
@@ -131,7 +124,7 @@ export default function BacktestHistory({
                             {runs.map((run) => (
                                 <tr
                                     key={run.id}
-                                    className="border-line-subtle hover:bg-ink-70 border-b last:border-b-0 transition-colors"
+                                    className="border-line-subtle hover:bg-ink-70 border-b transition-colors last:border-b-0"
                                 >
                                     <td className="text-app-text py-2 pr-3 font-medium">
                                         {run.asset}

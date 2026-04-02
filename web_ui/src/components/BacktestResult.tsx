@@ -72,7 +72,8 @@ export default function BacktestResult({
                     <div>
                         <p className="text-app-text/50">Margin / Leverage</p>
                         <p className="text-app-text">
-                            {num(result.config.margin, 2)} / {result.config.lev}x
+                            {num(result.config.margin, 2)} / {result.config.lev}
+                            x
                         </p>
                     </div>
                     <div>

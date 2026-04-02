@@ -1,10 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import {
-    TIMEFRAME_CAMELCASE,
-    TF_TO_MS,
-    sanitizeAsset,
-} from "../types";
+import { TIMEFRAME_CAMELCASE, TF_TO_MS, sanitizeAsset } from "../types";
 import type { BacktestProgress, BacktestResult, TimeFrame } from "../types";
 import ChartContainer from "../chart/ChartContainer";
 import { isTimeframeSupported } from "../chart/dataSources";
@@ -367,7 +363,14 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
         if (!Number.isFinite(warmupCandles) || warmupCandles < 0) return false;
         if (isSubmittingBacktest) return false;
         return true;
-    }, [routeAsset, backtestWindow, margin, lev, warmupCandles, isSubmittingBacktest]);
+    }, [
+        routeAsset,
+        backtestWindow,
+        margin,
+        lev,
+        warmupCandles,
+        isSubmittingBacktest,
+    ]);
 
     const activeRun = useMemo(
         () => (activeRunId ? (backtestRuns[activeRunId] ?? null) : null),
@@ -1134,10 +1137,9 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                             </div>
                         )}
 
-                        {resultViewState === "result" &&
-                            resultToRender && (
-                                <BacktestResultView result={resultToRender} />
-                            )}
+                        {resultViewState === "result" && resultToRender && (
+                            <BacktestResultView result={resultToRender} />
+                        )}
                     </div>
                 </div>
             </div>

@@ -1,4 +1,8 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import AceEditor from "react-ace";
+import CustomRhaiMode from "../editor/custom_mode";
+import "ace-builds/src-noconflict/theme-monokai";
+
 import { useLocation } from "react-router-dom";
 import {
     Plus,
@@ -23,11 +27,7 @@ import {
     get_params,
     fromTimeFrame,
 } from "../types";
-import type {
-    IndexId,
-    IndicatorKind,
-    IndicatorName,
-} from "../types";
+import type { IndexId, IndicatorKind, IndicatorName } from "../types";
 import type { Strategy, StrategyDetail } from "../strats";
 
 type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
@@ -65,6 +65,8 @@ export default function StratEditor() {
     const { strategies, fetchStrategies } = useWebSocketContext();
     const location = useLocation();
 
+    const rhaiMode = useMemo(() => new CustomRhaiMode(), []);
+
     // Currently selected / editing strategy
     const [active, setActive] = useState<StrategyDetail | null>(null);
     const [isNew, setIsNew] = useState(false);
@@ -82,34 +84,24 @@ export default function StratEditor() {
     const [indicators, setIndicators] = useState<IndexId[]>([]);
 
     // Textarea refs for insert-at-cursor
-    const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+    const textareaRefs = useRef<Record<string, AceEditor | null>>({});
     const lastFocusedRef = useRef<string | null>(null);
 
     const insertAtCursor = (text: string) => {
         const key = lastFocusedRef.current;
         if (!key) return;
-        const ta = textareaRefs.current[key];
-        if (!ta) return;
 
-        const setterMap: Record<string, (fn: (prev: string) => string) => void> = {
-            on_idle: (fn) => setOnIdle(fn),
-            on_open: (fn) => setOnOpen(fn),
-            on_busy: (fn) => setOnBusy(fn),
-        };
-        const setter = setterMap[key];
-        if (!setter) return;
+        // The ref points to the AceEditor component instance
+        const aceComponent = textareaRefs.current[key];
+        if (!aceComponent) return;
 
-        const start = ta.selectionStart;
-        const end = ta.selectionEnd;
-        setter((prev) => prev.slice(0, start) + text + prev.slice(end));
+        // Get the underlying Ace editor instance
+        const editor = aceComponent.editor;
 
-        // Restore cursor after React re-render
-        requestAnimationFrame(() => {
-            ta.selectionStart = ta.selectionEnd = start + text.length;
-            ta.focus();
-        });
+        // Use Ace's internal API to insert at cursor
+        editor.insert(text);
+        editor.focus();
     };
-
     // Indicator picker
     const [showIndicatorPicker, setShowIndicatorPicker] = useState(false);
     const [newKind, setNewKind] = useState<IndicatorName>("rsi");
@@ -213,9 +205,7 @@ export default function StratEditor() {
 
             if (!res.ok) {
                 const data = await res.json().catch(() => null);
-                throw new Error(
-                    data?.error ?? `Save failed (${res.status})`
-                );
+                throw new Error(data?.error ?? `Save failed (${res.status})`);
             }
 
             const saved: StrategyDetail = await res.json();
@@ -323,7 +313,7 @@ export default function StratEditor() {
     const hasDualParams = ["emaCross", "smaOnRsi", "adx"].includes(newKind);
 
     return (
-        <div className="text-app-text flex h-full min-h-screen z-1">
+        <div className="text-app-text z-1 flex h-full min-h-screen">
             {/* ---- Left sidebar: strategy list ---- */}
             <div className="border-line-subtle bg-surface-pane flex w-64 shrink-0 flex-col border-r">
                 <div className="border-line-subtle flex items-center gap-2 border-b px-4 py-3">
@@ -377,7 +367,7 @@ export default function StratEditor() {
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
                                     placeholder="Strategy name"
-                                    className="bg-transparent text-app-text flex-1 text-lg font-semibold outline-none placeholder:text-app-text/30"
+                                    className="text-app-text placeholder:text-app-text/30 flex-1 bg-transparent text-lg font-semibold outline-none"
                                 />
                             ) : (
                                 <span className="text-app-text flex-1 text-lg font-semibold">
@@ -440,7 +430,7 @@ export default function StratEditor() {
                         {/* Indicators */}
                         <div className="border-line-subtle relative border-b px-6 py-3">
                             <div className="mb-2 flex items-center justify-between">
-                                <span className="text-app-text/50 text-xs font-medium uppercase tracking-wide">
+                                <span className="text-app-text/50 text-xs font-medium tracking-wide uppercase">
                                     Indicators
                                 </span>
                                 {editing && (
@@ -513,7 +503,9 @@ export default function StratEditor() {
                                             </h3>
                                             <button
                                                 onClick={() =>
-                                                    setShowIndicatorPicker(false)
+                                                    setShowIndicatorPicker(
+                                                        false
+                                                    )
                                                 }
                                             >
                                                 <X className="text-app-text/40 h-4 w-4" />
@@ -537,7 +529,11 @@ export default function StratEditor() {
                                         </select>
                                         <div className="mt-2 grid grid-cols-2 gap-2">
                                             <label className="text-app-text/60 mt-1 text-right text-xs">
-                                                {indicatorParamLabels[newKind][0]}
+                                                {
+                                                    indicatorParamLabels[
+                                                        newKind
+                                                    ][0]
+                                                }
                                             </label>
                                             <input
                                                 type="number"
@@ -617,11 +613,14 @@ export default function StratEditor() {
                                     className="bg-app-surface-3 flex flex-1 flex-col"
                                 >
                                     <div className="border-line-subtle bg-surface-pane border-b px-4 py-2">
-                                        <span className="text-app-text/50 text-xs font-medium uppercase tracking-wider">
+                                        <span className="text-app-text/50 text-xs font-medium tracking-wider uppercase">
                                             {label.replace("_", " ")}
                                         </span>
                                     </div>
-                                    <textarea
+                                    <AceEditor
+                                        mode={rhaiMode} // or your "CustomRhaiMode"
+                                        theme="monokai"
+                                        // Ace refs return the component instance, which has an 'editor' property
                                         ref={(el) => {
                                             textareaRefs.current[label] = el;
                                         }}
@@ -629,18 +628,21 @@ export default function StratEditor() {
                                             lastFocusedRef.current = label;
                                         }}
                                         value={value}
-                                        onChange={(e) =>
-                                            setter(e.target.value)
+                                        // FIX: Ace onChange returns the value string directly
+                                        onChange={(newValue) =>
+                                            setter(newValue)
                                         }
                                         readOnly={!editing}
-                                        spellCheck={false}
-                                        className={`flex-1 resize-none px-4 py-3 font-mono text-sm leading-relaxed outline-none placeholder:text-app-text/20 ${
-                                            editing
-                                                ? "bg-app-surface-4 text-app-text"
-                                                : "bg-app-surface-4/50 text-app-text/60 cursor-default"
-                                        }`}
-                                        placeholder={`// ${label.replace("_", " ")} logic`}
-                                    />
+                                        setOptions={{
+                                            useWorker: false,
+                                            fontFamily: "monospace",
+                                        }}
+                                        // Apply your styling via 'style' or wrapper div,
+                                        // as Ace injects its own complex DOM structure
+                                        className="flex-1"
+                                        width="100%"
+                                        height="100%"
+                                    />{" "}
                                 </div>
                             ))}
                         </div>

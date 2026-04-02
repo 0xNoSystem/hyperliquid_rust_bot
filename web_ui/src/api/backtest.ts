@@ -27,7 +27,8 @@ export async function fetchBacktestHistory(
     const url = `${API_URL}/backtest/history${qs ? `?${qs}` : ""}`;
 
     const res = await fetch(url, { headers: authHeaders(token) });
-    if (!res.ok) throw new Error(`Failed to fetch backtest history (${res.status})`);
+    if (!res.ok)
+        throw new Error(`Failed to fetch backtest history (${res.status})`);
     return res.json();
 }
 
@@ -38,7 +39,8 @@ export async function fetchBacktestResult(
     const res = await fetch(`${API_URL}/backtest/history/${runId}`, {
         headers: authHeaders(token),
     });
-    if (!res.ok) throw new Error(`Failed to fetch backtest result (${res.status})`);
+    if (!res.ok)
+        throw new Error(`Failed to fetch backtest result (${res.status})`);
     return res.json();
 }
 
@@ -50,5 +52,6 @@ export async function deleteBacktestRun(
         method: "DELETE",
         headers: authHeaders(token),
     });
-    if (!res.ok) throw new Error(`Failed to delete backtest run (${res.status})`);
+    if (!res.ok)
+        throw new Error(`Failed to delete backtest run (${res.status})`);
 }

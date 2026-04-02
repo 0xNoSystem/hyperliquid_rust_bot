@@ -462,6 +462,28 @@
     --tv-grid-alpha: 0.1;
 }
 
+/* If the colors aren't showing up, add .ace_editor to the front */
+.ace_editor .ace_keyword {
+    color: #00ffff !important;
+} /* let → blue */
+.ace_editor .ace_keyword2 {
+    color: #ffd700 !important;
+} /* extract → yellow */
+.ace_editor .ace_constant.ace_numeric {
+    color: #ff0000 !important;
+} /* numbers → red */
+.ace_editor .ace_paren {
+    color: #fff480 !important;
+} /* parens → purple */
+.ace_variable.ace_field {
+    color: #008080; /* Teal */
+    font-weight: bold;
+}
+
+.ace_punctuation.ace_operator {
+    color: #808080; /* Gray for the dot */
+}
+
 .fx-grid {
     background-image:
         linear-gradient(transparent 23px, rgb(var(--app-grid) / 0.06) 24px),

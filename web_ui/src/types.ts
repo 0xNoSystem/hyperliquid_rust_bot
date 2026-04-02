@@ -233,7 +233,6 @@ export interface AddMarketInfo {
     config?: IndexId[];
 }
 
-
 export type BackendLoadSessionPayload =
     | [BackendMarketInfo[], assetMeta[]]
     | assetMeta[];

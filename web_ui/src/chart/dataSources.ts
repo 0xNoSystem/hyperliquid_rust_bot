@@ -517,4 +517,3 @@ async function fetchHtxCandles({
         };
     });
 }
-
