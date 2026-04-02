@@ -2,6 +2,10 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import AceEditor from "react-ace";
 import CustomRhaiMode from "../editor/custom_mode";
 import "ace-builds/src-noconflict/theme-monokai";
+import "ace-builds/src-noconflict/theme-github";
+import "ace-builds/src-noconflict/keybinding-vim";
+
+import { useTheme } from "../context/ThemeContextStore";
 
 import { useLocation } from "react-router-dom";
 import {
@@ -64,6 +68,7 @@ export default function StratEditor() {
     const { token } = useAuth();
     const { strategies, fetchStrategies } = useWebSocketContext();
     const location = useLocation();
+    const { theme } = useTheme();
 
     const rhaiMode = useMemo(() => new CustomRhaiMode(), []);
 
@@ -82,6 +87,9 @@ export default function StratEditor() {
     const [onOpen, setOnOpen] = useState("");
     const [onBusy, setOnBusy] = useState("");
     const [indicators, setIndicators] = useState<IndexId[]>([]);
+
+    //vim
+    const [vimMode, setVimMode] = useState<boolean>(false);
 
     // Textarea refs for insert-at-cursor
     const textareaRefs = useRef<Record<string, AceEditor | null>>({});
@@ -361,6 +369,7 @@ export default function StratEditor() {
                     <>
                         {/* Top bar: name + actions */}
                         <div className="border-line-subtle flex items-center gap-3 border-b px-6 py-3">
+                        
                             {editing ? (
                                 <input
                                     type="text"
@@ -374,6 +383,7 @@ export default function StratEditor() {
                                     {name || "Untitled"}
                                 </span>
                             )}
+                            
                             {editing ? (
                                 <>
                                     <button
@@ -393,6 +403,11 @@ export default function StratEditor() {
                                             Delete
                                         </button>
                                     )}
+                                    <button className="bg-green-600/30 px-3 font-bold rounded">
+                                    <span className="font-normal" onClick={() => setVimMode(!vimMode)}>
+                                        vim {vimMode ? "on " : "Off "}
+                                    </span>
+                                    </button>
                                 </>
                             ) : (
                                 <button
@@ -619,7 +634,7 @@ export default function StratEditor() {
                                     </div>
                                     <AceEditor
                                         mode={rhaiMode} // or your "CustomRhaiMode"
-                                        theme="monokai"
+                                        theme={theme == "light" ? "github" : "monokai"}
                                         // Ace refs return the component instance, which has an 'editor' property
                                         ref={(el) => {
                                             textareaRefs.current[label] = el;
@@ -642,6 +657,7 @@ export default function StratEditor() {
                                         className="flex-1"
                                         width="100%"
                                         height="100%"
+                                        keyboardHandler={vimMode ? "vim" : undefined}
                                     />{" "}
                                 </div>
                             ))}
