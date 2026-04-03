@@ -13,4 +13,5 @@ export interface StrategyDetail extends Strategy {
     onOpen: string;
     onBusy: string;
     indicators: IndexId[];
+    stateDeclarations?: Record<string, number | string | boolean | null> | null;
 }

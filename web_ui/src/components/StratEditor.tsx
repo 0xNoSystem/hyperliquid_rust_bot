@@ -63,7 +63,47 @@ const EMPTY_DETAIL: StrategyDetail = {
     onOpen: "",
     onBusy: "",
     indicators: [],
+    stateDeclarations: null,
 };
+
+/** Parse state declarations text (one per line: `name = value`) into a Record. */
+function parseStateDeclarations(
+    text: string
+): Record<string, number | string | boolean | null> | null {
+    const lines = text
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+    if (lines.length === 0) return null;
+    const result: Record<string, number | string | boolean | null> = {};
+    for (const line of lines) {
+        const match = line.match(/^(\w+)\s*=\s*(.+)$/);
+        if (!match) continue;
+        const [, name, rawVal] = match;
+        const val = rawVal.trim();
+        if (val === "null") result[name] = null;
+        else if (val === "true") result[name] = true;
+        else if (val === "false") result[name] = false;
+        else if (/^".*"$/.test(val)) result[name] = val.slice(1, -1);
+        else if (!isNaN(Number(val))) result[name] = Number(val);
+        else result[name] = val;
+    }
+    return Object.keys(result).length > 0 ? result : null;
+}
+
+/** Serialize state declarations Record back to editable text. */
+function serializeStateDeclarations(
+    decls: Record<string, number | string | boolean | null> | null | undefined
+): string {
+    if (!decls) return "";
+    return Object.entries(decls)
+        .map(([k, v]) => {
+            if (v === null) return `${k} = null`;
+            if (typeof v === "string") return `${k} = "${v}"`;
+            return `${k} = ${v}`;
+        })
+        .join("\n");
+}
 
 export default function StratEditor() {
     const { token } = useAuth();
@@ -88,6 +128,7 @@ export default function StratEditor() {
     const [onOpen, setOnOpen] = useState("");
     const [onBusy, setOnBusy] = useState("");
     const [indicators, setIndicators] = useState<IndexId[]>([]);
+    const [stateText, setStateText] = useState("");
 
     //vim
     const [vimMode, setVimMode] = useState<boolean>(false);
@@ -149,6 +190,9 @@ export default function StratEditor() {
                 setOnOpen(detail.onOpen);
                 setOnBusy(detail.onBusy);
                 setIndicators(detail.indicators);
+                setStateText(
+                    serializeStateDeclarations(detail.stateDeclarations)
+                );
             } catch (e) {
                 setError(
                     e instanceof Error ? e.message : "Failed to load strategy"
@@ -181,17 +225,10 @@ export default function StratEditor() {
         setOnOpen("");
         setOnBusy("");
         setIndicators([]);
+        setStateText("");
         setError(null);
         setSuccess(null);
     };
-
-    const expandExtract = (src: string): string =>
-        src.replace(
-            /let\s+(\w+)\s*=\s*extract\(\s*"([^"]+)"\s*\)\s*;/g,
-            (_match, varName: string, key: string) =>
-                `let ${varName} = indicators["${key}"];\n` +
-                `if ${varName} == () { return; };`
-        );
 
     const handleSave = async () => {
         if (!name.trim()) {
@@ -204,10 +241,11 @@ export default function StratEditor() {
         try {
             const body = {
                 name: name.trim(),
-                on_idle: expandExtract(onIdle),
-                on_open: expandExtract(onOpen),
-                on_busy: expandExtract(onBusy),
+                on_idle: onIdle,
+                on_open: onOpen,
+                on_busy: onBusy,
                 indicators: indicators,
+                state_declarations: parseStateDeclarations(stateText),
                 is_active: active?.isActive ?? false,
             };
 
@@ -239,6 +277,7 @@ export default function StratEditor() {
             setOnOpen(saved.onOpen);
             setOnBusy(saved.onBusy);
             setIndicators(saved.indicators);
+            setStateText(serializeStateDeclarations(saved.stateDeclarations));
             setSuccess(isNew ? "Strategy created" : "Strategy saved");
             fetchStrategies();
             setTimeout(() => setSuccess(null), 3000);
@@ -335,7 +374,7 @@ export default function StratEditor() {
     const hasDualParams = ["emaCross", "smaOnRsi", "adx"].includes(newKind);
 
     return (
-        <div className="text-app-text z-1 flex h-full min-h-screen">
+        <div className="text-app-text z-1 flex h-[120vh] min-h-screen">
             {/* ---- Left sidebar: strategy list ---- */}
             <div className="border-line-subtle bg-surface-pane flex w-64 shrink-0 flex-col border-r">
                 <div className="border-line-subtle flex items-center gap-2 border-b px-4 py-3">
@@ -372,8 +411,15 @@ export default function StratEditor() {
             {/* ---- Main editor area ---- */}
             <div className="flex flex-1 flex-col overflow-hidden">
                 {!active ? (
-                    <div className="text-app-text/40 flex flex-1 items-center justify-center text-sm">
+                    <div className="text-app-text/40 text-md flex flex-1 flex-col items-center justify-center">
                         Select a strategy or create a new one
+                        <button
+                            onClick={startNew}
+                            className="border-line-subtle text-accent-brand-soft hover:bg-glow-5 mt-1 flex items-center gap-2 rounded-sm px-2 py-2 text-sm font-medium hover:bg-orange-200/30"
+                        >
+                            <Plus className="h-4 w-4" />
+                            New Strategy
+                        </button>
                     </div>
                 ) : loading ? (
                     <div className="text-app-text/40 flex flex-1 items-center justify-center text-sm">
@@ -383,13 +429,13 @@ export default function StratEditor() {
                     <>
                         {/* Top bar: name + actions */}
                         <div className="border-line-subtle flex items-center gap-3 border-b px-6 py-3">
-                        
                             {editing ? (
                                 <input
                                     type="text"
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
                                     placeholder="Strategy name"
+                                    spellCheck={false}
                                     className="text-app-text placeholder:text-app-text/30 flex-1 bg-transparent text-lg font-semibold outline-none"
                                 />
                             ) : (
@@ -397,7 +443,7 @@ export default function StratEditor() {
                                     {name || "Untitled"}
                                 </span>
                             )}
-                            
+
                             {editing ? (
                                 <>
                                     <button
@@ -417,10 +463,13 @@ export default function StratEditor() {
                                             Delete
                                         </button>
                                     )}
-                                    <button className="bg-green-600/30 px-3 font-bold rounded">
-                                    <span className="font-normal" onClick={() => setVimMode(!vimMode)}>
-                                        vim {vimMode ? "on " : "Off "}
-                                    </span>
+                                    <button className="rounded bg-green-600/30 px-3 font-bold">
+                                        <span
+                                            className="font-normal"
+                                            onClick={() => setVimMode(!vimMode)}
+                                        >
+                                            vim {vimMode ? "on " : "Off "}
+                                        </span>
                                     </button>
                                 </>
                             ) : (
@@ -628,8 +677,37 @@ export default function StratEditor() {
                             </AnimatePresence>
                         </div>
 
+                        {/* State declarations */}
+                        {(editing || stateText.trim()) && (
+                            <div className="border-line-subtle border-b px-6 py-3">
+                                <div className="mb-2">
+                                    <span className="text-app-text/50 text-xs font-medium tracking-wide uppercase">
+                                        State Variables
+                                    </span>
+                                    <span className="text-app-text/30 ml-2 text-xs">
+                                        one per line: name = default
+                                    </span>
+                                </div>
+                                <textarea
+                                    value={stateText}
+                                    onChange={(e) =>
+                                        setStateText(e.target.value)
+                                    }
+                                    readOnly={!editing}
+                                    placeholder={
+                                        'count = 0\nlast_signal = "none"'
+                                    }
+                                    rows={Math.max(
+                                        2,
+                                        stateText.split("\n").length
+                                    )}
+                                    className="border-line-solid bg-surface-input text-app-text placeholder:text-app-text/20 w-full resize-none rounded border px-3 py-2 font-mono text-sm"
+                                />
+                            </div>
+                        )}
+
                         {/* Script editors */}
-                        <div className="relative flex flex-1 gap-px overflow-hidden">
+                        <div className="relative flex flex-1 flex-col gap-px overflow-hidden lg:flex-row">
                             {(
                                 [
                                     ["on_idle", onIdle, setOnIdle],
@@ -639,63 +717,81 @@ export default function StratEditor() {
                             ).map(([label, value, setter]) => {
                                 const isFullscreen = fullscreenPanel === label;
                                 return (
-                                <div
-                                    key={label}
-                                    className={
-                                        isFullscreen
-                                            ? "bg-app-surface-3 absolute inset-0 z-30 flex flex-col"
-                                            : "bg-app-surface-3 relative flex flex-1 flex-col"
-                                    }
-                                    onMouseEnter={() => setHoveredPanel(label)}
-                                    onMouseLeave={() => setHoveredPanel(null)}
-                                >
-                                    <div className="border-line-subtle bg-surface-pane flex items-center justify-between border-b px-4 py-2">
-                                        <span className="text-app-text/50 text-xs font-medium tracking-wider uppercase">
-                                            {label.replace("_", " ")}
-                                        </span>
-                                        {isFullscreen && (
-                                            <button
-                                                onClick={() => setFullscreenPanel(null)}
-                                                className="text-app-text/40 hover:text-app-text transition"
-                                            >
-                                                <X className="h-4 w-4" />
-                                            </button>
-                                        )}
-                                    </div>
-                                    {/* Fullscreen button on hover */}
-                                    {!isFullscreen && hoveredPanel === label && (
-                                        <button
-                                            onClick={() => setFullscreenPanel(label)}
-                                            className="absolute top-10 right-2 z-10 rounded bg-black/50 p-1.5 text-white/70 hover:text-white transition"
-                                            title="Fullscreen"
-                                        >
-                                            <Maximize2 className="h-4 w-4" />
-                                        </button>
-                                    )}
-                                    <AceEditor
-                                        mode={rhaiMode}
-                                        theme={theme == "light" ? "solarized_light" : "monokai"}
-                                        ref={(el) => {
-                                            textareaRefs.current[label] = el;
-                                        }}
-                                        onFocus={() => {
-                                            lastFocusedRef.current = label;
-                                        }}
-                                        value={value}
-                                        onChange={(newValue) =>
-                                            setter(newValue)
+                                    <div
+                                        key={label}
+                                        className={
+                                            isFullscreen
+                                                ? "bg-app-surface-3 absolute inset-0 z-30 flex flex-col"
+                                                : "bg-app-surface-3 relative flex flex-1 flex-col"
                                         }
-                                        readOnly={!editing}
-                                        setOptions={{
-                                            useWorker: false,
-                                            fontFamily: "monospace",
-                                        }}
-                                        className="flex-1"
-                                        width="100%"
-                                        height="100%"
-                                        keyboardHandler={vimMode ? "vim" : undefined}
-                                    />
-                                </div>
+                                        onMouseEnter={() =>
+                                            setHoveredPanel(label)
+                                        }
+                                        onMouseLeave={() =>
+                                            setHoveredPanel(null)
+                                        }
+                                    >
+                                        <div className="border-line-subtle bg-surface-pane flex items-center justify-between border-b px-4 py-2">
+                                            <span className="text-app-text/50 text-xs font-medium tracking-wider uppercase">
+                                                {label.replace("_", " ")}
+                                            </span>
+                                            {isFullscreen && (
+                                                <button
+                                                    onClick={() =>
+                                                        setFullscreenPanel(null)
+                                                    }
+                                                    className="text-app-text/40 hover:text-app-text transition"
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </button>
+                                            )}
+                                        </div>
+                                        {/* Fullscreen button on hover */}
+                                        {!isFullscreen &&
+                                            hoveredPanel === label && (
+                                                <button
+                                                    onClick={() =>
+                                                        setFullscreenPanel(
+                                                            label
+                                                        )
+                                                    }
+                                                    className="absolute top-10 right-2 z-10 rounded bg-black/50 p-1.5 text-white/70 transition hover:text-white"
+                                                    title="Fullscreen"
+                                                >
+                                                    <Maximize2 className="h-4 w-4" />
+                                                </button>
+                                            )}
+                                        <AceEditor
+                                            mode={rhaiMode}
+                                            theme={
+                                                theme == "light"
+                                                    ? "solarized_light"
+                                                    : "monokai"
+                                            }
+                                            ref={(el) => {
+                                                textareaRefs.current[label] =
+                                                    el;
+                                            }}
+                                            onFocus={() => {
+                                                lastFocusedRef.current = label;
+                                            }}
+                                            value={value}
+                                            onChange={(newValue) =>
+                                                setter(newValue)
+                                            }
+                                            readOnly={!editing}
+                                            setOptions={{
+                                                useWorker: false,
+                                                fontFamily: "monospace",
+                                            }}
+                                            className="flex-1"
+                                            width="100%"
+                                            height="100%"
+                                            keyboardHandler={
+                                                vimMode ? "vim" : undefined
+                                            }
+                                        />
+                                    </div>
                                 );
                             })}
                         </div>

@@ -14,4 +14,4 @@ pub use auth::{AuthUser, spawn_nonce_pruner, spawn_pending_agent_pruner};
 pub use bot_manager::BotManager;
 pub use db::{StrategyRow, TradeRow};
 pub use routes::create_router;
-pub use scripting::{CompiledStrategy, compile_strategy, create_engine};
+pub use scripting::{CompiledStrategy, StateDeclarations, compile_strategy, create_engine};

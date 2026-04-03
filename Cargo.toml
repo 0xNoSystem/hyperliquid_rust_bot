@@ -37,6 +37,7 @@ rand = "0.8"
 hex = "0.4"
 futures-util = "0.3"
 tracing = "0.1"
+regex = "1.12.3"
 
 [profile.release]
 panic = "abort"

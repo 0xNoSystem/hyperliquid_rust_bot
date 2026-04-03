@@ -39,6 +39,7 @@ pub struct StrategyRow {
     pub on_open: String,
     pub on_busy: String,
     pub indicators: serde_json::Value,
+    pub state_declarations: Option<serde_json::Value>,
     pub is_active: Option<bool>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,

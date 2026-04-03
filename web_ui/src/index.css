@@ -462,10 +462,10 @@
     --tv-grid-alpha: 0.1;
 }
 
-/* If the colors aren't showing up, add .ace_editor to the front */
+/* ── Ace editor syntax highlighting: dark ── */
 .ace_editor .ace_keyword {
     color: #00ffff !important;
-} /* let → blue */
+} /* let → cyan */
 .ace_editor .ace_keyword2 {
     color: #ffd700 !important;
 } /* extract → yellow */
@@ -474,15 +474,41 @@
 } /* numbers → red */
 .ace_editor .ace_paren {
     color: #fff480 !important;
-} /* parens → purple */
-.ace_variable.ace_field {
-    color: #008080; /* Teal */
+} /* parens → light yellow */
+.ace_editor .ace_variable.ace_field {
+    color: #008080 !important;
     font-weight: bold;
-}
+} /* .value/.on_close/.ts → teal */
+.ace_editor .ace_punctuation.ace_operator {
+    color: #808080 !important;
+} /* dot → gray */
+.ace_editor .ace_constant.ace_language.ace_boolean {
+    color: #c678dd !important;
+} /* true/false → soft purple */
 
-.ace_punctuation.ace_operator {
-    color: #808080; /* Gray for the dot */
-}
+/* ── Ace editor syntax highlighting: light ── */
+:root[data-theme="light"] .ace_editor .ace_keyword {
+    color: #0550ae !important;
+} /* let → blue */
+:root[data-theme="light"] .ace_editor .ace_keyword2 {
+    color: #8a5700 !important;
+} /* extract → amber */
+:root[data-theme="light"] .ace_editor .ace_constant.ace_numeric {
+    color: #cf222e !important;
+} /* numbers → red */
+:root[data-theme="light"] .ace_editor .ace_paren {
+    color: #6639ba !important;
+} /* parens → purple */
+:root[data-theme="light"] .ace_editor .ace_variable.ace_field {
+    color: #0a6640 !important;
+    font-weight: bold;
+} /* .value/.on_close/.ts → green */
+:root[data-theme="light"] .ace_editor .ace_punctuation.ace_operator {
+    color: #57606a !important;
+} /* dot → dark gray */
+:root[data-theme="light"] .ace_editor .ace_constant.ace_language.ace_boolean {
+    color: #8250df !important;
+} /* true/false → purple */
 
 .fx-grid {
     background-image:

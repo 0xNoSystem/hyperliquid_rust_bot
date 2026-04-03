@@ -81,6 +81,33 @@ impl Strategy {
         self.scope.push("state", Map::new());
     }
 
+    /// After eval, read state variable locals from the scope and write them
+    /// back into the `state` Map so they persist across ticks.
+    fn sync_state_back(&mut self) {
+        if self.compiled.state_var_names.is_empty() {
+            return;
+        }
+
+        // Collect values from scope locals
+        let values: Vec<(String, Dynamic)> = self
+            .compiled
+            .state_var_names
+            .iter()
+            .filter_map(|name| {
+                self.scope
+                    .get_value::<Dynamic>(name)
+                    .map(|v| (name.clone(), v))
+            })
+            .collect();
+
+        // Write them into the state map (which sits at scope_base - 1)
+        if let Some(state) = self.scope.get_value_mut::<Map>("state") {
+            for (name, val) in values {
+                state.insert(name.into(), val);
+            }
+        }
+    }
+
     /// Rewind scope to empty, then push fresh context variables.
     /// This avoids the per-variable linear name scan of `set_or_push`.
     fn push_context(&mut self, ctx: &StratContext) {
@@ -150,19 +177,25 @@ impl Strat for Strategy {
         self.push_context(&ctx);
         self.scope
             .push("is_armed", is_armed.map(|t| t as i64).unwrap_or(-1_i64));
-        eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_idle)
+        let result = eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_idle);
+        self.sync_state_back();
+        result
     }
 
     fn on_open(&mut self, ctx: StratContext, open_pos: &OpenPosInfo) -> Option<Intent> {
         self.push_context(&ctx);
         self.scope.push("open_position", *open_pos);
-        eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_open)
+        let result = eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_open);
+        self.sync_state_back();
+        result
     }
 
     fn on_busy(&mut self, ctx: StratContext, busy_reason: BusyType) -> Option<Intent> {
         self.push_context(&ctx);
         self.scope.push("busy_reason", busy_reason);
-        eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_busy)
+        let result = eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_busy);
+        self.sync_state_back();
+        result
     }
 
     fn required_indicators(&self) -> Vec<IndexId> {

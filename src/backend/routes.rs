@@ -436,6 +436,7 @@ struct SaveStrategyPayload {
     on_open: String,
     on_busy: String,
     indicators: serde_json::Value,
+    state_declarations: Option<serde_json::Value>,
     is_active: Option<bool>,
 }
 
@@ -444,12 +445,19 @@ async fn save_strategy(
     auth: AuthUser,
     Json(payload): Json<SaveStrategyPayload>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // Validate scripts compile before persisting
+    // Parse state declarations
+    let state_decls: Option<super::scripting::StateDeclarations> = payload
+        .state_declarations
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+    // Validate scripts compile before persisting (expansion happens inside)
     let compiled = match super::scripting::compile_strategy(
         &state.rhai_engine,
         &payload.on_idle,
         &payload.on_open,
         &payload.on_busy,
+        state_decls.as_ref(),
     ) {
         Ok(c) => c,
         Err(msg) => {
@@ -462,8 +470,8 @@ async fn save_strategy(
     };
 
     let row = sqlx::query_as::<_, super::db::StrategyRow>(
-        "INSERT INTO strategies (pubkey, name, on_idle, on_open, on_busy, indicators, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "INSERT INTO strategies (pubkey, name, on_idle, on_open, on_busy, indicators, state_declarations, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *",
     )
     .bind(&auth.pubkey)
@@ -472,6 +480,7 @@ async fn save_strategy(
     .bind(&payload.on_open)
     .bind(&payload.on_busy)
     .bind(&payload.indicators)
+    .bind(&payload.state_declarations)
     .bind(payload.is_active.unwrap_or(false))
     .fetch_one(&state.pool)
     .await
@@ -487,6 +496,7 @@ async fn save_strategy(
             CachedStrategy {
                 compiled,
                 indicators,
+                state_declarations: state_decls,
                 name: payload.name.clone(),
             },
         );
@@ -503,12 +513,19 @@ async fn update_strategy(
 ) -> Result<impl IntoResponse, StatusCode> {
     let id: sqlx::types::Uuid = id.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    // Validate scripts compile before persisting
+    // Parse state declarations
+    let state_decls: Option<super::scripting::StateDeclarations> = payload
+        .state_declarations
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+    // Validate scripts compile before persisting (expansion happens inside)
     let compiled = match super::scripting::compile_strategy(
         &state.rhai_engine,
         &payload.on_idle,
         &payload.on_open,
         &payload.on_busy,
+        state_decls.as_ref(),
     ) {
         Ok(c) => c,
         Err(msg) => {
@@ -521,8 +538,8 @@ async fn update_strategy(
     };
 
     let row = sqlx::query_as::<_, super::db::StrategyRow>(
-        "UPDATE strategies SET name = $1, on_idle = $2, on_open = $3, on_busy = $4, indicators = $5, is_active = $6, updated_at = now()
-         WHERE id = $7 AND pubkey = $8
+        "UPDATE strategies SET name = $1, on_idle = $2, on_open = $3, on_busy = $4, indicators = $5, state_declarations = $6, is_active = $7, updated_at = now()
+         WHERE id = $8 AND pubkey = $9
          RETURNING *",
     )
     .bind(&payload.name)
@@ -530,6 +547,7 @@ async fn update_strategy(
     .bind(&payload.on_open)
     .bind(&payload.on_busy)
     .bind(&payload.indicators)
+    .bind(&payload.state_declarations)
     .bind(payload.is_active.unwrap_or(false))
     .bind(id)
     .bind(&auth.pubkey)
@@ -549,6 +567,7 @@ async fn update_strategy(
                     CachedStrategy {
                         compiled,
                         indicators,
+                        state_declarations: state_decls,
                         name: payload.name.clone(),
                     },
                 );

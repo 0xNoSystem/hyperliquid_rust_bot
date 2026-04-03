@@ -27,6 +27,11 @@ export class CustomHighlightRules extends TextHighlightRules {
 
                 { token: "keyword2", regex: "\\b(extract|timedelta)\\b" },
 
+                {
+                    token: "constant.language.boolean",
+                    regex: "\\b(true|false)\\b",
+                },
+
                 { token: "constant.numeric", regex: "\\b\\d+(\\.\\d+)?\\b" },
 
                 { token: "paren", regex: "[\\[\\(\\{\\}\\]\\)]" },

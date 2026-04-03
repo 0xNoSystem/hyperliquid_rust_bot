@@ -12,7 +12,7 @@ use alloy::signers::local::PrivateKeySigner;
 use hyperliquid_rust_sdk::ApproveAgent;
 
 use super::bot_manager::BotManager;
-use super::scripting::CompiledStrategy;
+use super::scripting::{CompiledStrategy, StateDeclarations};
 use crate::backtest::CandleStore;
 use crate::{IndexId, UpdateFrontend};
 
@@ -37,6 +37,7 @@ pub type PendingAgentStore = Arc<RwLock<HashMap<String, PendingAgent>>>;
 pub struct CachedStrategy {
     pub compiled: CompiledStrategy,
     pub indicators: Vec<IndexId>,
+    pub state_declarations: Option<StateDeclarations>,
     pub name: String,
 }
 

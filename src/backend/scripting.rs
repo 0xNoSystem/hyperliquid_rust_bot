@@ -1,10 +1,16 @@
-u e rhai::{AST, Dynamic, Engine, Scope};
+use std::collections::HashMap;
+
+use regex::Regex;
+use rhai::{AST, Dynamic, Engine, Scope};
 
 use crate::strategy::{
     BusyType, Intent, LimitOptions, LiqSide, OnTimeout, Order, ReduceOrder, SizeSpec, TimeoutInfo,
     Triggers,
 };
 use crate::{OpenPosInfo, Price, Side, TimeDelta, TimeFrame, TimedValue, Value};
+
+/// State variable declarations: variable name → default value as Rhai literal.
+pub type StateDeclarations = HashMap<String, serde_json::Value>;
 
 // ── Compiled strategy (validated ASTs) ──────────────────────────────────────
 
@@ -13,6 +19,8 @@ pub struct CompiledStrategy {
     pub ast_on_idle: AST,
     pub ast_on_open: AST,
     pub ast_on_busy: AST,
+    /// Names of user-declared state variables (for post-eval sync-back).
+    pub state_var_names: Vec<String>,
 }
 
 impl CompiledStrategy {
@@ -23,6 +31,7 @@ impl CompiledStrategy {
             ast_on_idle: ast.clone(),
             ast_on_open: ast.clone(),
             ast_on_busy: ast,
+            state_var_names: Vec::new(),
         }
     }
 }
@@ -97,31 +106,144 @@ fn validation_scope(extra: &[&str]) -> Scope<'static> {
 /// Compile three strategy scripts (on_idle, on_open, on_busy) and return
 /// compiled ASTs. With strict variables enabled, the compiler rejects any
 /// reference to an undefined variable across ALL code branches.
+///
+/// Raw scripts are expanded (extract macros + state init preamble) before
+/// compilation. The DB stores the raw user code; expansion is transient.
 pub fn compile_strategy(
     engine: &Engine,
     on_idle: &str,
     on_open: &str,
     on_busy: &str,
+    state_declarations: Option<&StateDeclarations>,
 ) -> Result<CompiledStrategy, String> {
-    let idle_scope = validation_scope(&["is_armed"]);
-    let open_scope = validation_scope(&["open_position"]);
-    let busy_scope = validation_scope(&["busy_reason"]);
+    let state_preamble = state_declarations
+        .map(generate_state_preamble)
+        .unwrap_or_default();
+
+    let expanded_idle = expand_script(on_idle, &state_preamble);
+    let expanded_open = expand_script(on_open, &state_preamble);
+    let expanded_busy = expand_script(on_busy, &state_preamble);
+
+    // State variable names need to be in scope for strict-variable checking
+    let state_var_names: Vec<String> = state_declarations
+        .map(|d| d.keys().cloned().collect())
+        .unwrap_or_default();
+    let state_var_refs: Vec<&str> = state_var_names.iter().map(|s| s.as_str()).collect();
+
+    let mut idle_extras = vec!["is_armed"];
+    idle_extras.extend_from_slice(&state_var_refs);
+    let mut open_extras = vec!["open_position"];
+    open_extras.extend_from_slice(&state_var_refs);
+    let mut busy_extras = vec!["busy_reason"];
+    busy_extras.extend_from_slice(&state_var_refs);
+
+    let idle_scope = validation_scope(&idle_extras);
+    let open_scope = validation_scope(&open_extras);
+    let busy_scope = validation_scope(&busy_extras);
 
     let ast_on_idle = engine
-        .compile_with_scope(&idle_scope, on_idle)
+        .compile_with_scope(&idle_scope, &expanded_idle)
         .map_err(|e| format!("on_idle compile error: {}", e))?;
     let ast_on_open = engine
-        .compile_with_scope(&open_scope, on_open)
+        .compile_with_scope(&open_scope, &expanded_open)
         .map_err(|e| format!("on_open compile error: {}", e))?;
     let ast_on_busy = engine
-        .compile_with_scope(&busy_scope, on_busy)
+        .compile_with_scope(&busy_scope, &expanded_busy)
         .map_err(|e| format!("on_busy compile error: {}", e))?;
 
     Ok(CompiledStrategy {
         ast_on_idle,
         ast_on_open,
         ast_on_busy,
+        state_var_names,
     })
+}
+
+// ── Script expansion (transpilation) ───────────────────────────────────────
+
+/// Expand a raw user script: apply extract() macro expansion, then prepend
+/// the state initialization preamble.
+fn expand_script(src: &str, state_preamble: &str) -> String {
+    let expanded = expand_extract(src);
+    if state_preamble.is_empty() {
+        expanded
+    } else {
+        format!("{}\n{}", state_preamble, expanded)
+    }
+}
+
+/// Expand `let <var> = extract("<key>");` into indicator access + guard +
+/// value unpacking. The unpacking depends on the indicator type detected
+/// from the key prefix.
+fn expand_extract(src: &str) -> String {
+    let re = Regex::new(r#"let\s+(\w+)\s*=\s*extract\(\s*"([^"]+)"\s*\)\s*;"#).unwrap();
+
+    re.replace_all(src, |caps: &regex::Captures| {
+        let var = &caps[1];
+        let key = &caps[2];
+
+        let mut out = format!("let {var} = indicators[\"{key}\"];\nif {var} == () {{ return; }}\n");
+
+        if key.starts_with("stochRsi_") {
+            out.push_str(&format!(
+                "let {var}_k = {var}.value.stoch_k();\n\
+                 let {var}_d = {var}.value.stoch_d();\n\
+                 let {var}_on_close = {var}.on_close;\n\
+                 let {var}_ts = {var}.ts;\n"
+            ));
+        } else if key.starts_with("emaCross_") {
+            out.push_str(&format!(
+                "let {var}_short = {var}.value.ema_short();\n\
+                 let {var}_long = {var}.value.ema_long();\n\
+                 let {var}_trend = {var}.value.ema_trend();\n\
+                 let {var}_on_close = {var}.on_close;\n\
+                 let {var}_ts = {var}.ts;\n"
+            ));
+        } else {
+            out.push_str(&format!(
+                "let {var}_value = {var}.value.as_f64();\n\
+                 let {var}_on_close = {var}.on_close;\n\
+                 let {var}_ts = {var}.ts;\n"
+            ));
+        }
+        out
+    })
+    .into_owned()
+}
+
+/// Generate the state initialization preamble from state declarations.
+/// Each declaration becomes: `let <name> = if state["<name>"] == () { <default> } else { state["<name>"] };`
+fn generate_state_preamble(decls: &StateDeclarations) -> String {
+    let mut lines = Vec::with_capacity(decls.len());
+    for (name, default) in decls {
+        let default_rhai = json_to_rhai_literal(default);
+        lines.push(format!(
+            "let {name} = if state[\"{name}\"] == () {{ {default_rhai} }} else {{ state[\"{name}\"] }};"
+        ));
+    }
+    lines.join("\n")
+}
+
+/// Convert a serde_json::Value to a Rhai literal string.
+fn json_to_rhai_literal(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::Null => "()".to_string(),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                i.to_string()
+            } else if let Some(f) = n.as_f64() {
+                let s = f.to_string();
+                if s.contains('.') { s } else { format!("{s}.0") }
+            } else {
+                "0".to_string()
+            }
+        }
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::String(s) => {
+            format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+        }
+        _ => "()".to_string(),
+    }
 }
 
 // ── Type registrations ──────────────────────────────────────────────────────

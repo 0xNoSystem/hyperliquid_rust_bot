@@ -148,11 +148,17 @@ impl Backtester {
                 .map_err(|e| Error::Custom(format!("DB error fetching strategy: {e}")))?
                 .ok_or_else(|| Error::Custom(format!("strategy {sid} not found")))?;
 
+                let state_decls: Option<crate::backend::scripting::StateDeclarations> = row
+                    .state_declarations
+                    .as_ref()
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
+
                 let compiled = crate::backend::scripting::compile_strategy(
                     &rhai_engine,
                     &row.on_idle,
                     &row.on_open,
                     &row.on_busy,
+                    state_decls.as_ref(),
                 )
                 .map_err(|e| Error::Custom(format!("strategy {sid} failed to compile: {e}")))?;
 
@@ -166,6 +172,7 @@ impl Backtester {
                         crate::backend::app_state::CachedStrategy {
                             compiled: compiled.clone(),
                             indicators: indicators.clone(),
+                            state_declarations: state_decls,
                             name: row.name,
                         },
                     );
