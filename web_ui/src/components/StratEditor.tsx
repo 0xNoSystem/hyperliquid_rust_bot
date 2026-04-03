@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import AceEditor from "react-ace";
 import CustomRhaiMode from "../editor/custom_mode";
 import "ace-builds/src-noconflict/theme-monokai";
-import "ace-builds/src-noconflict/theme-github";
+import "ace-builds/src-noconflict/theme-solarized_light";
 import "ace-builds/src-noconflict/keybinding-vim";
 
 import { useTheme } from "../context/ThemeContextStore";
@@ -16,6 +16,7 @@ import {
     FlaskConical,
     Pencil,
     X,
+    Maximize2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../context/AuthContextStore";
@@ -90,6 +91,19 @@ export default function StratEditor() {
 
     //vim
     const [vimMode, setVimMode] = useState<boolean>(false);
+
+    // Fullscreen editor
+    const [fullscreenPanel, setFullscreenPanel] = useState<string | null>(null);
+    const [hoveredPanel, setHoveredPanel] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!fullscreenPanel || vimMode) return;
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setFullscreenPanel(null);
+        };
+        window.addEventListener("keydown", handler);
+        return () => window.removeEventListener("keydown", handler);
+    }, [fullscreenPanel, vimMode]);
 
     // Textarea refs for insert-at-cursor
     const textareaRefs = useRef<Record<string, AceEditor | null>>({});
@@ -615,27 +629,52 @@ export default function StratEditor() {
                         </div>
 
                         {/* Script editors */}
-                        <div className="flex flex-1 gap-px overflow-hidden">
+                        <div className="relative flex flex-1 gap-px overflow-hidden">
                             {(
                                 [
                                     ["on_idle", onIdle, setOnIdle],
                                     ["on_open", onOpen, setOnOpen],
                                     ["on_busy", onBusy, setOnBusy],
                                 ] as const
-                            ).map(([label, value, setter]) => (
+                            ).map(([label, value, setter]) => {
+                                const isFullscreen = fullscreenPanel === label;
+                                return (
                                 <div
                                     key={label}
-                                    className="bg-app-surface-3 flex flex-1 flex-col"
+                                    className={
+                                        isFullscreen
+                                            ? "bg-app-surface-3 absolute inset-0 z-30 flex flex-col"
+                                            : "bg-app-surface-3 relative flex flex-1 flex-col"
+                                    }
+                                    onMouseEnter={() => setHoveredPanel(label)}
+                                    onMouseLeave={() => setHoveredPanel(null)}
                                 >
-                                    <div className="border-line-subtle bg-surface-pane border-b px-4 py-2">
+                                    <div className="border-line-subtle bg-surface-pane flex items-center justify-between border-b px-4 py-2">
                                         <span className="text-app-text/50 text-xs font-medium tracking-wider uppercase">
                                             {label.replace("_", " ")}
                                         </span>
+                                        {isFullscreen && (
+                                            <button
+                                                onClick={() => setFullscreenPanel(null)}
+                                                className="text-app-text/40 hover:text-app-text transition"
+                                            >
+                                                <X className="h-4 w-4" />
+                                            </button>
+                                        )}
                                     </div>
+                                    {/* Fullscreen button on hover */}
+                                    {!isFullscreen && hoveredPanel === label && (
+                                        <button
+                                            onClick={() => setFullscreenPanel(label)}
+                                            className="absolute top-10 right-2 z-10 rounded bg-black/50 p-1.5 text-white/70 hover:text-white transition"
+                                            title="Fullscreen"
+                                        >
+                                            <Maximize2 className="h-4 w-4" />
+                                        </button>
+                                    )}
                                     <AceEditor
-                                        mode={rhaiMode} // or your "CustomRhaiMode"
-                                        theme={theme == "light" ? "github" : "monokai"}
-                                        // Ace refs return the component instance, which has an 'editor' property
+                                        mode={rhaiMode}
+                                        theme={theme == "light" ? "solarized_light" : "monokai"}
                                         ref={(el) => {
                                             textareaRefs.current[label] = el;
                                         }}
@@ -643,7 +682,6 @@ export default function StratEditor() {
                                             lastFocusedRef.current = label;
                                         }}
                                         value={value}
-                                        // FIX: Ace onChange returns the value string directly
                                         onChange={(newValue) =>
                                             setter(newValue)
                                         }
@@ -652,15 +690,14 @@ export default function StratEditor() {
                                             useWorker: false,
                                             fontFamily: "monospace",
                                         }}
-                                        // Apply your styling via 'style' or wrapper div,
-                                        // as Ace injects its own complex DOM structure
                                         className="flex-1"
                                         width="100%"
                                         height="100%"
                                         keyboardHandler={vimMode ? "vim" : undefined}
-                                    />{" "}
+                                    />
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </>
                 )}

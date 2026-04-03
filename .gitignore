@@ -2,4 +2,6 @@
 /target
 testnet
 web_ui/.vite
-src/bin/cli_ui.rs
+data
+
+
