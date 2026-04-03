@@ -47,8 +47,7 @@ These are available in **all three** scripts:
 | `free_margin` | `f64` | Available margin in USDC |
 | `lev` | `i64` | Current leverage multiplier |
 | `last_price` | `Price` | Latest candle data |
-| `indicators` | `Map` | Indicator values keyed by `"kind_timeframe"` |
-| `state` | `Map` | Persistent state across ticks (survives between evaluations) |
+| `indicators` | `Map` | Indicator values (use `extract()` instead of accessing directly) |
 
 ### Constants
 
@@ -172,54 +171,60 @@ Add indicators to your strategy through the editor UI. Each indicator is bound t
 | Volume MA | `volMa_{periods}_{tf}` | periods |
 | Historical Volatility | `histVol_{periods}_{tf}` | periods |
 
-### Reading Indicator Values
+### The `extract()` Macro
 
-Each entry in the `indicators` map is a `TimedValue`:
+Use `extract()` to access an indicator. It handles the lookup, null guard, and value unpacking automatically. You write one line and get several ready-to-use variables.
 
-```rust
-let rsi_tv = indicators["rsi_14_15m"];
-if rsi_tv == () { return; }         // not ready yet
-
-let rsi = rsi_tv.value.as_f64();   // the numeric value
-let on_close = rsi_tv.on_close;    // true if from a closed candle
-let ts = rsi_tv.ts;                // candle close timestamp (ms)
-```
-
-### The `extract()` Shorthand
-
-In the strategy editor, clicking an indicator badge inserts an `extract()` call:
+**Single-value indicators** (RSI, EMA, SMA, ATR, ADX, SMA on RSI, Volume MA, Historical Volatility):
 
 ```rust
 let rsi = extract("rsi_14_15m");
 ```
 
-This is expanded before compilation into:
+Expands to:
 
 ```rust
 let rsi = indicators["rsi_14_15m"];
-if rsi == () { return; };
+if rsi == () { return; }
+let rsi_value = rsi.value.as_f64();     // the numeric value
+let rsi_on_close = rsi.on_close;        // true if from a closed candle
+let rsi_ts = rsi.ts;                    // candle close timestamp (ms)
 ```
 
-It gives you the `TimedValue` directly, with a guard that skips the tick if the indicator hasn't produced a value yet.
+After `extract()`, use `rsi_value` directly in your logic.
 
-### Value Accessors
+**Stochastic RSI:**
 
-Most indicators use `.as_f64()` on the value. Some multi-output indicators have specialized accessors:
-
-**Stochastic RSI**
 ```rust
 let stoch = extract("stochRsi_14_0_0_15m");
-stoch.value.stoch_k()    // K line
-stoch.value.stoch_d()    // D line
 ```
 
-**EMA Cross**
+Expands with:
+
 ```rust
-let cross = extract("emaCross_9_21_15m");
-cross.value.ema_short()   // short EMA value
-cross.value.ema_long()    // long EMA value
-cross.value.ema_trend()   // true if short > long
+let stoch_k = ...       // K line
+let stoch_d = ...       // D line
+let stoch_on_close = ...
+let stoch_ts = ...
 ```
+
+**EMA Cross:**
+
+```rust
+let ema = extract("emaCross_9_21_15m");
+```
+
+Expands with:
+
+```rust
+let ema_short = ...     // short EMA value
+let ema_long = ...      // long EMA value
+let ema_trend = ...     // true if short > long (bool)
+let ema_on_close = ...
+let ema_ts = ...
+```
+
+The variable names are always `{your_name}_{field}`. Clicking an indicator badge in the editor inserts the `extract()` call for you.
 
 ---
 
@@ -263,17 +268,34 @@ busy_reason.is_closing()    // true if waiting for a close order to fill
 
 ---
 
-## Persistent State
+## State Declarations
 
-The `state` variable is a map that persists across ticks within the same strategy session. Use it to track custom counters, flags, or any data your strategy needs between evaluations.
+Declare persistent variables in the **State Variables** box in the editor. One per line, `name = default`:
+
+```
+count = 0
+last_signal = "none"
+prev_uptrend = null
+```
+
+These variables are automatically initialized on the first tick and persist across ticks. Use them as bare locals in your scripts — no `state["..."]` boilerplate.
 
 ```rust
 // on_idle
-if state["entry_count"] == () {
-    state["entry_count"] = 0;
+count += 1;
+if count > 10 {
+    open_market(LONG, margin_pct(50.0))
 }
+```
 
-state["entry_count"] += 1;
+Supported default types: numbers, strings (`"..."`), booleans (`true`/`false`), and `null` (Rhai `()` — useful for "not set yet").
+
+A `null` default lets you check whether a value has been assigned:
+
+```rust
+if prev_uptrend != () {
+    // only runs after prev_uptrend has been set to a real value
+}
 ```
 
 State resets when the strategy is reloaded or the bot restarts.
@@ -289,65 +311,69 @@ State resets when the strategy is reloaded or the bot restarts.
 **on_idle:**
 ```rust
 let rsi = extract("rsi_14_15m");
-let val = rsi.value.as_f64();
 
-if val < 30.0 {
+if rsi_value < 30.0 {
     open_market(LONG, margin_pct(50.0), triggers(3.0, 2.0))
-} else if val > 70.0 {
+} else if rsi_value > 70.0 {
     open_market(SHORT, margin_pct(50.0), triggers(3.0, 2.0))
 }
 ```
 
-**on_open:**
-```rust
-// let TP/SL triggers handle the exit
+**on_open / on_busy:** empty (TP/SL triggers handle the exit)
+
+### EMA Cross + RSI with Armed Entry
+
+**Indicators:** RSI(12) on 1h, EMA Cross(9, 21) on 15m
+
+**State declarations:**
 ```
-
-**on_busy:**
-```rust
-// wait for fill
+prev_uptrend = null
 ```
-
-### EMA Cross Trend Following
-
-**Indicators:** EMA Cross(9, 21) on 15m, ATR(14) on 15m
 
 **on_idle:**
 ```rust
-let cross = extract("emaCross_9_21_15m");
-let atr = extract("atr_14_15m");
+let rsi_1h = extract("rsi_12_1h");
+let ema = extract("emaCross_9_21_15m");
 
-if !cross.on_close { return; }
+if is_armed > 0 {
+    if !prev_uptrend && ema_trend {
+        prev_uptrend = ema_trend;
+        return open_market(LONG, margin_pct(80.0), sl_only(28.0));
+    }
+    if prev_uptrend && !ema_trend {
+        prev_uptrend = ema_trend;
+        return open_market(SHORT, margin_pct(80.0), sl_only(28.0));
+    }
+} else if rsi_1h_value < 60.0 && !ema_trend {
+    prev_uptrend = ema_trend;
+    return arm(timedelta(MIN15, 1));
+} else if rsi_1h_value > 70.0 && ema_trend {
+    prev_uptrend = ema_trend;
+    return arm(timedelta(MIN15, 1));
+}
 
-let trend_up = cross.value.ema_trend();
-let volatility = atr.value.as_f64();
+prev_uptrend = ema_trend;
+```
 
-// only enter on confirmed candle close with sufficient volatility
-if volatility > last_price.close * 0.005 {
-    if trend_up {
-        open_market(LONG, margin_pct(30.0), triggers(4.0, 2.0))
-    } else {
-        open_market(SHORT, margin_pct(30.0), triggers(4.0, 2.0))
+**on_open:**
+```rust
+let rsi_1h = extract("rsi_12_1h");
+let rsi_15m = extract("rsi_14_15m");
+
+let elapsed = last_price.open_time - open_position.open_time;
+
+if open_position.side == LONG {
+    if rsi_15m_value >= 68.0 || (elapsed > timedelta(MIN15, 2) && rsi_1h_value < 33.0) {
+        return flatten_limit(last_price.close * 1.003);
+    }
+} else {
+    if rsi_15m_value <= 38.0 || (elapsed > timedelta(MIN15, 2) && rsi_1h_value > 58.0) {
+        return flatten_limit(last_price.close * 0.997);
     }
 }
 ```
 
-**on_open:**
-```rust
-let cross = extract("emaCross_9_21_15m");
-
-// exit if trend reverses
-if open_position.side == LONG && !cross.value.ema_trend() {
-    flatten_market()
-} else if open_position.side == SHORT && cross.value.ema_trend() {
-    flatten_market()
-}
-```
-
-**on_busy:**
-```rust
-// wait for fill
-```
+**on_busy:** empty (wait for fill)
 
 ### Limit Order with Timeout
 
@@ -356,9 +382,8 @@ if open_position.side == LONG && !cross.value.ema_trend() {
 **on_idle:**
 ```rust
 let rsi = extract("rsi_14_5m");
-let val = rsi.value.as_f64();
 
-if val < 25.0 {
+if rsi_value < 25.0 {
     // place a limit buy 0.1% below current price
     // if not filled in 15 minutes, force-execute at market
     let px = last_price.close * 0.999;
@@ -366,17 +391,7 @@ if val < 25.0 {
 }
 ```
 
-**on_open:**
-```rust
-// TP/SL triggers manage the exit
-```
-
-**on_busy:**
-```rust
-if busy_reason.is_opening() {
-    // could abort() here if conditions changed
-}
-```
+**on_open / on_busy:** empty
 
 ---
 
@@ -458,5 +473,11 @@ reduce_limit(size, px, timeout)
 arm(timedelta)      disarm()               abort()
 
 -- Indicators --
-extract("key")      .value.as_f64()        .on_close       .ts
+extract("key")  →  {name}_value, {name}_on_close, {name}_ts
+                   emaCross: {name}_short, {name}_long, {name}_trend
+                   stochRsi: {name}_k, {name}_d
+
+-- State --
+Declare in State Variables box:   count = 0 | flag = false | x = null
+Use as bare locals:               count += 1
 ```
