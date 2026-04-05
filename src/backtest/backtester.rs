@@ -231,7 +231,7 @@ impl Backtester {
             .run_id
             .clone()
             .filter(|id| !id.trim().is_empty())
-            .unwrap_or_else(|| format!("bt-{}-{started_at}", cfg.asset.to_lowercase()));
+            .unwrap_or_else(|| format!("bt-{}-{started_at}", cfg.asset));
         let asset = cfg.asset.clone();
         let tf = cfg.resolution;
         let sim_start = cfg.start_time;
@@ -1150,11 +1150,7 @@ impl Backtester {
         let snapshots = cap_snapshots(&self.snapshots, self.request.config.max_snapshots);
 
         BacktestResult {
-            run_id: format!(
-                "bt-{}-{}",
-                self.request.config.asset.to_lowercase(),
-                started_at
-            ),
+            run_id: format!("bt-{}-{}", self.request.config.asset, started_at),
             started_at,
             finished_at,
             candles_loaded,

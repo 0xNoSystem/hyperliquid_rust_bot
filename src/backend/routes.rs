@@ -177,7 +177,7 @@ async fn execute_command(
 
 #[inline]
 fn make_backtest_run_id(asset: &str) -> String {
-    format!("bt-{}-{}", asset.to_lowercase(), get_time_now())
+    format!("bt-{asset}-{}", get_time_now())
 }
 
 fn validate_backtest_request(request: &BacktestRunRequest) -> Result<(), String> {
@@ -1082,7 +1082,7 @@ async fn list_backtest_history(
                  ORDER BY created_at DESC LIMIT $4 OFFSET $5",
             )
             .bind(&auth.pubkey)
-            .bind(asset.to_uppercase())
+            .bind(asset)
             .bind(strategy_id)
             .bind(limit)
             .bind(offset)
@@ -1096,7 +1096,7 @@ async fn list_backtest_history(
                  ORDER BY created_at DESC LIMIT $3 OFFSET $4",
             )
             .bind(&auth.pubkey)
-            .bind(asset.to_uppercase())
+            .bind(asset)
             .bind(limit)
             .bind(offset)
             .fetch_all(&state.pool)

@@ -1,7 +1,6 @@
 use crate::{Price, TimeFrame};
 use hyperliquid_rust_sdk::{AssetMeta, CandleData, Error, InfoClient, Message, Subscription};
 use log::info;
-use log::warn;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -106,19 +105,8 @@ pub fn address(address: &str) -> Address {
     address.parse().unwrap()
 }
 
-pub async fn get_max_lev(info_client: &InfoClient, token: &str) -> usize {
-    let assets = info_client.meta().await.unwrap().universe;
-
-    if let Some(asset) = assets.iter().find(|a| a.name == token) {
-        asset.max_leverage
-    } else {
-        warn!("ERROR: Failed to retrieve max_leverage for {}", token);
-        1
-    }
-}
-
 pub async fn get_asset(info_client: &InfoClient, token: &str) -> Result<AssetMeta, Error> {
-    let assets = info_client.meta().await?.universe;
+    let assets = info_client.all_perp_metas().await?;
 
     if let Some(asset) = assets.into_iter().find(|a| a.name == token) {
         Ok(asset)
@@ -128,7 +116,7 @@ pub async fn get_asset(info_client: &InfoClient, token: &str) -> Result<AssetMet
 }
 
 pub async fn get_all_assets(info_client: &InfoClient) -> Result<Vec<AssetMeta>, Error> {
-    Ok(info_client.meta().await?.universe)
+    info_client.all_perp_metas().await
 }
 
 #[inline]
