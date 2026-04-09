@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
@@ -106,7 +107,7 @@ impl Handler {
     }
 }
 
-pub type IndexId = (IndicatorKind, TimeFrame);
+pub type IndexId = (Arc<str>, IndicatorKind, TimeFrame);
 
 fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
     match kind {
@@ -133,20 +134,23 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
 #[derive(Debug)]
 pub struct Tracker {
     pub indicators: HashMap<IndicatorKind, Handler, BuildHasherDefault<FxHasher>>,
+    asset: Arc<str>,
     tf: TimeFrame,
     prev_close: Option<u64>,
     next_close: Option<u64>,
 }
 
 impl Tracker {
-    pub fn new(tf: TimeFrame) -> Self {
+    pub fn new(asset: Arc<str>, tf: TimeFrame) -> Self {
         Tracker {
             indicators: HashMap::default(),
+            asset,
             tf,
             prev_close: None,
             next_close: None,
         }
     }
+
     pub fn digest(&mut self, price: Price) {
         let ts = price.close_time;
         let tf_ms = self.tf.to_millis();
@@ -237,7 +241,7 @@ impl Tracker {
                     on_close: handler.closed,
                     ts: self.prev_close.unwrap_or(0),
                 };
-                values.insert((*kind, self.tf), tv);
+                values.insert((Arc::clone(&self.asset), *kind, self.tf), tv);
             }
         }
         values
@@ -247,7 +251,7 @@ impl Tracker {
         let mut values = Vec::with_capacity(self.indicators.len());
         for (kind, handler) in self.indicators.iter() {
             values.push(IndicatorData {
-                id: (*kind, self.tf),
+                id: (Arc::clone(&self.asset), *kind, self.tf),
                 value: handler.get_value(),
             });
         }
@@ -265,7 +269,7 @@ impl Tracker {
 
 pub type TimeFrameData = HashMap<TimeFrame, Vec<Price>, BuildHasherDefault<FxHasher>>;
 
-#[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
     pub id: IndexId,

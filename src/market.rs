@@ -45,7 +45,7 @@ fn filter_edits(required: &[IndexId], edits: &mut Vec<Entry>) -> Vec<IndexId> {
     let mut blocked = Vec::new();
     edits.retain(|e| {
         if e.edit == EditType::Remove && required.contains(&e.id) {
-            blocked.push(e.id);
+            blocked.push(e.id.clone());
             false
         } else {
             true
@@ -149,7 +149,7 @@ impl Market {
         let active = self.signal_engine.get_active_indicators();
         let requested_tfs: Vec<TimeFrame> = active
             .iter()
-            .map(|id| id.1)
+            .map(|id| id.2)
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
@@ -159,7 +159,7 @@ impl Market {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cache_tx
             .send(CacheCmdIn::Snapshot(CandleSnapshotRequest {
-                asset: self.asset.name.clone(),
+                asset: Arc::from(self.asset.name.as_str()),
                 request,
                 reply: reply_tx,
             }))
@@ -189,7 +189,9 @@ impl Market {
         let mut last_price: Option<f64> = None;
         for (tf, prices) in &tf_data {
             last_price = prices.last().map(|p| p.close);
-            self.signal_engine.load(*tf, prices.clone()).await;
+            self.signal_engine
+                .load(&Arc::from(self.asset.name.as_str()), *tf, prices.clone())
+                .await;
         }
 
         Ok(last_price)
@@ -235,40 +237,35 @@ impl Market {
         let candle_stream_handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
             loop {
                 match px_receiver.recv().await {
-                    Ok(PriceData::Single(price)) => {
-                        let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
-                            UpdateFrontend::MarketStream(MarketStream::Price {
-                                asset: asset_name.to_string(),
-                                price: price.close,
-                            }),
-                        ));
-                        let _ = engine_price_tx.send(EngineCommand::UpdatePrice(price));
-                    }
-                    Ok(PriceData::Bulk(prices)) => {
-                        if let Some(last) = prices.last() {
+                    Ok(data) => {
+                        let last_price = match &data {
+                            PriceData::Single(p) => Some(p.close),
+                            PriceData::Bulk(ps) => ps.last().map(|p| p.close),
+                        };
+                        if let Some(px) = last_price {
                             let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
                                 UpdateFrontend::MarketStream(MarketStream::Price {
-                                    asset: asset_name.to_string(),
-                                    price: last.close,
+                                    asset: Arc::clone(&asset_name),
+                                    price: px,
                                 }),
                             ));
                         }
-                        let _ = engine_price_tx.send(EngineCommand::UpdatePriceBulk(prices));
+                        let _ = engine_price_tx
+                            .send(EngineCommand::UpdatePrice((Arc::clone(&asset_name), data)));
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!("{} price receiver lagged by {} messages", &asset_name, n);
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         warn!("{} broadcast channel closed", &asset_name);
-                        let _ =
-                            bot_price_update.send(MarketUpdate::FeedDied(asset_name.to_string()));
+                        let _ = bot_price_update
+                            .send(MarketUpdate::FeedDied((*asset_name).to_string()));
                         break;
                     }
                 }
             }
             Ok(())
         });
-
         //listen to changes and trade results
         let engine_update_tx = self.senders.engine_tx.clone();
         let bot_update_tx = self.senders.bot_tx;
@@ -303,15 +300,17 @@ impl Market {
                 }
 
                 MarketCommand::UpdateStrategy(compiled, strat_indicators, name) => {
-                    let new_tfs: HashMap<TimeFrame, CandleCount> =
-                        strat_indicators.iter().map(|(_, tf)| (*tf, 5000)).collect();
+                    let new_tfs: HashMap<TimeFrame, CandleCount> = strat_indicators
+                        .iter()
+                        .map(|(_, _, tf)| (*tf, 5000))
+                        .collect();
 
                     let mut map: TimeFrameData = HashMap::default();
                     let mut failed = false;
                     if !new_tfs.is_empty() {
                         let (reply_tx, reply_rx) = oneshot::channel();
                         let req = CandleSnapshotRequest {
-                            asset: asset.name.clone(),
+                            asset: Arc::from(asset.name.as_str()),
                             request: new_tfs.clone(),
                             reply: reply_tx,
                         };
@@ -403,14 +402,14 @@ impl Market {
                     let new_tfs: HashMap<TimeFrame, CandleCount> = entry_vec
                         .iter()
                         .filter(|e| e.edit == EditType::Add)
-                        .map(|e| (e.id.1, 5000))
+                        .map(|e| (e.id.2, 5000))
                         .collect();
 
                     let mut map: TimeFrameData = HashMap::default();
                     if !new_tfs.is_empty() {
                         let (reply_tx, reply_rx) = oneshot::channel();
                         let req = CandleSnapshotRequest {
-                            asset: asset.name.clone(),
+                            asset: asset.name.clone().into(),
                             request: new_tfs.clone(),
                             reply: reply_tx,
                         };
@@ -426,7 +425,7 @@ impl Market {
 
                                     if !failed_tfs.is_empty() {
                                         // Remove indicators that depend on failed TFs
-                                        entry_vec.retain(|e| !failed_tfs.contains(&e.id.1));
+                                        entry_vec.retain(|e| !failed_tfs.contains(&e.id.2));
                                         let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                                             UpdateFrontend::UserError(format!(
                                                 "Failed to load candle data for: {}\nIndicators on these timeframes were skipped.",
@@ -492,7 +491,7 @@ impl Market {
                 MarketCommand::UpdateIndicatorData(data) => {
                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                         UpdateFrontend::MarketStream(MarketStream::Indicators {
-                            asset: asset.name.clone(),
+                            asset: Arc::from(asset.name.as_str()),
                             data,
                         }),
                     ));

@@ -233,6 +233,7 @@ impl Backtester {
             .filter(|id| !id.trim().is_empty())
             .unwrap_or_else(|| format!("bt-{}-{started_at}", cfg.asset));
         let asset = cfg.asset.clone();
+        let asset_arc: Arc<str> = Arc::from(asset.as_str());
         let tf = cfg.resolution;
         let sim_start = cfg.start_time;
         let sim_end = cfg.end_time;
@@ -421,7 +422,7 @@ impl Backtester {
                                     if !sim_started {
                                         let warmup_loaded = warmup_buffer.len() as u64;
                                         if warmup_loaded > 0 {
-                                            self.engine.load(tf, warmup_buffer.iter().copied()).await;
+                                            self.engine.load(&asset_arc, tf, warmup_buffer.iter().copied()).await;
                                         }
                                         on_progress(BacktestProgress::WarmingEngine {
                                             loaded: warmup_loaded,

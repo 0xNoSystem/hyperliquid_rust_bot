@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::backtest::{BacktestProgress, BacktestResult};
 use crate::{
     AssetMargin, EngineView, IndexId, MarginAllocation, MarketState, OpenPositionLocal, TradeInfo,
@@ -70,11 +72,11 @@ pub enum EditMarketInfo {
 #[serde(rename_all = "camelCase")]
 pub enum MarketStream {
     Price {
-        asset: String,
+        asset: Arc<str>,
         price: f64,
     },
     Indicators {
-        asset: String,
+        asset: Arc<str>,
         data: Vec<IndicatorData>,
     },
 }

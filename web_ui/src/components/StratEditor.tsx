@@ -38,21 +38,22 @@ import type { Strategy, StrategyDetail } from "../strats";
 type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
 
 /** Mirrors Rust `IndicatorKind::key()` + `_` + `TimeFrame::as_str()` */
-function indicatorKey(ind: IndicatorKind, tf: string): string {
-    if ("rsi" in ind) return `rsi_${ind.rsi}_${tf}`;
-    if ("atr" in ind) return `atr_${ind.atr}_${tf}`;
-    if ("ema" in ind) return `ema_${ind.ema}_${tf}`;
-    if ("sma" in ind) return `sma_${ind.sma}_${tf}`;
-    if ("volMa" in ind) return `volMa_${ind.volMa}_${tf}`;
-    if ("histVolatility" in ind) return `histVol_${ind.histVolatility}_${tf}`;
+function indicatorKey(asset: string, ind: IndicatorKind, tf: string): string {
+    if ("rsi" in ind) return `${asset}_rsi_${ind.rsi}_${tf}`;
+    if ("atr" in ind) return `${asset}_atr_${ind.atr}_${tf}`;
+    if ("ema" in ind) return `${asset}_ema_${ind.ema}_${tf}`;
+    if ("sma" in ind) return `${asset}_sma_${ind.sma}_${tf}`;
+    if ("volMa" in ind) return `${asset}_volMa_${ind.volMa}_${tf}`;
+    if ("histVolatility" in ind)
+        return `${asset}_histVol_${ind.histVolatility}_${tf}`;
     if ("smaOnRsi" in ind)
-        return `smaRsi_${ind.smaOnRsi.periods}_${ind.smaOnRsi.smoothing_length}_${tf}`;
+        return `${asset}_smaRsi_${ind.smaOnRsi.periods}_${ind.smaOnRsi.smoothing_length}_${tf}`;
     if ("stochRsi" in ind)
-        return `stochRsi_${ind.stochRsi.periods}_${ind.stochRsi.k_smoothing ?? 0}_${ind.stochRsi.d_smoothing ?? 0}_${tf}`;
+        return `${asset}_stochRsi_${ind.stochRsi.periods}_${ind.stochRsi.k_smoothing ?? 0}_${ind.stochRsi.d_smoothing ?? 0}_${tf}`;
     if ("adx" in ind)
-        return `adx_${ind.adx.periods}_${ind.adx.di_length}_${tf}`;
+        return `${asset}_adx_${ind.adx.periods}_${ind.adx.di_length}_${tf}`;
     if ("emaCross" in ind)
-        return `emaCross_${ind.emaCross.short}_${ind.emaCross.long}_${tf}`;
+        return `${asset}_emaCross_${ind.emaCross.short}_${ind.emaCross.long}_${tf}`;
     return "unknown";
 }
 
@@ -107,7 +108,7 @@ function serializeStateDeclarations(
 
 export default function StratEditor() {
     const { token } = useAuth();
-    const { strategies, fetchStrategies } = useWebSocketContext();
+    const { strategies, fetchStrategies, universe } = useWebSocketContext();
     const location = useLocation();
     const { theme } = useTheme();
 
@@ -167,6 +168,7 @@ export default function StratEditor() {
     };
     // Indicator picker
     const [showIndicatorPicker, setShowIndicatorPicker] = useState(false);
+    const [newAsset, setNewAsset] = useState("BTC");
     const [newKind, setNewKind] = useState<IndicatorName>("rsi");
     const [newParam, setNewParam] = useState(14);
     const [newParam2, setNewParam2] = useState(14);
@@ -354,7 +356,7 @@ export default function StratEditor() {
                 cfg = { rsi: newParam };
         }
 
-        const newItem: IndexId = [cfg, into(newTf)];
+        const newItem: IndexId = [newAsset, cfg, into(newTf)];
         setIndicators((prev) => {
             const exists = prev.some(
                 (item) => JSON.stringify(item) === JSON.stringify(newItem)
@@ -528,7 +530,7 @@ export default function StratEditor() {
                                         No indicators added
                                     </span>
                                 )}
-                                {indicators.map(([ind, tf], i) => {
+                                {indicators.map(([asset, ind, tf], i) => {
                                     const kind = Object.keys(
                                         ind
                                     )[0] as IndicatorName;
@@ -541,12 +543,13 @@ export default function StratEditor() {
                                                 type="button"
                                                 onClick={() =>
                                                     insertAtCursor(
-                                                        `let x = extract("${indicatorKey(ind, fromTimeFrame(tf))}");`
+                                                        `let x = extract("${indicatorKey(asset, ind, fromTimeFrame(tf))}");`
                                                     )
                                                 }
                                                 title="Click to insert extract() into editor"
                                                 className={`${indicatorColors[kind]} cursor-pointer rounded-full px-2.5 py-0.5 text-xs hover:opacity-80`}
                                             >
+                                                <strong>({asset})</strong>{" "}
                                                 {indicatorLabels[kind]}{" "}
                                                 {get_params(ind)}{" "}
                                                 {fromTimeFrame(tf)}
@@ -588,6 +591,28 @@ export default function StratEditor() {
                                             >
                                                 <X className="text-app-text/40 h-4 w-4" />
                                             </button>
+                                        </div>
+                                        <div className="mb-2">
+                                            <label className="text-app-text/60 text-xs">
+                                                Asset
+                                            </label>
+                                            <select
+                                                className={selectClass}
+                                                value={newAsset}
+                                                onChange={(e) => {
+                                                    setNewAsset(e.target.value);
+                                                }}
+                                            >
+                                                {universe.map((asset) => (
+                                                    <option
+                                                        key={asset.name}
+                                                        value={asset.name}
+                                                        className="bg-app-surface-3 text-app-text"
+                                                    >
+                                                        {asset.name}
+                                                    </option>
+                                                ))}
+                                            </select>
                                         </div>
                                         <select
                                             value={newKind}

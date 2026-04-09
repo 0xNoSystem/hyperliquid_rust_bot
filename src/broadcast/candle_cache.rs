@@ -1,4 +1,4 @@
-use super::PriceData;
+use super::{PriceAsset, PriceData};
 use crate::{CandleHistory, Error, HL_MAX_CANDLES, Price, TimeFrame, TimeFrameData, load_candles};
 use hyperliquid_rust_sdk::{BaseUrl, InfoClient};
 use rustc_hash::FxHasher;
@@ -15,24 +15,21 @@ type FxMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
 pub type CandleCount = u32;
 
 pub struct CandleSnapshotRequest {
-    pub asset: String,
+    pub asset: Arc<str>,
     pub request: HashMap<TimeFrame, CandleCount>,
     pub reply: oneshot::Sender<Result<TimeFrameData, Error>>,
 }
 
 pub enum CacheCmdIn {
     NewFeed {
-        asset: String,
+        asset: Arc<str>,
         rx: tokio::sync::broadcast::Receiver<PriceData>,
     },
-    DropFeed(String),
-    Price {
-        asset: String,
-        data: PriceData,
-    },
+    DropFeed(Arc<str>),
+    Price(PriceAsset),
     Snapshot(CandleSnapshotRequest),
     Backfill {
-        asset: String,
+        asset: Arc<str>,
         data: TimeFrameData,
     },
 }
@@ -91,8 +88,8 @@ pub struct CandleCache {
     info_client: Arc<InfoClient>,
     cmd_tx: Sender<CacheCmdIn>,
     cmd_rx: Receiver<CacheCmdIn>,
-    candles: FxMap<String, FxMap<TimeFrame, CandleHistory>>,
-    builders: FxMap<String, HashMap<TimeFrame, TfBuilder>>,
+    candles: FxMap<Arc<str>, FxMap<TimeFrame, CandleHistory>>,
+    builders: FxMap<Arc<str>, HashMap<TimeFrame, TfBuilder>>,
 }
 
 impl CandleCache {
@@ -129,32 +126,29 @@ impl CandleCache {
         cached
     }
 
-    fn add_feed(&mut self, asset: String, rx: tokio::sync::broadcast::Receiver<PriceData>) {
+    fn add_feed(&mut self, asset: Arc<str>, rx: tokio::sync::broadcast::Receiver<PriceData>) {
         let builders: HashMap<TimeFrame, TfBuilder> = TimeFrame::available_tfs()
             .into_iter()
             .map(|tf| (tf, TfBuilder::new(tf)))
             .collect();
-        self.builders.insert(asset.clone(), builders);
-        self.candles.entry(asset.clone()).or_default();
+        self.builders.insert(Arc::clone(&asset), builders);
+        self.candles.entry(Arc::clone(&asset)).or_default();
 
         let cmd_tx = self.cmd_tx.clone();
         tokio::spawn(async move {
             let mut rx = rx;
             while let Ok(data) = rx.recv().await {
-                let _ = cmd_tx.try_send(CacheCmdIn::Price {
-                    asset: asset.clone(),
-                    data,
-                });
+                let _ = cmd_tx.try_send(CacheCmdIn::Price((Arc::clone(&asset), data)));
             }
         });
     }
 
-    fn drop_feed(&mut self, asset: &String) {
+    fn drop_feed(&mut self, asset: &Arc<str>) {
         self.candles.remove(asset);
         self.builders.remove(asset);
     }
 
-    fn digest(&mut self, asset: &String, data: PriceData) {
+    fn digest(&mut self, asset: &Arc<str>, data: PriceData) {
         match data {
             PriceData::Single(price) => self.digest_single(asset, price),
             PriceData::Bulk(prices) => {
@@ -165,9 +159,9 @@ impl CandleCache {
         }
     }
 
-    fn digest_single(&mut self, asset: &String, price: Price) {
+    fn digest_single(&mut self, asset: &Arc<str>, price: Price) {
         if let Some(builders) = self.builders.get_mut(asset) {
-            let tf_map = self.candles.entry(asset.clone()).or_default();
+            let tf_map = self.candles.entry(Arc::clone(asset)).or_default();
             for (tf, builder) in builders.iter_mut() {
                 if builder.digest(price) {
                     tf_map
@@ -189,7 +183,7 @@ impl CandleCache {
 
         let client = self.info_client.clone();
         let cmd_tx = self.cmd_tx.clone();
-        let asset = request.asset.clone();
+        let asset = Arc::clone(&request.asset);
 
         tokio::spawn(async move {
             let mut result: TimeFrameData = cached;
@@ -244,8 +238,6 @@ impl CandleCache {
                 }
             }
 
-            // Backfill BEFORE reply — ensures cache is queued for update
-            // before the caller can trigger another Snapshot request
             if !backfill.is_empty() {
                 let _ = cmd_tx
                     .send(CacheCmdIn::Backfill {
@@ -259,8 +251,8 @@ impl CandleCache {
         });
     }
 
-    fn handle_backfill(&mut self, asset: String, data: TimeFrameData) {
-        let tf_map = self.candles.entry(asset.clone()).or_default();
+    fn handle_backfill(&mut self, asset: Arc<str>, data: TimeFrameData) {
+        let tf_map = self.candles.entry(Arc::clone(&asset)).or_default();
         let mut builders = self.builders.get_mut(&asset);
 
         for (tf, candles) in data {
@@ -282,7 +274,7 @@ impl CandleCache {
             match cmd {
                 CacheCmdIn::NewFeed { asset, rx } => self.add_feed(asset, rx),
                 CacheCmdIn::DropFeed(asset) => self.drop_feed(&asset),
-                CacheCmdIn::Price { asset, data } => self.digest(&asset, data),
+                CacheCmdIn::Price((asset, data)) => self.digest(&asset, data),
                 CacheCmdIn::Snapshot(request) => self.fetch_candles(request),
                 CacheCmdIn::Backfill { asset, data } => self.handle_backfill(asset, data),
             }

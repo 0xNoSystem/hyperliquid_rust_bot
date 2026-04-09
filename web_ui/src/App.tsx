@@ -3,6 +3,7 @@ import "./index.css";
 import MarketsPage from "./components/Markets";
 import Layout from "./components/Layout";
 import Backtest from "./components/Backtest";
+import BacktestRunDetail from "./components/BacktestRunDetail";
 import Settings from "./components/Settings";
 import MarketDetail from "./components/MarketDetail";
 import StratEditor from "./components/StratEditor";
@@ -37,6 +38,10 @@ const App: React.FC = () => (
                             <Backtest />
                         </ChartProvider>
                     }
+                />
+                <Route
+                    path="backtest/run/:runId"
+                    element={<BacktestRunDetail />}
                 />
             </Route>
         </Routes>

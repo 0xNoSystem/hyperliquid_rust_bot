@@ -28,9 +28,13 @@ export default function BacktestResult({
                 {!hideDetailButton && (
                     <button
                         className="border-line-subtle text-app-text/70 hover:text-app-text hover:border-line-muted cursor-pointer rounded border px-2 py-1 text-xs transition-colors"
-                        onClick={() => nav(`/backtest/run/${result.runId}`)}
+                        onClick={() =>
+                            nav(`/backtest/run/${result.runId}`, {
+                                state: { result },
+                            })
+                        }
                     >
-                        Detail
+                        See More
                     </button>
                 )}
             </div>

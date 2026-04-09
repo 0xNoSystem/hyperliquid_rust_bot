@@ -30,7 +30,7 @@ pub trait Strat: Send {
     fn required_indicators(&self) -> Vec<IndexId>;
 }
 
-pub type Armed = Option<u64>; //expiry time
+pub type Armed = Option<u64>;
 
 // ── Strategy (Rhai-powered Strat implementation) ────────────────────────────
 
@@ -41,9 +41,9 @@ type IndicatorKeyMap = HashMap<IndexId, String, BuildHasherDefault<FxHasher>>;
 fn build_indicator_keys(indicators: &[IndexId]) -> IndicatorKeyMap {
     indicators
         .iter()
-        .map(|(kind, tf)| {
-            let key = format!("{}_{}", kind.key(), tf.as_str());
-            ((*kind, *tf), key)
+        .map(|(asset, kind, tf)| {
+            let key = format!("{}_{}_{}", asset, kind.key(), tf.as_str());
+            ((Arc::clone(asset), *kind, *tf), key)
         })
         .collect()
 }
@@ -54,7 +54,6 @@ pub struct Strategy {
     indicators: Vec<IndexId>,
     indicator_keys: IndicatorKeyMap,
     scope: Scope<'static>,
-    /// Number of constants pushed at the start of scope; rewind target.
     scope_base: usize,
 }
 
@@ -81,14 +80,11 @@ impl Strategy {
         self.scope.push("state", Map::new());
     }
 
-    /// After eval, read state variable locals from the scope and write them
-    /// back into the `state` Map so they persist across ticks.
     fn sync_state_back(&mut self) {
         if self.compiled.state_var_names.is_empty() {
             return;
         }
 
-        // Collect values from scope locals
         let values: Vec<(String, Dynamic)> = self
             .compiled
             .state_var_names
@@ -100,7 +96,6 @@ impl Strategy {
             })
             .collect();
 
-        // Write them into the state map (which sits at scope_base - 1)
         if let Some(state) = self.scope.get_value_mut::<Map>("state") {
             for (name, val) in values {
                 state.insert(name.into(), val);
@@ -108,8 +103,6 @@ impl Strategy {
         }
     }
 
-    /// Rewind scope to empty, then push fresh context variables.
-    /// This avoids the per-variable linear name scan of `set_or_push`.
     fn push_context(&mut self, ctx: &StratContext) {
         self.scope.rewind(self.scope_base);
         self.scope.push("free_margin", ctx.free_margin);
@@ -122,8 +115,8 @@ impl Strategy {
     /// Build the Rhai indicator map using pre-computed keys (no `format!` per tick).
     fn indicators_to_map(&self, values: &ValuesMap) -> Map {
         let mut map = Map::new();
-        for ((kind, tf), timed_value) in values.iter() {
-            if let Some(key) = self.indicator_keys.get(&(*kind, *tf)) {
+        for ((asset, kind, tf), timed_value) in values.iter() {
+            if let Some(key) = self.indicator_keys.get(&(Arc::clone(asset), *kind, *tf)) {
                 map.insert(key.as_str().into(), Dynamic::from(*timed_value));
             }
         }
@@ -131,14 +124,10 @@ impl Strategy {
     }
 }
 
-/// Push trading-domain constants into a scope so scripts can reference them
-/// as bare identifiers (e.g. `MIN15` instead of `MIN15()`).
 fn push_scope_constants(scope: &mut Scope) {
-    // Sides
     scope.push_constant("LONG", Side::Long);
     scope.push_constant("SHORT", Side::Short);
 
-    // Timeframes
     scope.push_constant("MIN1", TimeFrame::Min1);
     scope.push_constant("MIN3", TimeFrame::Min3);
     scope.push_constant("MIN5", TimeFrame::Min5);
@@ -150,7 +139,6 @@ fn push_scope_constants(scope: &mut Scope) {
     scope.push_constant("HOUR12", TimeFrame::Hour12);
     scope.push_constant("DAY1", TimeFrame::Day1);
 
-    // Liquidity / timeout actions
     scope.push_constant("TAKER", LiqSide::Taker);
     scope.push_constant("FORCE", OnTimeout::Force);
     scope.push_constant("CANCEL", OnTimeout::Cancel);
@@ -225,8 +213,8 @@ pub enum BusyType {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SizeSpec {
     MarginAmount(f64),
-    MarginPct(f64), // % of free margin OR % of open pos used_margin
-    RawSize(f64),   // number of asset units
+    MarginPct(f64),
+    RawSize(f64),
 }
 
 impl SizeSpec {
@@ -234,7 +222,6 @@ impl SizeSpec {
         match self {
             SizeSpec::RawSize(sz) => *sz,
             SizeSpec::MarginAmount(amount) => (amount * lev) / ref_px,
-
             SizeSpec::MarginPct(pct) => {
                 let amount = free_margin * (pct / 100.0);
                 (amount * lev) / ref_px
@@ -267,7 +254,7 @@ impl Default for TimeoutInfo {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum LiqSide {
     Taker,
-    Maker(LimitOptions), //limit_px hint
+    Maker(LimitOptions),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -296,9 +283,9 @@ pub enum Intent {
     Open(Order),
     Reduce(ReduceOrder),
     Flatten(LiqSide),
-    Arm(TimeDelta), //timeout duration
+    Arm(TimeDelta),
     Disarm,
-    Abort, //Force close at market
+    Abort,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -320,7 +307,6 @@ impl Intent {
             tp = triggers.tp;
             sl = triggers.sl;
         }
-
         Intent::Open(Order {
             side,
             size,
@@ -345,7 +331,6 @@ impl Intent {
             limit_px,
             timeout: on_timeout,
         };
-
         Self::new_open(side, size, LiqSide::Maker(limit_options), tp_sl)
     }
 
@@ -366,7 +351,6 @@ impl Intent {
             limit_px,
             timeout: on_timeout,
         };
-
         Self::reduce(size, LiqSide::Maker(limit_options))
     }
 
@@ -379,7 +363,6 @@ impl Intent {
             limit_px,
             timeout: on_timeout,
         };
-
         Intent::Flatten(LiqSide::Maker(limit_options))
     }
 }
@@ -391,17 +374,14 @@ impl Intent {
                 LiqSide::Maker(opts) => opts.timeout,
                 LiqSide::Taker => None,
             },
-
             Intent::Reduce(order) => match &order.liq_side {
                 LiqSide::Maker(opts) => opts.timeout,
                 LiqSide::Taker => None,
             },
-
             Intent::Flatten(liq_side) => match liq_side {
                 LiqSide::Maker(opts) => opts.timeout,
                 LiqSide::Taker => None,
             },
-
             _ => None,
         }
     }
@@ -415,21 +395,9 @@ impl Intent {
 
     pub fn is_market_order(&self) -> bool {
         match self {
-            Intent::Open(order) => match &order.liq_side {
-                LiqSide::Maker(_) => false,
-                LiqSide::Taker => true,
-            },
-
-            Intent::Reduce(order) => match &order.liq_side {
-                LiqSide::Maker(_) => false,
-                LiqSide::Taker => true,
-            },
-
-            Intent::Flatten(liq_side) => match liq_side {
-                LiqSide::Maker(_) => false,
-                LiqSide::Taker => true,
-            },
-
+            Intent::Open(order) => matches!(order.liq_side, LiqSide::Taker),
+            Intent::Reduce(order) => matches!(order.liq_side, LiqSide::Taker),
+            Intent::Flatten(liq_side) => matches!(liq_side, LiqSide::Taker),
             Intent::Abort => true,
             _ => false,
         }

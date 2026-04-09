@@ -206,7 +206,8 @@ const MarketCard = ({
                     <LoadingDots />
                 ) : (
                     indicators.map((data, i) => {
-                        const { kind, timeframe, value } = decompose(data);
+                        const { asset, kind, timeframe, value } =
+                            decompose(data);
                         const kindKey = Object.keys(kind)[0] as IndicatorName;
 
                         return (
@@ -214,6 +215,10 @@ const MarketCard = ({
                                 className={`border-line-subtle flex cursor-pointer flex-col rounded-md border px-2.5 py-1 text-[11px] ${indicatorColors[kindKey]}`}
                                 title={get_params(kind)}
                             >
+                                <span className="text-center font-bold">
+                                    ({asset})
+                                </span>
+
                                 <span key={i}>
                                     {indicatorLabels[kindKey] ||
                                         (kindKey as string)}{" "}

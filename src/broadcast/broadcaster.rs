@@ -27,15 +27,15 @@ pub struct SubscriptionReply {
 }
 
 pub struct SubscribePayload {
-    pub asset: String,
+    pub asset: Arc<str>,
     pub reply: oneshot::Sender<SubReply>,
 }
 
 pub enum BroadcastCmd {
     Subscribe(SubscribePayload),
-    Unsubscribe(String),
-    SetSubId { asset: String, sub_id: u32 },
-    CleanUp(String),
+    Unsubscribe(Arc<str>),
+    SetSubId { asset: Arc<str>, sub_id: u32 },
+    CleanUp(Arc<str>),
 }
 
 struct AssetFeed {
@@ -48,7 +48,7 @@ pub struct Broadcaster {
     info_client: Arc<Mutex<InfoClient>>,
     cmd_tx: UnboundedSender<BroadcastCmd>,
     cmd_rx: UnboundedReceiver<BroadcastCmd>,
-    channels: FxMap<String, AssetFeed>,
+    channels: FxMap<Arc<str>, AssetFeed>,
     cache_tx: Sender<CacheCmdIn>,
     universe: Vec<AssetMeta>,
 }
@@ -78,7 +78,7 @@ impl Broadcaster {
     async fn add_sub(&mut self, sub_req: SubscribePayload) -> Result<(), Error> {
         let asset = sub_req.asset;
 
-        let meta = match self.universe.iter().find(|a| a.name == asset) {
+        let meta = match self.universe.iter().find(|a| a.name == *asset) {
             Some(m) => m.clone(),
             None => {
                 let _ = sub_req.reply.send(Err(Error::AssetNotFound));
@@ -91,7 +91,7 @@ impl Broadcaster {
         } else {
             let (tx, rx) = broadcast::channel::<PriceData>(256);
             self.channels.insert(
-                asset.clone(),
+                Arc::clone(&asset),
                 AssetFeed {
                     tx: tx.clone(),
                     sub_id: None,
@@ -100,11 +100,13 @@ impl Broadcaster {
 
             let info_client = self.info_client.clone();
             let cmd_tx = self.cmd_tx.clone();
-            let asset = asset.clone();
+            let asset = Arc::clone(&asset);
             let url = self.url;
 
             tokio::spawn(async move {
-                if let Err(e) = spawn_hl_feed(info_client, cmd_tx, asset.clone(), tx, url).await {
+                if let Err(e) =
+                    spawn_hl_feed(info_client, cmd_tx, Arc::clone(&asset), tx, url).await
+                {
                     log::error!("HL feed for {} exited with error: {:?}", &asset, e);
                 }
             });
@@ -121,9 +123,11 @@ impl Broadcaster {
     }
 
     #[allow(dead_code)]
-    fn unsubscribe_from_feed(&mut self, asset: String) {
+    fn unsubscribe_from_feed(&mut self, asset: Arc<str>) {
         if let Some(feed) = self.channels.remove(&asset) {
-            let _ = self.cache_tx.try_send(CacheCmdIn::DropFeed(asset.clone()));
+            let _ = self
+                .cache_tx
+                .try_send(CacheCmdIn::DropFeed(Arc::clone(&asset)));
             if let Some(sub_id) = feed.sub_id {
                 let client = self.info_client.clone();
                 tokio::spawn(async move {
@@ -170,7 +174,7 @@ impl Broadcaster {
                     //COMMENTED OUT BECAUSE UNSUBSCRIBING WOULD CLEAR CACHE BUILD UP, TODO: ADD A
                     //FEED IDLE TIMEOUT AND UNSUB AFTER N TIME, OR HAVE A LIST OF LOW VOLUME ASSETS
                     //THAT GET UNSUBED RIGHT (MAYBE VOLUME THRESHOLD)
-                    if self.is_feed_idle(asset.as_str()){
+                    if self.is_feed_idle(&asset){
                         self.unsubscribe_from_feed(asset);
                     }
                     */
@@ -189,7 +193,7 @@ impl Broadcaster {
 async fn spawn_hl_feed(
     info_client: Arc<Mutex<InfoClient>>,
     cmd_tx: UnboundedSender<BroadcastCmd>,
-    asset: String,
+    asset: Arc<str>,
     tx: broadcast::Sender<PriceData>,
     url: BaseUrl,
 ) -> Result<(), Error> {
@@ -197,7 +201,7 @@ async fn spawn_hl_feed(
     let (sub_id, mut price_rx) = loop {
         let result = {
             let mut client = info_client.lock().await;
-            subscribe_candles(&mut client, asset.as_str()).await
+            subscribe_candles(&mut client, &asset).await
         };
 
         match result {
@@ -219,7 +223,7 @@ async fn spawn_hl_feed(
     };
 
     let _ = cmd_tx.send(BroadcastCmd::SetSubId {
-        asset: asset.clone(),
+        asset: Arc::clone(&asset),
         sub_id,
     });
 

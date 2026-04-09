@@ -147,6 +147,9 @@ export default function MarketDetail() {
     const [margin, setMargin] = useState<number>(market?.margin ?? 0);
 
     // builder
+    const [pendingAsset, setPendingAsset] = useState<string | null>(
+        market?.asset
+    );
     const [kindKey, setKindKey] = useState<IndicatorName>("rsi");
     const [p1, setP1] = useState<number>(14);
     const [p2, setP2] = useState<number>(14);
@@ -240,8 +243,8 @@ export default function MarketDetail() {
         setPending((prev) => {
             const next = prev.slice();
             for (const data of market.indicators) {
-                const { kind, timeframe } = decompose(data);
-                const id: IndexId = [kind, timeframe];
+                const { asset: indAsset, kind, timeframe } = decompose(data);
+                const id: IndexId = [indAsset, kind, timeframe];
                 const addIndex = next.findIndex(
                     (e) => e.edit === "add" && eqIndexId(e.id, id)
                 );
@@ -712,7 +715,7 @@ export default function MarketDetail() {
                         </div>
                         <div className={`${Body} flex flex-wrap gap-2`}>
                             {market.indicators.map((data, i) => {
-                                const { kind, timeframe, value } =
+                                const { asset, kind, timeframe, value } =
                                     decompose(data);
                                 const kindKey = Object.keys(
                                     kind
@@ -731,6 +734,7 @@ export default function MarketDetail() {
                                             </div>
 
                                             <span className="font-medium">
+                                                <strong>({asset})</strong> —{" "}
                                                 {indicatorLabels[kindKey] ||
                                                     kindKey}{" "}
                                                 — {fromTimeFrame(timeframe)}
@@ -739,10 +743,7 @@ export default function MarketDetail() {
                                             <button
                                                 className="hover:bg-glow-10 rounded p-0.5"
                                                 onClick={() =>
-                                                    queueRemove([
-                                                        kind,
-                                                        timeframe,
-                                                    ])
+                                                    queueRemove(data.id)
                                                 }
                                             >
                                                 <X className="h-3.5 w-3.5" />
@@ -916,8 +917,30 @@ export default function MarketDetail() {
                         <div className={`${Body} grid grid-cols-2 gap-3`}>
                             <div className="col-span-2">
                                 <label className="text-app-text/50 text-[10px] uppercase">
+                                    Asset
+                                </label>
+                                <select
+                                    className={Select}
+                                    value={pendingAsset}
+                                    onChange={(e) => {
+                                        setPendingAsset(e.target.value);
+                                    }}
+                                >
+                                    {universe.map((asset) => (
+                                        <option
+                                            key={asset.name}
+                                            value={asset.name}
+                                            className="bg-app-surface-3 text-app-text"
+                                        >
+                                            {asset.name}
+                                        </option>
+                                    ))}
+                                </select>
+
+                                <label className="text-app-text/50 text-[10px] uppercase">
                                     Kind
                                 </label>
+
                                 <select
                                     className={Select}
                                     value={kindKey}
@@ -1012,6 +1035,7 @@ export default function MarketDetail() {
                                 <button
                                     onClick={() => {
                                         const id: IndexId = [
+                                            pendingAsset,
                                             buildKind(),
                                             into(tfSym) as TimeFrame,
                                         ];
@@ -1043,7 +1067,7 @@ export default function MarketDetail() {
                                 <>
                                     <div className="mb-3 flex flex-wrap gap-2">
                                         {pending.map((e, idx) => {
-                                            const [kind, tf] = e.id;
+                                            const [asset_name, kind, tf] = e.id;
                                             const k = Object.keys(
                                                 kind
                                             )[0] as IndicatorName;
@@ -1061,7 +1085,7 @@ export default function MarketDetail() {
                                                         {e.edit}
                                                     </span>
                                                     <span>
-                                                        ·{" "}
+                                                        ·({asset_name}){" "}
                                                         {indicatorLabels[k] ||
                                                             k}{" "}
                                                         — {fromTimeFrame(tf)}

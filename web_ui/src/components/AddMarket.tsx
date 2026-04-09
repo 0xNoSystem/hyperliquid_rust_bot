@@ -17,7 +17,7 @@ import type {
 } from "../types";
 
 type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
-type ConfigDraft = [IndicatorKind, TimeframeKey];
+type ConfigDraft = [string, IndicatorKind, TimeframeKey];
 
 interface AddMarketProps {
     onClose: () => void;
@@ -43,6 +43,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     const [showConfig, setShowConfig] = useState(false);
     const [config, setConfig] = useState<ConfigDraft[]>([]);
 
+    const [indicatorAsset, setIndicatorAsset] = useState<string>(asset);
     const [newKind, setNewKind] = useState<IndicatorName>("rsi");
     const [newParam, setNewParam] = useState(14);
     const [newParam2, setNewParam2] = useState(14);
@@ -101,7 +102,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                 cfg = { rsi: newParam };
         }
 
-        const newItem: ConfigDraft = [cfg, newTf];
+        const newItem: ConfigDraft = [indicatorAsset, cfg, newTf];
 
         setConfig((prev) => {
             const exists = prev.some(
@@ -119,6 +120,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const validConfig: IndexId[] = config.map(([ind, tf]) => [
+            indicatorAsset,
             ind,
             into(tf),
         ]);
@@ -173,7 +175,12 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         </label>
                         <select
                             value={asset}
-                            onChange={(e) => setAsset(e.target.value)}
+                            onChange={(e) => {
+                                setAsset(e.target.value);
+                                if (!showConfig) {
+                                    setIndicatorAsset(e.target.value);
+                                }
+                            }}
                             required
                             className={`${inputClass} bg-surface-input-strong`}
                         >
@@ -315,10 +322,11 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                     </legend>
                     <div className="flex flex-col gap-2">
                         <div className="flex flex-wrap">
-                            {config.map(([ind, tf], i) => {
+                            {config.map(([assetName, ind, tf], i) => {
                                 const kind = Object.keys(
                                     ind
                                 )[0] as IndicatorName;
+
                                 return (
                                     <div
                                         key={i}
@@ -327,6 +335,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                                         <span
                                             className={`${indicatorColors[kind]} rounded-full px-3 py-1 text-xs`}
                                         >
+                                            <strong>({assetName})</strong>{" "}
                                             {indicatorLabels[kind] || kind} --{" "}
                                             {tf}
                                         </span>
@@ -354,6 +363,24 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             <h3 className="text-app-text text-sm font-semibold">
                                 New Indicator
                             </h3>
+                            <select
+                                className={selectClass}
+                                value={indicatorAsset}
+                                onChange={(e) => {
+                                    setIndicatorAsset(e.target.value);
+                                }}
+                            >
+                                {universe.map((asset) => (
+                                    <option
+                                        key={asset.name}
+                                        value={asset.name}
+                                        className="bg-app-surface-3 text-app-text"
+                                    >
+                                        {asset.name}
+                                    </option>
+                                ))}
+                            </select>
+
                             <select
                                 value={newKind}
                                 onChange={(e) =>

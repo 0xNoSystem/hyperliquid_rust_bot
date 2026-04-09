@@ -162,17 +162,18 @@ export function get_params(k: IndicatorKind): string {
 }
 
 export type Decomposed = {
+    asset: string;
     kind: IndicatorKind;
     timeframe: TimeFrame;
     value?: Value;
 };
 
 export function decompose(ind: indicatorData): Decomposed {
-    const [kind, timeframe] = ind.id;
-    return { kind, timeframe, value: ind.value };
+    const [asset, kind, timeframe] = ind.id;
+    return { asset, kind, timeframe, value: ind.value };
 }
 
-export type IndexId = [IndicatorKind, TimeFrame];
+export type IndexId = [string, IndicatorKind, TimeFrame];
 
 export type TimeFrame =
     | "min1"
@@ -299,7 +300,8 @@ export type SnapshotReason =
     | "close"
     | "forceClose"
     | "cancelResting"
-    | "fill";
+    | "fill"
+    | "interval";
 
 export interface PositionSnapshot {
     id: number;

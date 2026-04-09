@@ -215,7 +215,7 @@ impl Bot {
 
         let (one_tx, one_rx) = oneshot::channel::<SubReply>();
         let sub_request = SubscribePayload {
-            asset: asset.clone(),
+            asset: Arc::from(asset.as_str()),
             reply: one_tx,
         };
 
@@ -285,7 +285,7 @@ impl Bot {
 
         let _ = self
             .broadcast_tx
-            .send(BroadcastCmd::Unsubscribe(asset.clone()));
+            .send(BroadcastCmd::Unsubscribe(Arc::from(asset.as_str())));
 
         if let Some(tx) = self.markets.remove(&asset) {
             let tx = tx.clone();
@@ -323,7 +323,9 @@ impl Bot {
 
     pub async fn close_all(&mut self) {
         for (asset, tx) in self.markets.drain() {
-            let _ = self.broadcast_tx.send(BroadcastCmd::Unsubscribe(asset));
+            let _ = self
+                .broadcast_tx
+                .send(BroadcastCmd::Unsubscribe(Arc::from(asset.as_str())));
             let _ = tx.send(MarketCommand::Close).await;
         }
     }
