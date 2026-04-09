@@ -5,7 +5,7 @@ use rhai::{AST, Dynamic, Engine, Scope};
 
 use crate::strategy::{
     BusyType, Intent, LimitOptions, LiqSide, OnTimeout, Order, ReduceOrder, SizeSpec, TimeoutInfo,
-    Triggers,
+    Triggers, check_asset_fix,
 };
 use crate::{OpenPosInfo, Price, Side, TimeDelta, TimeFrame, TimedValue, Value};
 
@@ -180,7 +180,7 @@ fn expand_extract(src: &str) -> String {
 
     re.replace_all(src, |caps: &regex::Captures| {
         let var = &caps[1];
-        let key = &caps[2];
+        let key = check_asset_fix(&caps[2]);
 
         let mut out = format!("let {var} = indicators[\"{key}\"];\nif {var} == () {{ return; }}\n");
 

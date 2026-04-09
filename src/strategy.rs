@@ -38,11 +38,20 @@ pub type Armed = Option<u64>;
 /// Built once at construction, reused every tick to avoid per-tick `format!` allocations.
 type IndicatorKeyMap = HashMap<IndexId, String, BuildHasherDefault<FxHasher>>;
 
+pub(crate) fn check_asset_fix(name: &str) -> String {
+    name.replace(':', "_")
+}
+
 fn build_indicator_keys(indicators: &[IndexId]) -> IndicatorKeyMap {
     indicators
         .iter()
         .map(|(asset, kind, tf)| {
-            let key = format!("{}_{}_{}", asset, kind.key(), tf.as_str());
+            let key = format!(
+                "{}_{}_{}",
+                check_asset_fix(asset.as_ref()),
+                kind.key(),
+                tf.as_str()
+            );
             ((Arc::clone(asset), *kind, *tf), key)
         })
         .collect()
