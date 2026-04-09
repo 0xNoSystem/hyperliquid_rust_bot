@@ -696,11 +696,10 @@ impl SignalEngine {
                         }
                     }
                     if let Some(data) = price_data {
-                        for (tf, prices) in data {
-                            for ((_, tracker_tf), tracker) in self.trackers.iter_mut() {
-                                if *tracker_tf == tf {
-                                    tracker.load(prices.iter().copied());
-                                }
+                        for ((asset, tf), prices) in data {
+                            if let Some(tracker) = self.trackers.get_mut(&(Arc::clone(&asset), tf))
+                            {
+                                tracker.load(prices.iter().copied());
                             }
                         }
                     }
@@ -1029,7 +1028,7 @@ pub enum EngineCommand {
     UpdateStrategy(CompiledStrategy, Vec<IndexId>),
     EditIndicators {
         indicators: Vec<Entry>,
-        price_data: Option<TimeFrameData>,
+        price_data: Option<AssetTimeFrameData>,
     },
     UpdateExecParams(ExecParam),
     ExecPause,

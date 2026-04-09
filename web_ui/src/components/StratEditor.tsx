@@ -34,6 +34,7 @@ import {
 } from "../types";
 import type { IndexId, IndicatorKind, IndicatorName } from "../types";
 import type { Strategy, StrategyDetail } from "../strats";
+import SearchBar from "./SearchBar";
 
 type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
 
@@ -173,6 +174,14 @@ export default function StratEditor() {
     const [newParam, setNewParam] = useState(14);
     const [newParam2, setNewParam2] = useState(14);
     const [newTf, setNewTf] = useState<TimeframeKey>("15m");
+    const assetOptions = useMemo(
+        () =>
+            universe.map((asset) => ({
+                value: asset.name,
+                label: asset.name,
+            })),
+        [universe]
+    );
 
     const loadStrategy = useCallback(
         async (strat: Strategy) => {
@@ -596,23 +605,17 @@ export default function StratEditor() {
                                             <label className="text-app-text/60 text-xs">
                                                 Asset
                                             </label>
-                                            <select
-                                                className={selectClass}
+                                            <SearchBar
                                                 value={newAsset}
-                                                onChange={(e) => {
-                                                    setNewAsset(e.target.value);
-                                                }}
-                                            >
-                                                {universe.map((asset) => (
-                                                    <option
-                                                        key={asset.name}
-                                                        value={asset.name}
-                                                        className="bg-app-surface-3 text-app-text"
-                                                    >
-                                                        {asset.name}
-                                                    </option>
-                                                ))}
-                                            </select>
+                                                onChange={setNewAsset}
+                                                options={assetOptions}
+                                                placeholder="Select asset"
+                                                searchPlaceholder="Search assets..."
+                                                emptyMessage="No assets found."
+                                                ariaLabel="Indicator asset"
+                                                containerClassName="mt-1"
+                                                buttonClassName={selectClass}
+                                            />
                                         </div>
                                         <select
                                             value={newKind}

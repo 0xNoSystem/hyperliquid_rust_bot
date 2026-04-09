@@ -11,6 +11,7 @@ import { formatUTC } from "../chart/utils";
 import { MAX_DECIMALS, MIN_ORDER_VALUE } from "../consts";
 import { ErrorBanner } from "./ErrorBanner";
 import PositionTable from "./Position";
+import SearchBar from "./SearchBar";
 
 import {
     decompose,
@@ -147,8 +148,8 @@ export default function MarketDetail() {
     const [margin, setMargin] = useState<number>(market?.margin ?? 0);
 
     // builder
-    const [pendingAsset, setPendingAsset] = useState<string | null>(
-        market?.asset
+    const [pendingAsset, setPendingAsset] = useState<string>(
+        market?.asset ?? ""
     );
     const [kindKey, setKindKey] = useState<IndicatorName>("rsi");
     const [p1, setP1] = useState<number>(14);
@@ -161,6 +162,20 @@ export default function MarketDetail() {
         null
     );
     const [confirmForceClose, setConfirmForceClose] = useState(false);
+    const assetOptions = useMemo(
+        () =>
+            universe.map((asset) => ({
+                value: asset.name,
+                label: asset.name,
+            })),
+        [universe]
+    );
+
+    useEffect(() => {
+        if (market?.asset) {
+            setPendingAsset((current) => current || market.asset);
+        }
+    }, [market?.asset]);
 
     const handleForceClose = async () => {
         if (!market) return;
@@ -919,23 +934,17 @@ export default function MarketDetail() {
                                 <label className="text-app-text/50 text-[10px] uppercase">
                                     Asset
                                 </label>
-                                <select
-                                    className={Select}
+                                <SearchBar
                                     value={pendingAsset}
-                                    onChange={(e) => {
-                                        setPendingAsset(e.target.value);
-                                    }}
-                                >
-                                    {universe.map((asset) => (
-                                        <option
-                                            key={asset.name}
-                                            value={asset.name}
-                                            className="bg-app-surface-3 text-app-text"
-                                        >
-                                            {asset.name}
-                                        </option>
-                                    ))}
-                                </select>
+                                    onChange={setPendingAsset}
+                                    options={assetOptions}
+                                    placeholder="Select asset"
+                                    searchPlaceholder="Search assets..."
+                                    emptyMessage="No assets found."
+                                    ariaLabel="Indicator asset"
+                                    containerClassName="mt-1"
+                                    buttonClassName={Select}
+                                />
 
                                 <label className="text-app-text/50 text-[10px] uppercase">
                                     Kind
@@ -1034,6 +1043,7 @@ export default function MarketDetail() {
                             <div className="col-span-2">
                                 <button
                                     onClick={() => {
+                                        if (!pendingAsset) return;
                                         const id: IndexId = [
                                             pendingAsset,
                                             buildKind(),
@@ -1041,7 +1051,8 @@ export default function MarketDetail() {
                                         ];
                                         queueAdd(id);
                                     }}
-                                    className={`${BtnGhost} w-full`}
+                                    disabled={!pendingAsset}
+                                    className={`${BtnGhost} w-full disabled:cursor-not-allowed disabled:opacity-50`}
                                 >
                                     Queue Add
                                 </button>

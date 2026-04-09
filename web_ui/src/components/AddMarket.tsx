@@ -15,6 +15,7 @@ import type {
     IndicatorKind,
     IndicatorName,
 } from "../types";
+import SearchBar from "./SearchBar";
 
 type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
 type ConfigDraft = [string, IndicatorKind, TimeframeKey];
@@ -53,8 +54,21 @@ export const AddMarket: React.FC<AddMarketProps> = ({
         () => (marginType === "alloc" ? totalMargin * (marginValue / 100) : 0),
         [marginType, marginValue, totalMargin]
     );
+    const assetOptions = useMemo(
+        () =>
+            universe.map((item) => ({
+                value: item.name,
+                label: item.name,
+            })),
+        [universe]
+    );
 
     const handleAddIndicator = () => {
+        if (!indicatorAsset) {
+            console.error("Cannot add indicator: indicator asset is required.");
+            return;
+        }
+
         let cfg: IndicatorKind;
         switch (newKind) {
             case "histVolatility":
@@ -119,13 +133,18 @@ export const AddMarket: React.FC<AddMarketProps> = ({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const validConfig: IndexId[] = config.map(([ind, tf]) => [
-            indicatorAsset,
+        if (!asset) {
+            console.error("Cannot submit market: asset symbol is required.");
+            return;
+        }
+
+        const validConfig: IndexId[] = config.map(([assetName, ind, tf]) => [
+            assetName,
             ind,
             into(tf),
         ]);
         const info: AddMarketInfo = {
-            asset: asset,
+            asset,
             marginAlloc:
                 marginType === "alloc"
                     ? { alloc: marginValue / 100 }
@@ -151,7 +170,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
     const selectClass =
         "mt-1 w-full cursor-pointer rounded border border-line-solid bg-surface-input px-3 py-2 text-app-text";
     const btnClass =
-        "cursor-pointer rounded border border-line-solid bg-surface-input px-5 py-2 text-app-text hover:bg-surface-toggle-off";
+        "cursor-pointer rounded border border-line-solid bg-surface-input px-5 py-2 text-app-text transition hover:bg-surface-toggle-off disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-surface-input";
 
     return (
         <div className="fixed inset-0 z-50 flex scale-[0.92] transform items-center justify-center backdrop-blur-sm">
@@ -173,26 +192,22 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                         <label className="text-app-text block text-sm">
                             Asset Symbol
                         </label>
-                        <select
+                        <SearchBar
                             value={asset}
-                            onChange={(e) => {
-                                setAsset(e.target.value);
+                            onChange={(value) => {
+                                setAsset(value);
                                 if (!showConfig) {
-                                    setIndicatorAsset(e.target.value);
+                                    setIndicatorAsset(value);
                                 }
                             }}
-                            required
-                            className={`${inputClass} bg-surface-input-strong`}
-                        >
-                            <option value="" disabled>
-                                -- select an asset --
-                            </option>
-                            {universe.map((u) => (
-                                <option key={u.name} value={u.name}>
-                                    {u.name}
-                                </option>
-                            ))}
-                        </select>
+                            options={assetOptions}
+                            placeholder="-- select an asset --"
+                            searchPlaceholder="Search assets..."
+                            emptyMessage="No assets found."
+                            ariaLabel="Asset Symbol"
+                            containerClassName="mt-1"
+                            buttonClassName="bg-surface-input-strong border-line-solid"
+                        />
                     </div>
                     <div>
                         <label className="text-app-text block text-sm">
@@ -363,23 +378,19 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                             <h3 className="text-app-text text-sm font-semibold">
                                 New Indicator
                             </h3>
-                            <select
-                                className={selectClass}
+                            <SearchBar
                                 value={indicatorAsset}
-                                onChange={(e) => {
-                                    setIndicatorAsset(e.target.value);
+                                onChange={(value) => {
+                                    setIndicatorAsset(value);
                                 }}
-                            >
-                                {universe.map((asset) => (
-                                    <option
-                                        key={asset.name}
-                                        value={asset.name}
-                                        className="bg-app-surface-3 text-app-text"
-                                    >
-                                        {asset.name}
-                                    </option>
-                                ))}
-                            </select>
+                                options={assetOptions}
+                                placeholder="Select indicator asset"
+                                searchPlaceholder="Search assets..."
+                                emptyMessage="No assets found."
+                                ariaLabel="Indicator Asset"
+                                containerClassName="mt-2"
+                                buttonClassName="bg-surface-input border-line-solid"
+                            />
 
                             <select
                                 value={newKind}
@@ -467,7 +478,8 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                                 <button
                                     type="button"
                                     onClick={handleAddIndicator}
-                                    className="bg-surface-input text-app-text cursor-pointer rounded px-2 py-1 text-sm"
+                                    disabled={!indicatorAsset}
+                                    className="bg-surface-input text-app-text cursor-pointer rounded px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     Add
                                 </button>
@@ -483,7 +495,11 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                     >
                         Cancel
                     </button>
-                    <button type="submit" className={btnClass}>
+                    <button
+                        type="submit"
+                        className={btnClass}
+                        disabled={!asset}
+                    >
                         Add Market
                     </button>
                 </div>

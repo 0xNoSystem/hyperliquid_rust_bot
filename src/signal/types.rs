@@ -108,6 +108,7 @@ impl Handler {
 }
 
 pub type IndexId = (Arc<str>, IndicatorKind, TimeFrame);
+pub type AssetTimeFrame = (Arc<str>, TimeFrame);
 
 fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
     match kind {
@@ -268,6 +269,7 @@ impl Tracker {
 }
 
 pub type TimeFrameData = HashMap<TimeFrame, Vec<Price>, BuildHasherDefault<FxHasher>>;
+pub type AssetTimeFrameData = HashMap<AssetTimeFrame, Vec<Price>, BuildHasherDefault<FxHasher>>;
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]

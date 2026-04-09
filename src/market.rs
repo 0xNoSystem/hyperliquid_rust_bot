@@ -12,8 +12,8 @@ use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, Error, ExchangeClient, ExchangeRe
 use crate::backend::scripting::CompiledStrategy;
 use crate::broadcast::{CacheCmdIn, CandleCount, CandleSnapshotRequest, PriceData};
 use crate::signal::{
-    EditType, EngineCommand, EngineView, Entry, ExecParam, ExecParams, IndexId, SignalEngine,
-    TimeFrameData,
+    AssetTimeFrameData, EditType, EngineCommand, EngineView, Entry, ExecParam, ExecParams, IndexId,
+    SignalEngine, TimeFrameData,
 };
 use crate::{AssetMargin, EditMarketInfo, IndicatorData, MarketStream, UpdateFrontend};
 use crate::{ExecCommand, ExecControl, ExecEvent, Executor};
@@ -52,6 +52,28 @@ fn filter_edits(required: &[IndexId], edits: &mut Vec<Entry>) -> Vec<IndexId> {
         }
     });
     blocked
+}
+
+fn collect_snapshot_requests<'a>(
+    indicators: impl IntoIterator<Item = &'a IndexId>,
+    candle_count: CandleCount,
+) -> HashMap<Arc<str>, HashMap<TimeFrame, CandleCount>> {
+    let mut requests: HashMap<Arc<str>, HashMap<TimeFrame, CandleCount>> = HashMap::new();
+    for (asset, _, tf) in indicators {
+        requests
+            .entry(Arc::clone(asset))
+            .or_default()
+            .insert(*tf, candle_count);
+    }
+    requests
+}
+
+fn format_asset_timeframes(items: &[(Arc<str>, TimeFrame)]) -> String {
+    items
+        .iter()
+        .map(|(asset, tf)| format!("{asset} {tf:?}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl Market {
@@ -147,54 +169,83 @@ impl Market {
 
     async fn load_engine(&mut self, candle_count: CandleCount) -> Result<Option<f64>, Error> {
         let active = self.signal_engine.get_active_indicators();
-        let requested_tfs: Vec<TimeFrame> = active
-            .iter()
-            .map(|id| id.2)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-        let request: HashMap<TimeFrame, CandleCount> =
-            requested_tfs.iter().map(|tf| (*tf, candle_count)).collect();
+        let requests = collect_snapshot_requests(active.iter(), candle_count);
+        let tf_data = Self::fetch_snapshot_map(&self.cache_tx, &requests).await?;
 
+        let missing: Vec<_> = requests
+            .iter()
+            .flat_map(|(asset, request)| {
+                request
+                    .keys()
+                    .filter(|tf| {
+                        tf_data
+                            .get(&(Arc::clone(asset), **tf))
+                            .filter(|prices| !prices.is_empty())
+                            .is_none()
+                    })
+                    .map(|tf| (Arc::clone(asset), *tf))
+            })
+            .collect();
+
+        if !missing.is_empty() {
+            return Err(Error::Custom(format!(
+                "Failed to load candle data for indicator(s): {}",
+                format_asset_timeframes(&missing)
+            )));
+        }
+
+        let mut last_price: Option<f64> = None;
+        let mut last_price_ts: Option<u64> = None;
+        for ((asset, tf), prices) in &tf_data {
+            if asset.as_ref() == self.asset.name.as_str()
+                && let Some(price) = prices.last()
+                && last_price_ts.is_none_or(|ts| price.close_time >= ts)
+            {
+                last_price_ts = Some(price.close_time);
+                last_price = Some(price.close);
+            }
+            self.signal_engine.load(asset, *tf, prices.clone()).await;
+        }
+
+        Ok(last_price)
+    }
+
+    async fn fetch_snapshot(
+        cache_tx: &Sender<CacheCmdIn>,
+        asset: Arc<str>,
+        request: HashMap<TimeFrame, CandleCount>,
+    ) -> Result<TimeFrameData, Error> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.cache_tx
+        cache_tx
             .send(CacheCmdIn::Snapshot(CandleSnapshotRequest {
-                asset: Arc::from(self.asset.name.as_str()),
+                asset,
                 request,
                 reply: reply_tx,
             }))
             .await
             .map_err(|_| Error::Custom("CandleCache channel closed".into()))?;
 
-        let tf_data = reply_rx
+        reply_rx
             .await
-            .map_err(|_| Error::Custom("CandleCache reply dropped".into()))??;
+            .map_err(|_| Error::Custom("CandleCache reply dropped".into()))?
+    }
 
-        let missing: Vec<_> = requested_tfs
-            .iter()
-            .filter(|tf| !tf_data.contains_key(tf))
-            .collect();
+    async fn fetch_snapshot_map(
+        cache_tx: &Sender<CacheCmdIn>,
+        requests: &HashMap<Arc<str>, HashMap<TimeFrame, CandleCount>>,
+    ) -> Result<AssetTimeFrameData, Error> {
+        let mut snapshot_map = AssetTimeFrameData::default();
 
-        if !missing.is_empty() {
-            return Err(Error::Custom(format!(
-                "Failed to load candle data for timeframe(s): {}",
-                missing
-                    .iter()
-                    .map(|tf| format!("{tf:?}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )));
+        for (asset, request) in requests {
+            let tf_data =
+                Self::fetch_snapshot(cache_tx, Arc::clone(asset), request.clone()).await?;
+
+            for (tf, prices) in tf_data {
+                snapshot_map.insert((Arc::clone(asset), tf), prices);
+            }
         }
 
-        let mut last_price: Option<f64> = None;
-        for (tf, prices) in &tf_data {
-            last_price = prices.last().map(|p| p.close);
-            self.signal_engine
-                .load(&Arc::from(self.asset.name.as_str()), *tf, prices.clone())
-                .await;
-        }
-
-        Ok(last_price)
+        Ok(snapshot_map)
     }
 }
 
@@ -300,54 +351,47 @@ impl Market {
                 }
 
                 MarketCommand::UpdateStrategy(compiled, strat_indicators, name) => {
-                    let new_tfs: HashMap<TimeFrame, CandleCount> = strat_indicators
-                        .iter()
-                        .map(|(_, _, tf)| (*tf, 5000))
-                        .collect();
-
-                    let mut map: TimeFrameData = HashMap::default();
+                    let requests = collect_snapshot_requests(strat_indicators.iter(), 5000);
+                    let mut map = AssetTimeFrameData::default();
                     let mut failed = false;
-                    if !new_tfs.is_empty() {
-                        let (reply_tx, reply_rx) = oneshot::channel();
-                        let req = CandleSnapshotRequest {
-                            asset: Arc::from(asset.name.as_str()),
-                            request: new_tfs.clone(),
-                            reply: reply_tx,
-                        };
-                        if self.cache_tx.send(CacheCmdIn::Snapshot(req)).await.is_ok() {
-                            match reply_rx.await {
-                                Ok(Ok(data)) => {
-                                    let failed_tfs: Vec<_> = new_tfs
-                                        .keys()
-                                        .filter(|tf| data.get(tf).is_none_or(|v| v.is_empty()))
-                                        .copied()
-                                        .collect();
+                    if !requests.is_empty() {
+                        match Self::fetch_snapshot_map(&self.cache_tx, &requests).await {
+                            Ok(data) => {
+                                let failed_keys: Vec<_> = requests
+                                    .iter()
+                                    .flat_map(|(req_asset, request)| {
+                                        request
+                                            .keys()
+                                            .filter(|tf| {
+                                                data.get(&(Arc::clone(req_asset), **tf))
+                                                    .filter(|prices| !prices.is_empty())
+                                                    .is_none()
+                                            })
+                                            .map(|tf| (Arc::clone(req_asset), *tf))
+                                    })
+                                    .collect();
 
-                                    if !failed_tfs.is_empty() {
-                                        failed = true;
-                                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                            UpdateFrontend::UserError(format!(
-                                                "Strategy '{}' requires candle data for: {}\nFailed to load — strategy not applied.",
-                                                name,
-                                                failed_tfs.iter().map(|tf| format!("{tf:?}")).collect::<Vec<_>>().join(", ")
-                                            )),
-                                        ));
-                                    } else {
-                                        map = data;
-                                    }
-                                }
-                                Ok(Err(e)) => {
+                                if !failed_keys.is_empty() {
                                     failed = true;
                                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                                         UpdateFrontend::UserError(format!(
-                                            "Failed to load candle data for strategy '{}': {}",
-                                            name, e
+                                            "Strategy '{}' requires candle data for: {}\nFailed to load — strategy not applied.",
+                                            name,
+                                            format_asset_timeframes(&failed_keys)
                                         )),
                                     ));
+                                } else {
+                                    map = data;
                                 }
-                                Err(_) => {
-                                    failed = true;
-                                }
+                            }
+                            Err(e) => {
+                                failed = true;
+                                let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                    UpdateFrontend::UserError(format!(
+                                        "Failed to load candle data for strategy '{}': {}",
+                                        name, e
+                                    )),
+                                ));
                             }
                         }
                     }
@@ -399,52 +443,66 @@ impl Market {
                         ));
                     }
 
-                    let new_tfs: HashMap<TimeFrame, CandleCount> = entry_vec
-                        .iter()
-                        .filter(|e| e.edit == EditType::Add)
-                        .map(|e| (e.id.2, 5000))
-                        .collect();
+                    let requests = collect_snapshot_requests(
+                        entry_vec
+                            .iter()
+                            .filter(|e| e.edit == EditType::Add)
+                            .map(|e| &e.id),
+                        5000,
+                    );
 
-                    let mut map: TimeFrameData = HashMap::default();
-                    if !new_tfs.is_empty() {
-                        let (reply_tx, reply_rx) = oneshot::channel();
-                        let req = CandleSnapshotRequest {
-                            asset: asset.name.clone().into(),
-                            request: new_tfs.clone(),
-                            reply: reply_tx,
-                        };
-                        if self.cache_tx.send(CacheCmdIn::Snapshot(req)).await.is_ok() {
-                            match reply_rx.await {
-                                Ok(Ok(data)) => {
-                                    // Check which requested TFs are missing or empty
-                                    let failed_tfs: Vec<_> = new_tfs
-                                        .keys()
-                                        .filter(|tf| data.get(tf).is_none_or(|v| v.is_empty()))
-                                        .copied()
-                                        .collect();
+                    let mut map = AssetTimeFrameData::default();
+                    if !requests.is_empty() {
+                        match Self::fetch_snapshot_map(&self.cache_tx, &requests).await {
+                            Ok(data) => {
+                                let failed_keys: HashSet<_> = requests
+                                    .iter()
+                                    .flat_map(|(req_asset, request)| {
+                                        request
+                                            .keys()
+                                            .filter(|tf| {
+                                                data.get(&(Arc::clone(req_asset), **tf))
+                                                    .filter(|prices| !prices.is_empty())
+                                                    .is_none()
+                                            })
+                                            .map(|tf| (Arc::clone(req_asset), *tf))
+                                    })
+                                    .collect();
 
-                                    if !failed_tfs.is_empty() {
-                                        // Remove indicators that depend on failed TFs
-                                        entry_vec.retain(|e| !failed_tfs.contains(&e.id.2));
-                                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                            UpdateFrontend::UserError(format!(
-                                                "Failed to load candle data for: {}\nIndicators on these timeframes were skipped.",
-                                                failed_tfs.iter().map(|tf| format!("{tf:?}")).collect::<Vec<_>>().join(", ")
-                                            )),
-                                        ));
-                                    }
-
-                                    // Only keep TFs that have data
-                                    map = data.into_iter().filter(|(_, v)| !v.is_empty()).collect();
-                                }
-                                Ok(Err(e)) => {
+                                if !failed_keys.is_empty() {
+                                    entry_vec.retain(|e| {
+                                        !failed_keys.contains(&(Arc::clone(&e.id.0), e.id.2))
+                                    });
+                                    let mut failed_list: Vec<_> =
+                                        failed_keys.iter().cloned().collect();
+                                    failed_list.sort_by(|(asset_a, tf_a), (asset_b, tf_b)| {
+                                        asset_a.as_ref().cmp(asset_b.as_ref()).then_with(|| {
+                                            format!("{tf_a:?}").cmp(&format!("{tf_b:?}"))
+                                        })
+                                    });
                                     let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                                         UpdateFrontend::UserError(format!(
-                                            "Failed to load candle data: {}\nREMOVE CONCERNED INDICATORS AND TRY AGAIN", e
+                                            "Failed to load candle data for: {}\nIndicators on these asset/timeframes were skipped.",
+                                            format_asset_timeframes(&failed_list)
                                         )),
                                     ));
                                 }
-                                Err(_) => {}
+
+                                map = data
+                                    .into_iter()
+                                    .filter(|(_, prices)| !prices.is_empty())
+                                    .filter(|((req_asset, tf), _)| {
+                                        !failed_keys.contains(&(Arc::clone(req_asset), *tf))
+                                    })
+                                    .collect();
+                            }
+                            Err(e) => {
+                                let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                                    UpdateFrontend::UserError(format!(
+                                        "Failed to load candle data: {}\nREMOVE CONCERNED INDICATORS AND TRY AGAIN",
+                                        e
+                                    )),
+                                ));
                             }
                         }
                     }

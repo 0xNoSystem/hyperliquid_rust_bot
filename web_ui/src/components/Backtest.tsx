@@ -24,6 +24,7 @@ import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { useAuth } from "../context/AuthContextStore";
 import type { Strategy } from "../strats";
 import BacktestResultView from "./BacktestResult";
+import SearchBar from "./SearchBar";
 
 type RangePreset = "24H" | "7D" | "30D" | "YTD" | "CUSTOM";
 
@@ -192,6 +193,18 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
     const { universe, backtestRuns, strategies } = useWebSocketContext();
     const { token } = useAuth();
     const activeAsset = routeAsset ?? "";
+    const assetOptions = useMemo(
+        () =>
+            universe.map((asset) => {
+                const sanitized = sanitizeAsset(asset.name);
+                return {
+                    value: sanitized,
+                    label: sanitized,
+                    searchText: `${asset.name} ${sanitized}`,
+                };
+            }),
+        [universe]
+    );
     const defaultStartParts = useMemo(
         () => dateToParts(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
         []
@@ -1032,25 +1045,21 @@ function BacktestContent({ routeAsset }: BacktestContentProps) {
                                 ))}
                             </select>
 
-                            <select
-                                value={activeAsset}
-                                onChange={(e) =>
-                                    nav(
-                                        `/backtest/${sanitizeAsset(e.target.value)}`
-                                    )
-                                }
-                                required
-                                className="border-accent-brand-strong bg-ink-80 text-accent-brand rounded border px-3 py-1 text-sm font-semibold transition"
-                            >
-                                {universe.map((u) => (
-                                    <option
-                                        key={u.name}
-                                        value={sanitizeAsset(u.name)}
-                                    >
-                                        {sanitizeAsset(u.name)}
-                                    </option>
-                                ))}
-                            </select>
+                            <div className="min-w-[10rem]">
+                                <SearchBar
+                                    value={activeAsset}
+                                    onChange={(value) =>
+                                        nav(`/backtest/${sanitizeAsset(value)}`)
+                                    }
+                                    options={assetOptions}
+                                    placeholder="Select asset"
+                                    searchPlaceholder="Search assets..."
+                                    emptyMessage="No assets found."
+                                    ariaLabel="Active asset"
+                                    buttonClassName="border-accent-brand-strong bg-ink-80 text-accent-brand rounded border px-3 py-1 text-sm font-semibold transition hover:bg-ink-70"
+                                    popoverClassName="min-w-[10rem]"
+                                />
+                            </div>
                         </div>
                     </div>
 
