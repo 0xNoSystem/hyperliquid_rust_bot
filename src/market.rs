@@ -1,5 +1,4 @@
 #![allow(unused_variables)]
-use log::warn;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -10,18 +9,21 @@ use alloy::signers::local::PrivateKeySigner;
 use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, Error, ExchangeClient, ExchangeResponseStatus};
 
 use crate::backend::scripting::CompiledStrategy;
-use crate::broadcast::{CacheCmdIn, CandleCount, CandleSnapshotRequest, PriceData};
+use crate::bot::SyncMarketFeeds;
+use crate::broadcast::{CacheCmdIn, CandleCount, CandleSnapshotRequest, PriceAsset, PriceData};
 use crate::signal::{
     AssetTimeFrameData, EditType, EngineCommand, EngineView, Entry, ExecParam, ExecParams, IndexId,
     SignalEngine, TimeFrameData,
 };
-use crate::{AssetMargin, EditMarketInfo, IndicatorData, MarketStream, UpdateFrontend};
+use crate::{AssetMargin, BotEvent, EditMarketInfo, IndicatorData, MarketStream, UpdateFrontend};
 use crate::{ExecCommand, ExecControl, ExecEvent, Executor};
 use crate::{MarketInfo, Wallet};
 use crate::{OpenPositionLocal, TimeFrame, TradeHistory, TradeInfo};
 
-use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_channel};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::mpsc::{
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
+};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use flume::{Sender as FlumeSender, bounded};
@@ -32,6 +34,7 @@ pub struct Market {
     pub pnl: f64,
     pub lev: usize,
     strategy: (String, Vec<IndexId>),
+    manual_indicators: HashSet<IndexId>,
     pub asset: AssetMeta,
     signal_engine: SignalEngine,
     executor: Executor,
@@ -76,13 +79,98 @@ fn format_asset_timeframes(items: &[(Arc<str>, TimeFrame)]) -> String {
         .join(", ")
 }
 
+fn manual_indicators_after_edits(
+    manual_indicators: &HashSet<IndexId>,
+    entry_vec: &[Entry],
+) -> HashSet<IndexId> {
+    let mut indicators = manual_indicators.clone();
+    for entry in entry_vec {
+        match entry.edit {
+            EditType::Add => {
+                indicators.insert(entry.id.clone());
+            }
+            EditType::Remove => {
+                indicators.remove(&entry.id);
+            }
+        }
+    }
+    indicators
+}
+
+fn strategy_edit_entries(
+    manual_indicators: &HashSet<IndexId>,
+    current_strategy: &[IndexId],
+    next_strategy: &[IndexId],
+) -> Vec<Entry> {
+    let current_strategy: HashSet<IndexId> = current_strategy.iter().cloned().collect();
+    let next_strategy: HashSet<IndexId> = next_strategy.iter().cloned().collect();
+    let mut entries = Vec::new();
+
+    let mut removals: Vec<_> = current_strategy
+        .difference(&next_strategy)
+        .filter(|id| !manual_indicators.contains(*id))
+        .cloned()
+        .collect();
+    removals.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+    entries.extend(removals.into_iter().map(|id| Entry {
+        id,
+        edit: EditType::Remove,
+    }));
+
+    let mut additions: Vec<_> = next_strategy
+        .difference(&current_strategy)
+        .filter(|id| !manual_indicators.contains(*id))
+        .cloned()
+        .collect();
+    additions.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+    entries.extend(additions.into_iter().map(|id| Entry {
+        id,
+        edit: EditType::Add,
+    }));
+
+    entries
+}
+
+fn required_assets_for<'a>(
+    base_asset: &str,
+    manual_indicators: impl IntoIterator<Item = &'a IndexId>,
+    strategy_indicators: impl IntoIterator<Item = &'a IndexId>,
+) -> HashSet<Arc<str>> {
+    let mut assets = HashSet::from([Arc::<str>::from(base_asset)]);
+    for (asset, _, _) in manual_indicators.into_iter().chain(strategy_indicators) {
+        assets.insert(Arc::clone(asset));
+    }
+    assets
+}
+
+async fn sync_required_assets_via_bot(
+    bot_cmd_tx: &Sender<BotEvent>,
+    market: &str,
+    required_assets: HashSet<Arc<str>>,
+) -> Result<(), Error> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    bot_cmd_tx
+        .send(BotEvent::SyncMarketFeeds(SyncMarketFeeds {
+            market: market.to_string(),
+            required_assets: required_assets.into_iter().collect(),
+            reply: reply_tx,
+        }))
+        .await
+        .map_err(|_| Error::Custom("bot channel closed".into()))?;
+
+    reply_rx
+        .await
+        .map_err(|_| Error::Custom("bot feed sync reply dropped".into()))?
+}
+
 impl Market {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         wallet: Arc<Wallet>,
         bot_tx: UnboundedSender<MarketUpdate>,
+        bot_cmd_tx: Sender<BotEvent>,
         cache_tx: Sender<CacheCmdIn>,
-        px_receiver: broadcast::Receiver<PriceData>,
+        px_receiver: UnboundedReceiver<PriceAsset>,
         asset: AssetMeta,
         margin: f64,
         lev: usize,
@@ -94,6 +182,8 @@ impl Market {
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
         let exchange_client =
             ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
+        let manual_indicators: HashSet<IndexId> =
+            config.clone().unwrap_or_default().into_iter().collect();
 
         //setup channels
         let (market_tx, market_rv) = channel::<MarketCommand>(7);
@@ -102,6 +192,7 @@ impl Market {
 
         let senders = MarketSenders {
             bot_tx,
+            bot_cmd_tx,
             engine_tx,
             exec_tx: exec_tx.clone(),
         };
@@ -122,6 +213,7 @@ impl Market {
                 pnl: 0_f64,
                 lev,
                 strategy: (strategy_name, strat_indicators.clone()),
+                manual_indicators,
                 asset: asset.clone(),
                 signal_engine: SignalEngine::new(
                     config,
@@ -152,6 +244,12 @@ impl Market {
         let engine_tx = self.senders.engine_tx.clone();
         let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(self.lev)));
 
+        sync_required_assets_via_bot(
+            &self.senders.bot_cmd_tx,
+            self.asset.name.as_str(),
+            self.current_required_assets(),
+        )
+        .await?;
         let last_price = self.load_engine(5000).await?;
         Ok(last_price)
     }
@@ -247,6 +345,26 @@ impl Market {
 
         Ok(snapshot_map)
     }
+
+    fn current_required_assets(&self) -> HashSet<Arc<str>> {
+        Self::required_assets_for(
+            self.asset.name.as_str(),
+            self.manual_indicators.iter(),
+            self.strategy.1.iter(),
+        )
+    }
+
+    fn required_assets_for<'a>(
+        base_asset: &str,
+        manual_indicators: impl IntoIterator<Item = &'a IndexId>,
+        strategy_indicators: impl IntoIterator<Item = &'a IndexId>,
+    ) -> HashSet<Arc<str>> {
+        let mut assets = HashSet::from([Arc::<str>::from(base_asset)]);
+        for (asset, _, _) in manual_indicators.into_iter().chain(strategy_indicators) {
+            assets.insert(Arc::clone(asset));
+        }
+        assets
+    }
 }
 
 impl Market {
@@ -286,35 +404,24 @@ impl Market {
         let mut px_receiver = self.receivers.price_rv;
 
         let candle_stream_handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-            loop {
-                match px_receiver.recv().await {
-                    Ok(data) => {
-                        let last_price = match &data {
-                            PriceData::Single(p) => Some(p.close),
-                            PriceData::Bulk(ps) => ps.last().map(|p| p.close),
-                        };
-                        if let Some(px) = last_price {
-                            let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
-                                UpdateFrontend::MarketStream(MarketStream::Price {
-                                    asset: Arc::clone(&asset_name),
-                                    price: px,
-                                }),
-                            ));
-                        }
-                        let _ = engine_price_tx
-                            .send(EngineCommand::UpdatePrice((Arc::clone(&asset_name), data)));
-                    }
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        warn!("{} price receiver lagged by {} messages", &asset_name, n);
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        warn!("{} broadcast channel closed", &asset_name);
-                        let _ = bot_price_update
-                            .send(MarketUpdate::FeedDied((*asset_name).to_string()));
-                        break;
+            while let Some((tick_asset, data)) = px_receiver.recv().await {
+                if tick_asset == asset_name {
+                    let last_price = match &data {
+                        PriceData::Single(p) => Some(p.close),
+                        PriceData::Bulk(ps) => ps.last().map(|p| p.close),
+                    };
+                    if let Some(px) = last_price {
+                        let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
+                            UpdateFrontend::MarketStream(MarketStream::Price {
+                                asset: Arc::clone(&asset_name),
+                                price: px,
+                            }),
+                        ));
                     }
                 }
+                let _ = engine_price_tx.send(EngineCommand::UpdatePrice((tick_asset, data)));
             }
+            let _ = bot_price_update.send(MarketUpdate::FeedDied((*asset_name).to_string()));
             Ok(())
         });
         //listen to changes and trade results
@@ -351,7 +458,18 @@ impl Market {
                 }
 
                 MarketCommand::UpdateStrategy(compiled, strat_indicators, name) => {
-                    let requests = collect_snapshot_requests(strat_indicators.iter(), 5000);
+                    let strategy_entries = strategy_edit_entries(
+                        &self.manual_indicators,
+                        &self.strategy.1,
+                        &strat_indicators,
+                    );
+                    let requests = collect_snapshot_requests(
+                        strategy_entries
+                            .iter()
+                            .filter(|entry| entry.edit == EditType::Add)
+                            .map(|entry| &entry.id),
+                        5000,
+                    );
                     let mut map = AssetTimeFrameData::default();
                     let mut failed = false;
                     if !requests.is_empty() {
@@ -388,7 +506,7 @@ impl Market {
                                 failed = true;
                                 let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                                     UpdateFrontend::UserError(format!(
-                                        "Failed to load candle data for strategy '{}': {}",
+                                        "Failed to load candle data for strategy '{}': {}\nStrategy not applied.",
                                         name, e
                                     )),
                                 ));
@@ -400,6 +518,26 @@ impl Market {
                         continue;
                     }
 
+                    if let Err(e) = sync_required_assets_via_bot(
+                        &self.senders.bot_cmd_tx,
+                        asset.name.as_str(),
+                        required_assets_for(
+                            asset.name.as_str(),
+                            self.manual_indicators.iter(),
+                            strat_indicators.iter(),
+                        ),
+                    )
+                    .await
+                    {
+                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                            UpdateFrontend::UserError(format!(
+                                "Failed to sync live feeds for strategy '{}': {}",
+                                name, e
+                            )),
+                        ));
+                        continue;
+                    }
+
                     self.strategy = (name, strat_indicators.clone());
 
                     let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(
@@ -407,18 +545,13 @@ impl Market {
                         strat_indicators.clone(),
                     ));
 
-                    let price_data = if map.is_empty() { None } else { Some(map) };
-                    let indicators: Vec<Entry> = strat_indicators
-                        .into_iter()
-                        .map(|id| Entry {
-                            id,
-                            edit: EditType::Add,
-                        })
-                        .collect();
-                    let _ = engine_update_tx.send(EngineCommand::EditIndicators {
-                        indicators,
-                        price_data,
-                    });
+                    if !strategy_entries.is_empty() || !map.is_empty() {
+                        let price_data = if map.is_empty() { None } else { Some(map) };
+                        let _ = engine_update_tx.send(EngineCommand::EditIndicators {
+                            indicators: strategy_entries,
+                            price_data,
+                        });
+                    }
 
                     //close any ongoing trade
                     let _ = self
@@ -499,19 +632,43 @@ impl Market {
                             Err(e) => {
                                 let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
                                     UpdateFrontend::UserError(format!(
-                                        "Failed to load candle data: {}\nREMOVE CONCERNED INDICATORS AND TRY AGAIN",
+                                        "Failed to load candle data: {}\nIndicator changes were not applied.",
                                         e
                                     )),
                                 ));
+                                continue;
                             }
                         }
                     }
 
+                    let next_manual_indicators =
+                        manual_indicators_after_edits(&self.manual_indicators, &entry_vec);
+                    if let Err(e) = sync_required_assets_via_bot(
+                        &self.senders.bot_cmd_tx,
+                        asset.name.as_str(),
+                        required_assets_for(
+                            asset.name.as_str(),
+                            next_manual_indicators.iter(),
+                            self.strategy.1.iter(),
+                        ),
+                    )
+                    .await
+                    {
+                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
+                            UpdateFrontend::UserError(format!(
+                                "Failed to sync live feeds for indicator update: {}",
+                                e
+                            )),
+                        ));
+                        continue;
+                    }
+
                     let price_data = if map.is_empty() { None } else { Some(map) };
                     let _ = engine_update_tx.send(EngineCommand::EditIndicators {
-                        indicators: entry_vec,
+                        indicators: entry_vec.clone(),
                         price_data,
                     });
+                    self.manual_indicators = next_manual_indicators;
                 }
 
                 MarketCommand::UpdateOpenPosition(pos) => {
@@ -703,12 +860,13 @@ pub enum MarketCommand {
 
 struct MarketSenders {
     bot_tx: UnboundedSender<MarketUpdate>,
+    bot_cmd_tx: Sender<BotEvent>,
     engine_tx: UnboundedSender<EngineCommand>,
     exec_tx: FlumeSender<ExecCommand>,
 }
 
 struct MarketReceivers {
-    pub price_rv: broadcast::Receiver<PriceData>,
+    pub price_rv: UnboundedReceiver<PriceAsset>,
     pub market_rv: Receiver<MarketCommand>,
 }
 

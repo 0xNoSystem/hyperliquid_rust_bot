@@ -207,7 +207,7 @@ const LineChartsContainer: React.FC<LineChartsContainerProps> = ({
 
     const [mouseX, setMouseX] = useState<number | null>(null);
     const [mouseY, setMouseY] = useState<number | null>(null);
-    const [mouseInside, setMouseInside] = useState(false);
+    const [_mouseInside, setMouseInside] = useState(false);
     const [mouseOnChart, setMouseOnChart] = useState(false);
 
     const chartWidth = Math.max(0, totalWidth - VALUE_SCALE_WIDTH);

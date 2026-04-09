@@ -12,9 +12,11 @@ import LineChart from "../chart/LineChart";
 import LineChartsContainer from "../chart/LineChartsContainer";
 import type { LineSeries } from "../chart/LineChart";
 
-function formatUtcMinute(ts: number): string {
+/*
+function _formatUtcMinute(ts: number): string {
     return new Date(ts).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 }
+*/
 
 /** Convert a live BacktestResult into the shape BacktestResultDetail uses */
 function resultToDetail(r: BacktestResultType): BacktestResultDetail {

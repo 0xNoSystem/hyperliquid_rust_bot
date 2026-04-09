@@ -6,7 +6,7 @@ use crate::{
 };
 use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, InfoClient, Message};
 use rustc_hash::FxHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 use std::time::Instant;
@@ -15,8 +15,11 @@ use tokio::sync::{
     mpsc::{Sender, UnboundedReceiver, UnboundedSender, unbounded_channel},
     oneshot,
 };
+use tokio::time::{Duration, interval};
 
 const SUBSCRIPTION_ATTEMPTS_MAX: u32 = 5;
+const OI_UNSUB_BELOW: f64 = 100_000.0;
+const ASSET_CONTEXT_REFRESH_SECS: u64 = 12 * 60 * 60;
 
 type FxMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
 pub type SubReply = Result<SubscriptionReply, Error>;
@@ -49,6 +52,8 @@ pub struct Broadcaster {
     cmd_tx: UnboundedSender<BroadcastCmd>,
     cmd_rx: UnboundedReceiver<BroadcastCmd>,
     channels: FxMap<Arc<str>, AssetFeed>,
+    pending_unsubscribes: HashSet<Arc<str>, BuildHasherDefault<FxHasher>>,
+    asset_contexts: FxMap<Arc<str>, f64>,
     cache_tx: Sender<CacheCmdIn>,
     universe: Vec<AssetMeta>,
 }
@@ -68,6 +73,8 @@ impl Broadcaster {
                 cmd_tx: cmd_tx.clone(),
                 cmd_rx,
                 channels: HashMap::default(),
+                pending_unsubscribes: HashSet::default(),
+                asset_contexts: HashMap::default(),
                 cache_tx,
                 universe,
             },
@@ -90,6 +97,13 @@ impl Broadcaster {
             feed.tx.subscribe()
         } else {
             let (tx, rx) = broadcast::channel::<PriceData>(256);
+            self.cache_tx
+                .send(CacheCmdIn::NewFeed {
+                    asset: Arc::clone(&asset),
+                    rx: tx.subscribe(),
+                })
+                .await
+                .map_err(|_| Error::Custom("CandleCache channel closed".into()))?;
             self.channels.insert(
                 Arc::clone(&asset),
                 AssetFeed {
@@ -122,31 +136,44 @@ impl Broadcaster {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn unsubscribe_from_feed(&mut self, asset: Arc<str>) {
+    async fn drop_cache_feed(&self, asset: Arc<str>) {
+        if self
+            .cache_tx
+            .send(CacheCmdIn::DropFeed(asset.clone()))
+            .await
+            .is_err()
+        {
+            log::warn!("failed to drop candle cache feed for {}", &asset);
+        }
+    }
+
+    fn spawn_remote_unsubscribe(&self, asset: Arc<str>, sub_id: u32) {
+        let client = self.info_client.clone();
+        tokio::spawn(async move {
+            let mut client = client.lock().await;
+            if let Err(e) = client.unsubscribe(sub_id).await {
+                log::warn!(
+                    "failed to unsubscribe {} (sub_id {}): {:?}",
+                    &asset,
+                    sub_id,
+                    e
+                );
+            }
+        });
+    }
+
+    async fn unsubscribe_from_feed(&mut self, asset: Arc<str>) {
         if let Some(feed) = self.channels.remove(&asset) {
-            let _ = self
-                .cache_tx
-                .try_send(CacheCmdIn::DropFeed(Arc::clone(&asset)));
+            self.drop_cache_feed(Arc::clone(&asset)).await;
             if let Some(sub_id) = feed.sub_id {
-                let client = self.info_client.clone();
-                tokio::spawn(async move {
-                    let mut client = client.lock().await;
-                    if let Err(e) = client.unsubscribe(sub_id).await {
-                        log::warn!(
-                            "failed to unsubscribe {} (sub_id {}): {:?}",
-                            &asset,
-                            sub_id,
-                            e
-                        );
-                    }
-                });
+                self.spawn_remote_unsubscribe(asset, sub_id);
+            } else {
+                self.pending_unsubscribes.insert(asset);
             }
         }
     }
 
     #[inline]
-    #[allow(dead_code)]
     fn is_feed_idle(&self, asset: &str) -> bool {
         self.channels
             .get(asset)
@@ -158,32 +185,92 @@ impl Broadcaster {
     fn set_sub_id(&mut self, asset: &str, sub_id: u32) {
         if let Some(feed) = self.channels.get_mut(asset) {
             feed.sub_id = Some(sub_id);
+        } else {
+            let asset = Arc::<str>::from(asset);
+            if self.pending_unsubscribes.remove(&asset) {
+                self.spawn_remote_unsubscribe(asset, sub_id);
+            }
         }
     }
 
+    fn update_asset_contexts_for_meta(
+        asset_contexts: &mut FxMap<Arc<str>, f64>,
+        meta: hyperliquid_rust_sdk::Meta,
+        contexts: Vec<hyperliquid_rust_sdk::AssetContext>,
+    ) {
+        for (asset, context) in meta.universe.into_iter().zip(contexts) {
+            match context.open_interest.parse::<f64>() {
+                Ok(open_interest) => {
+                    asset_contexts.insert(Arc::from(asset.name), open_interest);
+                }
+                Err(e) => {
+                    log::warn!("failed to parse open interest for {}: {}", asset.name, e);
+                }
+            }
+        }
+    }
+
+    async fn refresh_asset_contexts(&mut self) -> Result<(), Error> {
+        let info_client = InfoClient::new(None, Some(self.url)).await?;
+        let mut asset_contexts = FxMap::default();
+
+        let (meta, contexts) = info_client.meta_and_asset_contexts().await?;
+        Self::update_asset_contexts_for_meta(&mut asset_contexts, meta, contexts);
+
+        for dex in info_client.perp_dexs().await?.into_iter().flatten() {
+            let (meta, contexts) = info_client
+                .meta_and_asset_contexts_for_dex(dex.name.clone())
+                .await?;
+            Self::update_asset_contexts_for_meta(&mut asset_contexts, meta, contexts);
+        }
+
+        self.asset_contexts = asset_contexts;
+        Ok(())
+    }
+
     pub async fn start(&mut self) {
-        while let Some(cmd) = self.cmd_rx.recv().await {
-            match cmd {
-                BroadcastCmd::Subscribe(payload) => {
-                    if let Err(e) = self.add_sub(payload).await {
-                        log::error!("failed to add subscription: {:?}", e);
+        if let Err(e) = self.refresh_asset_contexts().await {
+            log::warn!("failed to refresh asset contexts on startup: {:?}", e);
+        }
+
+        let mut asset_context_refresh = interval(Duration::from_secs(ASSET_CONTEXT_REFRESH_SECS));
+        asset_context_refresh.tick().await;
+
+        loop {
+            tokio::select! {
+                _ = asset_context_refresh.tick() => {
+                    if let Err(e) = self.refresh_asset_contexts().await {
+                        log::warn!("failed to refresh asset contexts: {:?}", e);
                     }
                 }
-                BroadcastCmd::Unsubscribe(_asset) => {
-                    /*
-                    //COMMENTED OUT BECAUSE UNSUBSCRIBING WOULD CLEAR CACHE BUILD UP, TODO: ADD A
-                    //FEED IDLE TIMEOUT AND UNSUB AFTER N TIME, OR HAVE A LIST OF LOW VOLUME ASSETS
-                    //THAT GET UNSUBED RIGHT (MAYBE VOLUME THRESHOLD)
-                    if self.is_feed_idle(&asset){
-                        self.unsubscribe_from_feed(asset);
+                maybe_cmd = self.cmd_rx.recv() => {
+                    let Some(cmd) = maybe_cmd else {
+                        break;
+                    };
+                    match cmd {
+                        BroadcastCmd::Subscribe(payload) => {
+                            if let Err(e) = self.add_sub(payload).await {
+                                log::error!("failed to add subscription: {:?}", e);
+                            }
+                        }
+                        BroadcastCmd::Unsubscribe(asset) => {
+                            if self.is_feed_idle(&asset)
+                                && self
+                                    .asset_contexts
+                                    .get(&asset)
+                                    .is_some_and(|oi| *oi < OI_UNSUB_BELOW)
+                            {
+                                self.unsubscribe_from_feed(asset).await;
+                            }
+                        }
+                        BroadcastCmd::SetSubId { asset, sub_id } => self.set_sub_id(&asset, sub_id),
+                        BroadcastCmd::CleanUp(asset) => {
+                            log::warn!("cleaning up dead feed for {}", &asset);
+                            self.channels.remove(&asset);
+                            self.pending_unsubscribes.remove(&asset);
+                            self.drop_cache_feed(asset).await;
+                        }
                     }
-                    */
-                }
-                BroadcastCmd::SetSubId { asset, sub_id } => self.set_sub_id(&asset, sub_id),
-                BroadcastCmd::CleanUp(asset) => {
-                    log::warn!("cleaning up dead feed for {}", &asset);
-                    self.channels.remove(&asset);
-                    let _ = self.cache_tx.try_send(CacheCmdIn::DropFeed(asset));
                 }
             }
         }

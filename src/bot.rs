@@ -4,7 +4,9 @@ use crate::{
 };
 
 use crate::backend::app_state::{StrategyCache, WsConnections, broadcast_to_user};
-use crate::broadcast::{BroadcastCmd, CacheCmdIn, SubReply, SubscribePayload};
+use crate::broadcast::{
+    BroadcastCmd, CacheCmdIn, PriceAsset, PriceData, SubReply, SubscribePayload,
+};
 use hyperliquid_rust_sdk::{
     AssetMeta, AssetPosition, BaseUrl, Error, InfoClient, Message, Subscription, UserData,
 };
@@ -13,13 +15,14 @@ use rhai::Engine;
 use rustc_hash::FxHasher;
 use serde::Deserialize;
 use sqlx::PgPool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 use tokio::sync::{Mutex, oneshot};
+use tokio::task::JoinHandle;
 use tokio::time::{Duration, interval};
 use tokio_util::sync::CancellationToken;
 
@@ -32,12 +35,18 @@ pub struct Bot {
     info_client: InfoClient,
     wallet: Arc<Wallet>,
     markets: HashMap<String, Sender<MarketCommand>, BuildHasherDefault<FxHasher>>,
+    market_price_routes: HashMap<String, UnboundedSender<PriceAsset>, BuildHasherDefault<FxHasher>>,
+    market_required_assets: HashMap<String, HashSet<Arc<str>>, BuildHasherDefault<FxHasher>>,
+    asset_consumers: HashMap<Arc<str>, HashSet<String>, BuildHasherDefault<FxHasher>>,
+    asset_feeds: HashMap<Arc<str>, BotAssetFeed, BuildHasherDefault<FxHasher>>,
     broadcast_tx: UnboundedSender<BroadcastCmd>,
     candle_rx: Sender<CacheCmdIn>,
     #[allow(unused)]
     fees: (f64, f64),
     _bot_tx: Sender<BotEvent>,
     bot_rv: Receiver<BotEvent>,
+    price_router_rv: Option<UnboundedReceiver<PriceAsset>>,
+    price_router_tx: UnboundedSender<PriceAsset>,
     update_rv: Option<UnboundedReceiver<MarketUpdate>>,
     update_tx: UnboundedSender<MarketUpdate>,
     ws_connections: Option<WsConnections>,
@@ -47,6 +56,11 @@ pub struct Bot {
     strategy_cache: Option<StrategyCache>,
     chain_open_positions: Vec<AssetPosition>,
     key_valid: bool,
+}
+
+struct BotAssetFeed {
+    meta: AssetMeta,
+    handle: JoinHandle<()>,
 }
 
 impl Bot {
@@ -59,6 +73,7 @@ impl Bot {
         let fees = wallet.get_user_fees().await?;
 
         let (bot_tx, bot_rv) = channel::<BotEvent>(64);
+        let (price_router_tx, price_router_rv) = unbounded_channel::<PriceAsset>();
         let (update_tx, update_rv) = unbounded_channel::<MarketUpdate>();
 
         Ok((
@@ -66,11 +81,17 @@ impl Bot {
                 info_client,
                 wallet: wallet.into(),
                 markets: HashMap::default(),
+                market_price_routes: HashMap::default(),
+                market_required_assets: HashMap::default(),
+                asset_consumers: HashMap::default(),
+                asset_feeds: HashMap::default(),
                 broadcast_tx,
                 candle_rx,
                 fees,
                 _bot_tx: bot_tx.clone(),
                 bot_rv,
+                price_router_rv: Some(price_router_rv),
+                price_router_tx,
                 update_rv: Some(update_rv),
                 update_tx,
                 ws_connections: None,
@@ -89,6 +110,196 @@ impl Bot {
     async fn send_to_frontend(&self, msg: UpdateFrontend) {
         if let (Some(conns), Some(pubkey)) = (&self.ws_connections, &self.pubkey) {
             broadcast_to_user(conns, pubkey, msg).await;
+        }
+    }
+
+    async fn ensure_asset_feed(&mut self, asset: Arc<str>) -> Result<AssetMeta, Error> {
+        if let Some(feed) = self.asset_feeds.get(&asset) {
+            return Ok(feed.meta.clone());
+        }
+
+        let (one_tx, one_rx) = oneshot::channel::<SubReply>();
+        let sub_request = SubscribePayload {
+            asset: Arc::clone(&asset),
+            reply: one_tx,
+        };
+
+        self.broadcast_tx
+            .send(BroadcastCmd::Subscribe(sub_request))
+            .map_err(|e| Error::Custom(format!("broadcast channel closed: {}", e)))?;
+
+        let sub_info = one_rx
+            .await
+            .map_err(|_| Error::Custom("subscription reply dropped".to_string()))??;
+
+        let meta = sub_info.meta.clone();
+        let mut px_receiver = sub_info.px_receiver;
+        let price_router_tx = self.price_router_tx.clone();
+        let bot_tx = self._bot_tx.clone();
+        let asset_key = Arc::clone(&asset);
+
+        let handle = tokio::spawn(async move {
+            loop {
+                match px_receiver.recv().await {
+                    Ok(data) => {
+                        if price_router_tx
+                            .send((Arc::clone(&asset_key), data))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("{} bot feed lagged by {} messages", &asset_key, n);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        let _ = bot_tx
+                            .send(BotEvent::AssetFeedDied((*asset_key).to_string()))
+                            .await;
+                        break;
+                    }
+                }
+            }
+        });
+
+        self.asset_feeds.insert(
+            asset,
+            BotAssetFeed {
+                meta: meta.clone(),
+                handle,
+            },
+        );
+        Ok(meta)
+    }
+
+    async fn drop_asset_feed(&mut self, asset: &Arc<str>) -> bool {
+        if let Some(feed) = self.asset_feeds.remove(asset) {
+            feed.handle.abort();
+            let _ = feed.handle.await;
+            return true;
+        }
+        false
+    }
+
+    async fn unsubscribe_asset_if_idle(&mut self, asset: Arc<str>) {
+        if self
+            .asset_consumers
+            .get(&asset)
+            .is_some_and(|consumers| !consumers.is_empty())
+        {
+            return;
+        }
+
+        self.asset_consumers.remove(&asset);
+
+        if self.drop_asset_feed(&asset).await
+            && self
+                .broadcast_tx
+                .send(BroadcastCmd::Unsubscribe(Arc::clone(&asset)))
+                .is_err()
+        {
+            warn!("failed to unsubscribe {} from broadcaster", &asset);
+        }
+    }
+
+    fn route_price(&self, asset: Arc<str>, data: PriceData) {
+        let Some(markets) = self.asset_consumers.get(&asset) else {
+            return;
+        };
+
+        for market in markets {
+            if let Some(tx) = self.market_price_routes.get(market) {
+                let _ = tx.send((Arc::clone(&asset), data.clone()));
+            }
+        }
+    }
+
+    async fn sync_market_feeds(
+        &mut self,
+        market: &str,
+        required_assets: HashSet<Arc<str>>,
+    ) -> Result<(), Error> {
+        if !self.market_price_routes.contains_key(market) {
+            return Err(Error::Custom(format!(
+                "market route missing for {}",
+                market
+            )));
+        }
+
+        let current_assets = self
+            .market_required_assets
+            .get(market)
+            .cloned()
+            .unwrap_or_default();
+
+        let to_add: Vec<_> = required_assets
+            .difference(&current_assets)
+            .cloned()
+            .collect();
+        let to_remove: Vec<_> = current_assets
+            .difference(&required_assets)
+            .cloned()
+            .collect();
+
+        let mut newly_created_feeds = Vec::new();
+        for asset in &to_add {
+            let had_feed = self.asset_feeds.contains_key(asset);
+            if let Err(e) = self.ensure_asset_feed(Arc::clone(asset)).await {
+                for created in newly_created_feeds {
+                    self.unsubscribe_asset_if_idle(created).await;
+                }
+                return Err(e);
+            }
+            if !had_feed {
+                newly_created_feeds.push(Arc::clone(asset));
+            }
+        }
+
+        for asset in &to_add {
+            self.asset_consumers
+                .entry(Arc::clone(asset))
+                .or_default()
+                .insert(market.to_string());
+        }
+
+        for asset in to_remove {
+            let should_drop = if let Some(consumers) = self.asset_consumers.get_mut(&asset) {
+                consumers.remove(market);
+                consumers.is_empty()
+            } else {
+                true
+            };
+
+            if should_drop {
+                self.unsubscribe_asset_if_idle(asset).await;
+            }
+        }
+
+        self.market_required_assets
+            .insert(market.to_string(), required_assets);
+
+        Ok(())
+    }
+
+    async fn clear_market_feed_state(&mut self, market: &str) {
+        self.market_price_routes.remove(market);
+        let mut required_assets = self
+            .market_required_assets
+            .remove(market)
+            .unwrap_or_default();
+        required_assets.insert(Arc::<str>::from(market));
+
+        for asset in required_assets {
+            let should_drop = if let Some(consumers) = self.asset_consumers.get_mut(&asset) {
+                consumers.remove(market);
+                consumers.is_empty()
+            } else {
+                true
+            };
+
+            if should_drop {
+                self.unsubscribe_asset_if_idle(asset).await;
+            }
         }
     }
 
@@ -213,26 +424,18 @@ impl Bot {
         self.send_to_frontend(UpdateFrontend::PreconfirmMarket(asset.clone()))
             .await;
 
-        let (one_tx, one_rx) = oneshot::channel::<SubReply>();
-        let sub_request = SubscribePayload {
-            asset: Arc::from(asset.as_str()),
-            reply: one_tx,
-        };
+        let market_asset = Arc::<str>::from(asset.as_str());
+        let had_feed = self.asset_feeds.contains_key(&market_asset);
+        let meta = self.ensure_asset_feed(Arc::clone(&market_asset)).await?;
+        let (price_tx, price_rx) = unbounded_channel::<PriceAsset>();
 
-        self.broadcast_tx
-            .send(BroadcastCmd::Subscribe(sub_request))
-            .map_err(|e| Error::Custom(format!("broadcast channel closed: {}", e)))?;
-
-        let sub_info = one_rx
-            .await
-            .map_err(|_| Error::Custom("subscription reply dropped".to_string()))??;
-
-        let (market, market_tx) = Market::new(
+        let market_result = Market::new(
             self.wallet.clone(),
             self.update_tx.clone(),
+            self._bot_tx.clone(),
             self.candle_rx.clone(),
-            sub_info.px_receiver,
-            sub_info.meta,
+            price_rx,
+            meta,
             margin,
             lev,
             rhai_engine,
@@ -241,9 +444,21 @@ impl Bot {
             strategy_name,
             config,
         )
-        .await?;
+        .await;
+        let (market, market_tx) = match market_result {
+            Ok(result) => result,
+            Err(e) => {
+                if !had_feed {
+                    self.unsubscribe_asset_if_idle(market_asset).await;
+                }
+                return Err(e);
+            }
+        };
 
         self.markets.insert(asset.clone(), market_tx);
+        self.market_price_routes.insert(asset.clone(), price_tx);
+        self.market_required_assets
+            .insert(asset.clone(), HashSet::default());
 
         let ws_conns = self.ws_connections.clone();
         let bot_pubkey = self.pubkey.clone();
@@ -283,10 +498,6 @@ impl Bot {
             return Ok(());
         }
 
-        let _ = self
-            .broadcast_tx
-            .send(BroadcastCmd::Unsubscribe(Arc::from(asset.as_str())));
-
         if let Some(tx) = self.markets.remove(&asset) {
             let tx = tx.clone();
             let cmd = MarketCommand::Close;
@@ -305,6 +516,7 @@ impl Bot {
                 book.remove(&asset);
             }
         }
+        self.clear_market_feed_state(&asset).await;
 
         Ok(())
     }
@@ -322,11 +534,15 @@ impl Bot {
     }
 
     pub async fn close_all(&mut self) {
-        for (asset, tx) in self.markets.drain() {
-            let _ = self
-                .broadcast_tx
-                .send(BroadcastCmd::Unsubscribe(Arc::from(asset.as_str())));
+        for (_asset, tx) in self.markets.drain() {
             let _ = tx.send(MarketCommand::Close).await;
+        }
+        self.market_price_routes.clear();
+        self.market_required_assets.clear();
+        self.asset_consumers.clear();
+        let assets: Vec<_> = self.asset_feeds.keys().cloned().collect();
+        for asset in assets {
+            self.unsubscribe_asset_if_idle(asset).await;
         }
     }
 
@@ -358,6 +574,7 @@ impl Bot {
         self.strategy_cache = Some(strategy_cache);
 
         let mut update_rv = self.update_rv.take().unwrap();
+        let mut price_router_rv = self.price_router_rv.take().unwrap();
 
         let session: Session = Arc::new(Mutex::new(HashMap::default()));
 
@@ -596,6 +813,10 @@ impl Bot {
                     }
                 },
 
+                Some((asset, data)) = price_router_rv.recv() => {
+                    self.route_price(asset, data);
+                },
+
                 Some(event) = self.bot_rv.recv() => {
                     // Block trading commands when key is invalid
                     if !self.key_valid {
@@ -669,6 +890,41 @@ impl Bot {
                             let _ = self.remove_market(asset.as_str(), &margin_user_edit).await;
                             let mut guard = session.lock().await;
                             let _ = guard.remove(&asset);
+                        }
+
+                        SyncMarketFeeds(payload) => {
+                            let result = self
+                                .sync_market_feeds(
+                                    payload.market.as_str(),
+                                    payload.required_assets.into_iter().collect(),
+                                )
+                                .await;
+                            let _ = payload.reply.send(result);
+                        }
+
+                        AssetFeedDied(asset) => {
+                            let asset_key = Arc::<str>::from(asset.as_str());
+                            let affected_markets: Vec<_> = self
+                                .asset_consumers
+                                .get(&asset_key)
+                                .map(|markets| markets.iter().cloned().collect())
+                                .unwrap_or_default();
+                            let _ = self.drop_asset_feed(&asset_key).await;
+                            self.asset_consumers.remove(&asset_key);
+
+                            if !affected_markets.is_empty() {
+                                self.send_to_frontend(UserError(format!(
+                                    "Price feed lost for {}. Removing affected markets.",
+                                    asset
+                                )))
+                                .await;
+                            }
+
+                            for market in affected_markets {
+                                let _ = self.remove_market(market.as_str(), &margin_user_edit).await;
+                                let mut guard = session.lock().await;
+                                let _ = guard.remove(&market);
+                            }
                         }
 
                         MarketComm(command) => {
@@ -983,7 +1239,7 @@ type FillsMap = HashMap<
     BuildHasherDefault<FxHasher>,
 >;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BotEvent {
     AddMarket(AddMarketInfo),
@@ -998,11 +1254,22 @@ pub enum BotEvent {
     ReloadWallet(alloy::signers::local::PrivateKeySigner),
     #[serde(skip)]
     AuthFailed(String),
+    #[serde(skip)]
+    SyncMarketFeeds(SyncMarketFeeds),
+    #[serde(skip)]
+    AssetFeedDied(String),
     ResumeAll,
     PauseAll,
     CloseAll,
     GetSession,
     Kill,
+}
+
+#[derive(Debug)]
+pub struct SyncMarketFeeds {
+    pub market: String,
+    pub required_assets: Vec<Arc<str>>,
+    pub reply: oneshot::Sender<Result<(), Error>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

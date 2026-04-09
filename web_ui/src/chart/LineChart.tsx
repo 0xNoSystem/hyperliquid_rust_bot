@@ -12,7 +12,6 @@ import type { LineSeries, LinePoint } from "./LineCanvas";
 import {
     priceToY,
     yToPrice,
-    timeToX,
     xToTime,
     zoomPriceRange,
     handleWheelZoom,
