@@ -172,9 +172,13 @@ fn expand_script(src: &str, state_preamble: &str) -> String {
     }
 }
 
+fn key_matches_indicator_prefix(key: &str, prefix: &str) -> bool {
+    key.starts_with(prefix) || key.contains(&format!("_{prefix}"))
+}
+
 /// Expand `let <var> = extract("<key>");` into indicator access + guard +
 /// value unpacking. The unpacking depends on the indicator type detected
-/// from the key prefix.
+/// from the key, with or without an asset prefix.
 fn expand_extract(src: &str) -> String {
     let re = Regex::new(r#"let\s+(\w+)\s*=\s*extract\(\s*"([^"]+)"\s*\)\s*;"#).unwrap();
 
@@ -184,14 +188,14 @@ fn expand_extract(src: &str) -> String {
 
         let mut out = format!("let {var} = indicators[\"{key}\"];\nif {var} == () {{ return; }}\n");
 
-        if key.starts_with("stochRsi_") {
+        if key_matches_indicator_prefix(&key, "stochRsi_") {
             out.push_str(&format!(
                 "let {var}_k = {var}.value.stoch_k();\n\
                  let {var}_d = {var}.value.stoch_d();\n\
                  let {var}_on_close = {var}.on_close;\n\
                  let {var}_ts = {var}.ts;\n"
             ));
-        } else if key.starts_with("emaCross_") {
+        } else if key_matches_indicator_prefix(&key, "emaCross_") {
             out.push_str(&format!(
                 "let {var}_short = {var}.value.ema_short();\n\
                  let {var}_long = {var}.value.ema_long();\n\
@@ -458,4 +462,40 @@ fn register_timeframe(engine: &mut Engine) {
     engine.register_fn("timedelta", |tf: TimeFrame, count: i64| {
         TimeDelta::from_tf(tf, count as u64)
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_extract;
+
+    #[test]
+    fn expand_extract_uses_ema_cross_unpacking_with_asset_prefix() {
+        let expanded = expand_extract(r#"let ema = extract("BTC_emaCross_9_21_15m");"#);
+
+        assert!(expanded.contains(r#"indicators["BTC_emaCross_9_21_15m"]"#));
+        assert!(expanded.contains("let ema_short = ema.value.ema_short();"));
+        assert!(expanded.contains("let ema_long = ema.value.ema_long();"));
+        assert!(expanded.contains("let ema_trend = ema.value.ema_trend();"));
+        assert!(!expanded.contains("let ema_value ="));
+    }
+
+    #[test]
+    fn expand_extract_uses_stoch_unpacking_with_asset_prefix() {
+        let expanded = expand_extract(r#"let stoch = extract("SOL_stochRsi_14_3_3_1h");"#);
+
+        assert!(expanded.contains(r#"indicators["SOL_stochRsi_14_3_3_1h"]"#));
+        assert!(expanded.contains("let stoch_k = stoch.value.stoch_k();"));
+        assert!(expanded.contains("let stoch_d = stoch.value.stoch_d();"));
+        assert!(!expanded.contains("let stoch_value ="));
+    }
+
+    #[test]
+    fn expand_extract_keeps_single_value_unpacking_with_asset_prefix() {
+        let expanded = expand_extract(r#"let rsi = extract("ETH_rsi_14_15m");"#);
+
+        assert!(expanded.contains(r#"indicators["ETH_rsi_14_15m"]"#));
+        assert!(expanded.contains("let rsi_value = rsi.value.as_f64();"));
+        assert!(!expanded.contains("let rsi_short ="));
+        assert!(!expanded.contains("let rsi_k ="));
+    }
 }

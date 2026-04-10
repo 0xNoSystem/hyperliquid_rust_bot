@@ -2,7 +2,7 @@
 
 A multi-user perpetual futures trading terminal for [Hyperliquid](https://hyperliquid.xyz), featuring a scripting engine that lets you write, test, and deploy automated trading strategies from your browser.
 
-Built with a Rust backend (Axum + WebSocket) and a React frontend. Strategies are written in **Rhai** (a Rust-native scripting language) and execute server-side with sandboxed resource limits.
+Built with a Rust backend (Axum + WebSocket) and a React frontend. Strategies are written in **Rhai** (a Rust-native scripting language), execute server-side with sandboxed resource limits, and can combine indicator signals across multiple assets and timeframes.
 
 ---
 
@@ -21,8 +21,8 @@ Browser (React)                     Server (Rust)
 
 1. You connect your Hyperliquid wallet (Ethereum signature auth).
 2. You add markets, choose leverage, and allocate margin.
-3. You write a strategy using the scripting API (or use an existing one).
-4. The engine evaluates your scripts on every candle tick and executes the resulting orders on Hyperliquid.
+3. You configure indicators per asset/timeframe and write a strategy using the scripting API (or use an existing one).
+4. The engine keeps those feeds hot, evaluates your scripts on each relevant candle update, and executes the resulting orders on Hyperliquid.
 
 ---
 
@@ -38,6 +38,12 @@ A strategy is three scripts that run at different stages of a trade lifecycle:
 
 Each script can return an **Intent** (a trading action) or return nothing (do nothing).
 
+### Market Model
+
+A strategy is attached to one market. Order helpers such as `open_market`, `open_limit`, `flatten_*`, and `reduce_*` act on that market.
+
+Indicators are separate inputs. Each configured indicator is identified by **asset + indicator kind + timeframe** (internally this is the runtime `IndexId`), so one script can read BTC, SOL, ETH, and other signals side by side.
+
 ### Context Variables
 
 These are available in **all three** scripts:
@@ -46,8 +52,8 @@ These are available in **all three** scripts:
 |----------|------|-------------|
 | `free_margin` | `f64` | Available margin in USDC |
 | `lev` | `i64` | Current leverage multiplier |
-| `last_price` | `Price` | Latest candle data |
-| `indicators` | `Map` | Indicator values (use `extract()` instead of accessing directly) |
+| `last_price` | `Price` | Latest candle data for the current evaluation tick |
+| `indicators` | `Map` | Configured indicator values across all strategy assets/timeframes (use `extract()` instead of accessing directly) |
 
 ### Constants
 
@@ -154,22 +160,33 @@ sl_only(3.0)          // SL only
 
 ## Indicators
 
-Add indicators to your strategy through the editor UI. Each indicator is bound to a timeframe and accessed from the `indicators` map.
+Add indicators to your strategy through the editor UI. Each indicator is now bound to an **asset** and a timeframe, then exposed to Rhai through the `indicators` map.
+
+### Asset-Specific Keys
+
+Indicators are asset-scoped in scripts. For example:
+
+```rust
+let sol_rsi = extract("SOL_rsi_12_1h");
+let btc_rsi = extract("BTC_rsi_12_1h");
+```
+
+This lets a strategy attached to one market use confirmation signals from other assets without duplicating the scripting model.
 
 ### Available Indicators
 
 | Indicator | Key format | Parameters |
 |-----------|-----------|------------|
-| RSI | `rsi_{periods}_{tf}` | periods |
-| EMA | `ema_{periods}_{tf}` | periods |
-| SMA | `sma_{periods}_{tf}` | periods |
-| ATR | `atr_{periods}_{tf}` | periods |
-| ADX | `adx_{periods}_{di_length}_{tf}` | periods, DI length |
-| Stochastic RSI | `stochRsi_{periods}_{k}_{d}_{tf}` | periods, K smoothing, D smoothing |
-| SMA on RSI | `smaRsi_{periods}_{smoothing}_{tf}` | periods, smoothing length |
-| EMA Cross | `emaCross_{short}_{long}_{tf}` | short period, long period |
-| Volume MA | `volMa_{periods}_{tf}` | periods |
-| Historical Volatility | `histVol_{periods}_{tf}` | periods |
+| RSI | `{asset}_rsi_{periods}_{tf}` | periods |
+| EMA | `{asset}_ema_{periods}_{tf}` | periods |
+| SMA | `{asset}_sma_{periods}_{tf}` | periods |
+| ATR | `{asset}_atr_{periods}_{tf}` | periods |
+| ADX | `{asset}_adx_{periods}_{di_length}_{tf}` | periods, DI length |
+| Stochastic RSI | `{asset}_stochRsi_{periods}_{k}_{d}_{tf}` | periods, K smoothing, D smoothing |
+| SMA on RSI | `{asset}_smaRsi_{periods}_{smoothing}_{tf}` | periods, smoothing length |
+| EMA Cross | `{asset}_emaCross_{short}_{long}_{tf}` | short period, long period |
+| Volume MA | `{asset}_volMa_{periods}_{tf}` | periods |
+| Historical Volatility | `{asset}_histVol_{periods}_{tf}` | periods |
 
 ### The `extract()` Macro
 
@@ -178,13 +195,13 @@ Use `extract()` to access an indicator. It handles the lookup, null guard, and v
 **Single-value indicators** (RSI, EMA, SMA, ATR, ADX, SMA on RSI, Volume MA, Historical Volatility):
 
 ```rust
-let rsi = extract("rsi_14_15m");
+let rsi = extract("BTC_rsi_14_15m");
 ```
 
 Expands to:
 
 ```rust
-let rsi = indicators["rsi_14_15m"];
+let rsi = indicators["BTC_rsi_14_15m"];
 if rsi == () { return; }
 let rsi_value = rsi.value.as_f64();     // the numeric value
 let rsi_on_close = rsi.on_close;        // true if from a closed candle
@@ -196,7 +213,7 @@ After `extract()`, use `rsi_value` directly in your logic.
 **Stochastic RSI:**
 
 ```rust
-let stoch = extract("stochRsi_14_0_0_15m");
+let stoch = extract("SOL_stochRsi_14_0_0_15m");
 ```
 
 Expands with:
@@ -211,7 +228,7 @@ let stoch_ts = ...
 **EMA Cross:**
 
 ```rust
-let ema = extract("emaCross_9_21_15m");
+let ema = extract("BTC_emaCross_9_21_15m");
 ```
 
 Expands with:
@@ -224,13 +241,13 @@ let ema_on_close = ...
 let ema_ts = ...
 ```
 
-The variable names are always `{your_name}_{field}`. Clicking an indicator badge in the editor inserts the `extract()` call for you.
+The variable names are always `{your_name}_{field}`. Clicking an indicator badge in the editor inserts the full asset-specific `extract()` call for you. If an asset symbol contains `:`, `extract()` normalizes it to `_` during lookup.
 
 ---
 
 ## Price Object
 
-`last_price` is the latest candle:
+`last_price` is the candle for the current evaluation tick:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -304,13 +321,15 @@ State resets when the strategy is reloaded or the bot restarts.
 
 ## Example Strategies
 
-### Simple RSI Mean Reversion
+All examples below use explicit asset-prefixed indicator keys.
 
-**Indicators:** RSI(14) on 15m
+### BTC RSI Mean Reversion
+
+**Indicators:** BTC RSI(14) on 15m
 
 **on_idle:**
 ```rust
-let rsi = extract("rsi_14_15m");
+let rsi = extract("BTC_rsi_14_15m");
 
 if rsi_value < 30.0 {
     open_market(LONG, margin_pct(50.0), triggers(3.0, 2.0))
@@ -321,9 +340,11 @@ if rsi_value < 30.0 {
 
 **on_open / on_busy:** empty (TP/SL triggers handle the exit)
 
-### EMA Cross + RSI with Armed Entry
+### Cross-Asset Armed Entry
 
-**Indicators:** RSI(12) on 1h, EMA Cross(9, 21) on 15m
+Attach this strategy to **SOL**. It uses **BTC** as a higher-timeframe filter and **SOL** for local trend / exit logic.
+
+**Indicators:** BTC RSI(12) on 1h, SOL EMA Cross(9, 21) on 15m, SOL RSI(14) on 15m
 
 **State declarations:**
 ```
@@ -332,42 +353,42 @@ prev_uptrend = null
 
 **on_idle:**
 ```rust
-let rsi_1h = extract("rsi_12_1h");
-let ema = extract("emaCross_9_21_15m");
+let btc_rsi_1h = extract("BTC_rsi_12_1h");
+let sol_ema = extract("SOL_emaCross_9_21_15m");
 
 if is_armed > 0 {
-    if !prev_uptrend && ema_trend {
-        prev_uptrend = ema_trend;
+    if !prev_uptrend && sol_ema_trend {
+        prev_uptrend = sol_ema_trend;
         return open_market(LONG, margin_pct(80.0), sl_only(28.0));
     }
-    if prev_uptrend && !ema_trend {
-        prev_uptrend = ema_trend;
+    if prev_uptrend && !sol_ema_trend {
+        prev_uptrend = sol_ema_trend;
         return open_market(SHORT, margin_pct(80.0), sl_only(28.0));
     }
-} else if rsi_1h_value < 60.0 && !ema_trend {
-    prev_uptrend = ema_trend;
+} else if btc_rsi_1h_value < 60.0 && !sol_ema_trend {
+    prev_uptrend = sol_ema_trend;
     return arm(timedelta(MIN15, 1));
-} else if rsi_1h_value > 70.0 && ema_trend {
-    prev_uptrend = ema_trend;
+} else if btc_rsi_1h_value > 70.0 && sol_ema_trend {
+    prev_uptrend = sol_ema_trend;
     return arm(timedelta(MIN15, 1));
 }
 
-prev_uptrend = ema_trend;
+prev_uptrend = sol_ema_trend;
 ```
 
 **on_open:**
 ```rust
-let rsi_1h = extract("rsi_12_1h");
-let rsi_15m = extract("rsi_14_15m");
+let btc_rsi_1h = extract("BTC_rsi_12_1h");
+let sol_rsi_15m = extract("SOL_rsi_14_15m");
 
 let elapsed = last_price.open_time - open_position.open_time;
 
 if open_position.side == LONG {
-    if rsi_15m_value >= 68.0 || (elapsed > timedelta(MIN15, 2) && rsi_1h_value < 33.0) {
+    if sol_rsi_15m_value >= 68.0 || (elapsed > timedelta(MIN15, 2) && btc_rsi_1h_value < 33.0) {
         return flatten_limit(last_price.close * 1.003);
     }
 } else {
-    if rsi_15m_value <= 38.0 || (elapsed > timedelta(MIN15, 2) && rsi_1h_value > 58.0) {
+    if sol_rsi_15m_value <= 38.0 || (elapsed > timedelta(MIN15, 2) && btc_rsi_1h_value > 58.0) {
         return flatten_limit(last_price.close * 0.997);
     }
 }
@@ -377,11 +398,11 @@ if open_position.side == LONG {
 
 ### Limit Order with Timeout
 
-**Indicators:** RSI(14) on 5m
+**Indicators:** BTC RSI(14) on 5m
 
 **on_idle:**
 ```rust
-let rsi = extract("rsi_14_5m");
+let rsi = extract("BTC_rsi_14_5m");
 
 if rsi_value < 25.0 {
     // place a limit buy 0.1% below current price
@@ -399,7 +420,8 @@ if rsi_value < 25.0 {
 
 Test your strategies against historical data before deploying. Configure:
 
-- **Asset** -- any Hyperliquid-listed perpetual
+- **Strategy** -- selected Rhai scripts, state declarations, and indicator set
+- **Traded asset** -- the market being simulated
 - **Time range** -- start and end timestamps
 - **Resolution** -- candle timeframe for simulation
 - **Margin & Leverage** -- initial capital and leverage
@@ -473,9 +495,10 @@ reduce_limit(size, px, timeout)
 arm(timedelta)      disarm()               abort()
 
 -- Indicators --
-extract("key")  →  {name}_value, {name}_on_close, {name}_ts
-                   emaCross: {name}_short, {name}_long, {name}_trend
-                   stochRsi: {name}_k, {name}_d
+Key format: {ASSET}_{indicator}_{params}_{tf}
+extract("BTC_rsi_14_15m")  →  {name}_value, {name}_on_close, {name}_ts
+                              emaCross: {name}_short, {name}_long, {name}_trend
+                              stochRsi: {name}_k, {name}_d
 
 -- State --
 Declare in State Variables box:   count = 0 | flag = false | x = null

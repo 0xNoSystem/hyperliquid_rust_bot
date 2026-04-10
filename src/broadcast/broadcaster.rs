@@ -234,6 +234,8 @@ impl Broadcaster {
         }
 
         let mut asset_context_refresh = interval(Duration::from_secs(ASSET_CONTEXT_REFRESH_SECS));
+        // Consume the immediate first tick so the interval starts its 12h countdown.
+        // Without this, the first select! iteration would double-refresh.
         asset_context_refresh.tick().await;
 
         loop {
