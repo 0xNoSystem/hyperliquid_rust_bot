@@ -190,22 +190,22 @@ fn expand_extract(src: &str) -> String {
 
         if key_matches_indicator_prefix(&key, "stochRsi_") {
             out.push_str(&format!(
-                "let {var}_k = {var}.value.stoch_k();\n\
-                 let {var}_d = {var}.value.stoch_d();\n\
+                "let {var}_k = stoch_k({var}.value);\n\
+                 let {var}_d = stoch_d({var}.value);\n\
                  let {var}_on_close = {var}.on_close;\n\
                  let {var}_ts = {var}.ts;\n"
             ));
         } else if key_matches_indicator_prefix(&key, "emaCross_") {
             out.push_str(&format!(
-                "let {var}_short = {var}.value.ema_short();\n\
-                 let {var}_long = {var}.value.ema_long();\n\
-                 let {var}_trend = {var}.value.ema_trend();\n\
+                "let {var}_short = ema_short({var}.value);\n\
+                 let {var}_long = ema_long({var}.value);\n\
+                 let {var}_trend = ema_trend({var}.value);\n\
                  let {var}_on_close = {var}.on_close;\n\
                  let {var}_ts = {var}.ts;\n"
             ));
         } else {
             out.push_str(&format!(
-                "let {var}_value = {var}.value.as_f64();\n\
+                "let {var}_value = as_f64({var}.value);\n\
                  let {var}_on_close = {var}.on_close;\n\
                  let {var}_ts = {var}.ts;\n"
             ));
@@ -473,9 +473,9 @@ mod tests {
         let expanded = expand_extract(r#"let ema = extract("BTC_emaCross_9_21_15m");"#);
 
         assert!(expanded.contains(r#"indicators["BTC_emaCross_9_21_15m"]"#));
-        assert!(expanded.contains("let ema_short = ema.value.ema_short();"));
-        assert!(expanded.contains("let ema_long = ema.value.ema_long();"));
-        assert!(expanded.contains("let ema_trend = ema.value.ema_trend();"));
+        assert!(expanded.contains("let ema_short = ema_short(ema.value);"));
+        assert!(expanded.contains("let ema_long = ema_long(ema.value);"));
+        assert!(expanded.contains("let ema_trend = ema_trend(ema.value);"));
         assert!(!expanded.contains("let ema_value ="));
     }
 
@@ -484,8 +484,8 @@ mod tests {
         let expanded = expand_extract(r#"let stoch = extract("SOL_stochRsi_14_3_3_1h");"#);
 
         assert!(expanded.contains(r#"indicators["SOL_stochRsi_14_3_3_1h"]"#));
-        assert!(expanded.contains("let stoch_k = stoch.value.stoch_k();"));
-        assert!(expanded.contains("let stoch_d = stoch.value.stoch_d();"));
+        assert!(expanded.contains("let stoch_k = stoch_k(stoch.value);"));
+        assert!(expanded.contains("let stoch_d = stoch_d(stoch.value);"));
         assert!(!expanded.contains("let stoch_value ="));
     }
 
@@ -494,7 +494,7 @@ mod tests {
         let expanded = expand_extract(r#"let rsi = extract("ETH_rsi_14_15m");"#);
 
         assert!(expanded.contains(r#"indicators["ETH_rsi_14_15m"]"#));
-        assert!(expanded.contains("let rsi_value = rsi.value.as_f64();"));
+        assert!(expanded.contains("let rsi_value = as_f64(rsi.value);"));
         assert!(!expanded.contains("let rsi_short ="));
         assert!(!expanded.contains("let rsi_k ="));
     }

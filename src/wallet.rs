@@ -1,18 +1,19 @@
-use crate::helper::address;
+use alloy::primitives::Address;
 use alloy::signers::local::PrivateKeySigner;
 use hyperliquid_rust_sdk::{AssetPosition, BaseUrl, Error, InfoClient, UserFillsResponse};
 use std::collections::HashSet;
+
 pub struct Wallet {
     info_client: InfoClient,
     pub wallet: PrivateKeySigner,
-    pub pubkey: String,
+    pub pubkey: Address,
     pub url: BaseUrl,
 }
 
 impl Wallet {
     pub async fn new(
         url: BaseUrl,
-        pubkey: String,
+        pubkey: Address,
         wallet: PrivateKeySigner,
     ) -> Result<Self, Error> {
         let info_client = InfoClient::new(None, Some(url)).await?;
@@ -25,8 +26,7 @@ impl Wallet {
     }
 
     pub async fn get_user_fees(&self) -> Result<(f64, f64), Error> {
-        let user = address(self.pubkey.as_str());
-        let user_fees = self.info_client.user_fees(user).await?;
+        let user_fees = self.info_client.user_fees(self.pubkey).await?;
         let add_fee = user_fees.user_add_rate.parse::<f64>().map_err(|_| {
             Error::GenericParse(format!(
                 "Failed to parse user_add_rate: {}",
@@ -45,19 +45,15 @@ impl Wallet {
     }
 
     pub async fn user_fills(&self) -> Result<Vec<UserFillsResponse>, Error> {
-        let user = address(self.pubkey.as_str());
-
-        return self.info_client.user_fills(user).await;
+        return self.info_client.user_fills(self.pubkey).await;
     }
 
     pub async fn get_user_margin(
         &self,
         bot_assets: &mut std::collections::hash_map::Keys<'_, String, f64>,
     ) -> Result<(f64, Vec<AssetPosition>), Error> {
-        let user = address(self.pubkey.as_str());
-
-        let state = self.info_client.user_state(user).await?;
-        let open_orders = self.info_client.frontend_open_orders(user).await?;
+        let state = self.info_client.user_state(self.pubkey).await?;
+        let open_orders = self.info_client.frontend_open_orders(self.pubkey).await?;
 
         let res = state
             .margin_summary
@@ -81,7 +77,7 @@ impl Wallet {
                 if !assets.contains(&o.coin) {
                     let lev = self
                         .info_client
-                        .active_asset_data(user, o.coin.clone())
+                        .active_asset_data(self.pubkey, o.coin.clone())
                         .await
                         .ok()?
                         .leverage

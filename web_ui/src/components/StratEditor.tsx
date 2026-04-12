@@ -176,10 +176,13 @@ export default function StratEditor() {
     const [newTf, setNewTf] = useState<TimeframeKey>("15m");
     const assetOptions = useMemo(
         () =>
-            universe.map((asset) => ({
-                value: asset.name,
-                label: asset.name,
-            })),
+            [
+                { value: "self", label: "self" },
+                ...universe.map((asset) => ({
+                    value: asset.name,
+                    label: asset.name,
+                })),
+            ],
         [universe]
     );
 

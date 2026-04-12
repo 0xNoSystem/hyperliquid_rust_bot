@@ -16,7 +16,7 @@ import {
     zoomPriceRange,
     handleWheelZoom,
 } from "./utils";
-import { LineContainerCtx } from "./LineChartsContainer";
+import { LineContainerCtx } from "./LineContainerCtx";
 
 export type { LineSeries, LinePoint };
 

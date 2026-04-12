@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 use tokio::sync::{
+    mpsc::error::TrySendError,
     mpsc::{Receiver, Sender},
     oneshot,
 };
@@ -93,6 +94,23 @@ pub struct CandleCache {
 }
 
 impl CandleCache {
+    fn cached_slice(history: &CandleHistory, count: CandleCount) -> Option<Vec<Price>> {
+        let need = count as usize;
+        if history.len() < need {
+            return None;
+        }
+
+        Some(
+            history
+                .iter()
+                .rev()
+                .take(need)
+                .rev()
+                .copied()
+                .collect::<Vec<_>>(),
+        )
+    }
+
     pub async fn new(url: BaseUrl) -> Result<(Self, Sender<CacheCmdIn>), Error> {
         let info_client = Arc::new(InfoClient::new(None, Some(url)).await?);
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(CACHE_CHANNEL_SIZE);
@@ -111,14 +129,23 @@ impl CandleCache {
     fn try_cache(&self, request: &mut CandleSnapshotRequest) -> TimeFrameData {
         let mut cached: TimeFrameData = HashMap::default();
         if let Some(tf_map) = self.candles.get(&request.asset) {
+            let asset = Arc::clone(&request.asset);
             request.request.retain(|tf, count| {
-                if let Some(history) = tf_map.get(tf)
-                    && !history.is_empty()
-                {
-                    let take = (*count as usize).min(history.len());
-                    let data: Vec<Price> = history.iter().rev().take(take).rev().copied().collect();
-                    cached.insert(*tf, data);
-                    return false;
+                if let Some(history) = tf_map.get(tf) {
+                    if let Some(data) = Self::cached_slice(history, *count) {
+                        cached.insert(*tf, data);
+                        return false;
+                    }
+
+                    if !history.is_empty() {
+                        log::info!(
+                            "candle cache partial for {} {:?}: have {}, need {}; fetching backfill",
+                            asset,
+                            tf,
+                            history.len(),
+                            count
+                        );
+                    }
                 }
                 true
             });
@@ -137,8 +164,29 @@ impl CandleCache {
         let cmd_tx = self.cmd_tx.clone();
         tokio::spawn(async move {
             let mut rx = rx;
+            let mut queue_full = false;
             while let Ok(data) = rx.recv().await {
-                let _ = cmd_tx.try_send(CacheCmdIn::Price((Arc::clone(&asset), data)));
+                match cmd_tx.try_send(CacheCmdIn::Price((Arc::clone(&asset), data))) {
+                    Ok(()) => {
+                        if queue_full {
+                            log::info!("candle cache queue recovered for {}", &asset);
+                            queue_full = false;
+                        }
+                    }
+                    Err(TrySendError::Full(_)) => {
+                        if !queue_full {
+                            log::warn!(
+                                "candle cache queue full for {}; dropping live candle updates until it drains",
+                                &asset
+                            );
+                            queue_full = true;
+                        }
+                    }
+                    Err(TrySendError::Closed(_)) => {
+                        log::warn!("candle cache queue closed for {}", &asset);
+                        break;
+                    }
+                }
             }
         });
     }
@@ -279,5 +327,45 @@ impl CandleCache {
                 CacheCmdIn::Backfill { asset, data } => self.handle_backfill(asset, data),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CandleCache;
+    use crate::{CandleHistory, Price};
+
+    fn price(close_time: u64) -> Price {
+        Price {
+            open: close_time as f64,
+            high: close_time as f64,
+            low: close_time as f64,
+            close: close_time as f64,
+            open_time: close_time.saturating_sub(60_000),
+            close_time,
+            vlm: 1.0,
+        }
+    }
+
+    #[test]
+    fn cached_slice_requires_full_requested_count() {
+        let history: CandleHistory = Box::new([price(1_000), price(2_000)].into_iter().collect());
+
+        assert!(CandleCache::cached_slice(&history, 3).is_none());
+    }
+
+    #[test]
+    fn cached_slice_returns_latest_requested_candles() {
+        let history: CandleHistory = Box::new(
+            [price(1_000), price(2_000), price(3_000), price(4_000)]
+                .into_iter()
+                .collect(),
+        );
+
+        let cached = CandleCache::cached_slice(&history, 2).expect("cache hit");
+
+        assert_eq!(cached.len(), 2);
+        assert_eq!(cached[0].close_time, 3_000);
+        assert_eq!(cached[1].close_time, 4_000);
     }
 }

@@ -82,9 +82,15 @@ export interface MarketInfo {
     strategyName: string;
     isPaused: boolean;
     indicators: indicatorData[];
+    log: string[];
     trades: TradeInfo[];
     position: OpenPositionLocal | null;
     engineState: EngineView;
+}
+
+export interface ScriptLog {
+    asset: string;
+    msg: string;
 }
 
 export interface indicatorData {
@@ -419,6 +425,7 @@ export type Message =
     | { confirmMarket: BackendMarketInfo }
     | { cancelMarket: string }
     | { marketStream: MarketStream }
+    | { strategyLog: ScriptLog }
     | { updateTotalMargin: number }
     | { updateMarketMargin: assetMargin }
     | { marketInfoEdit: [string, editMarketInfo] }

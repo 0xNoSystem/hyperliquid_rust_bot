@@ -4,15 +4,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use log::warn;
 use rhai::{Dynamic, Engine, Map, Scope};
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 
 use crate::backend::scripting::CompiledStrategy;
 use crate::signal::ValuesMap;
-use crate::{IndexId, OpenPosInfo, Price, Side, TimeDelta, TimeFrame, timedelta};
+use crate::{IndexId, IndicatorKind, OpenPosInfo, Price, Side, TimeDelta, TimeFrame, timedelta};
 
+use tokio::sync::mpsc::Sender;
 const MARKET_ORDER_TIMEOUT: TimeDelta = timedelta!(TimeFrame::Min1, 1);
 
 #[derive(Debug, Clone)]
@@ -42,44 +42,71 @@ pub(crate) fn check_asset_fix(name: &str) -> String {
     name.replace(':', "_")
 }
 
-fn build_indicator_keys(indicators: &[IndexId]) -> IndicatorKeyMap {
+fn indicator_map_key(asset: &str, kind: IndicatorKind, tf: TimeFrame) -> String {
+    format!("{}_{}_{}", check_asset_fix(asset), kind.key(), tf.as_str())
+}
+
+fn resolved_indicator_asset(asset: &Arc<str>, market_asset: &str) -> Arc<str> {
+    if asset.as_ref() == "self" {
+        Arc::from(market_asset)
+    } else {
+        Arc::clone(asset)
+    }
+}
+
+pub(crate) fn replace_self_with_asset(market_asset: &str, indicators: &mut [IndexId]) {
+    let market_asset: Arc<str> = Arc::from(market_asset);
+    for (asset, _, _) in indicators.iter_mut() {
+        if asset.as_ref() == "self" {
+            *asset = Arc::clone(&market_asset);
+        }
+    }
+}
+
+fn build_indicator_keys(indicators: &[IndexId], market_asset: Arc<str>) -> IndicatorKeyMap {
     indicators
         .iter()
         .map(|(asset, kind, tf)| {
-            let key = format!(
-                "{}_{}_{}",
-                check_asset_fix(asset.as_ref()),
-                kind.key(),
-                tf.as_str()
-            );
-            ((Arc::clone(asset), *kind, *tf), key)
+            let asset = resolved_indicator_asset(asset, market_asset.as_ref());
+            let key = indicator_map_key(asset.as_ref(), *kind, *tf);
+            ((Arc::clone(&asset), *kind, *tf), key)
         })
         .collect()
 }
 
 pub struct Strategy {
     engine: Arc<Engine>,
+    log_tx: Option<Sender<String>>,
     compiled: CompiledStrategy,
     indicators: Vec<IndexId>,
     indicator_keys: IndicatorKeyMap,
     scope: Scope<'static>,
     scope_base: usize,
+    asset: Arc<str>,
 }
 
 impl Strategy {
-    pub fn new(engine: Arc<Engine>, compiled: CompiledStrategy, indicators: Vec<IndexId>) -> Self {
-        let indicator_keys = build_indicator_keys(&indicators);
+    pub fn new(
+        engine: Arc<Engine>,
+        compiled: CompiledStrategy,
+        indicators: Vec<IndexId>,
+        log_tx: Option<Sender<String>>,
+        asset: Arc<str>,
+    ) -> Self {
+        let indicator_keys = build_indicator_keys(&indicators, asset.clone());
         let mut scope = Scope::new();
         push_scope_constants(&mut scope);
         scope.push("state", Map::new());
         let scope_base = scope.len();
         Self {
             engine,
+            log_tx,
             compiled,
             indicators,
             indicator_keys,
             scope,
             scope_base,
+            asset,
         }
     }
 
@@ -125,8 +152,18 @@ impl Strategy {
     fn indicators_to_map(&self, values: &ValuesMap) -> Map {
         let mut map = Map::new();
         for ((asset, kind, tf), timed_value) in values.iter() {
-            if let Some(key) = self.indicator_keys.get(&(Arc::clone(asset), *kind, *tf)) {
+            let resolved_asset = resolved_indicator_asset(asset, self.asset.as_ref());
+
+            if let Some(key) = self
+                .indicator_keys
+                .get(&(Arc::clone(&resolved_asset), *kind, *tf))
+            {
                 map.insert(key.as_str().into(), Dynamic::from(*timed_value));
+            }
+
+            if resolved_asset.as_ref() == self.asset.as_ref() {
+                let self_key = indicator_map_key("self", *kind, *tf);
+                map.insert(self_key.into(), Dynamic::from(*timed_value));
             }
         }
         map
@@ -153,7 +190,12 @@ fn push_scope_constants(scope: &mut Scope) {
     scope.push_constant("CANCEL", OnTimeout::Cancel);
 }
 
-fn eval_ast(engine: &Engine, scope: &mut Scope, ast: &rhai::AST) -> Option<Intent> {
+fn eval_ast(
+    engine: &Engine,
+    scope: &mut Scope,
+    ast: &rhai::AST,
+    log_tx: &Option<Sender<String>>,
+) -> Option<Intent> {
     match engine.eval_ast_with_scope::<Dynamic>(scope, ast) {
         Ok(result) => {
             if result.is_unit() {
@@ -163,7 +205,9 @@ fn eval_ast(engine: &Engine, scope: &mut Scope, ast: &rhai::AST) -> Option<Inten
             }
         }
         Err(e) => {
-            warn!("Rhai eval error: {}", e);
+            if let Some(logger) = log_tx {
+                let _ = logger.try_send(e.to_string());
+            }
             None
         }
     }
@@ -174,7 +218,12 @@ impl Strat for Strategy {
         self.push_context(&ctx);
         self.scope
             .push("is_armed", is_armed.map(|t| t as i64).unwrap_or(-1_i64));
-        let result = eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_idle);
+        let result = eval_ast(
+            &self.engine,
+            &mut self.scope,
+            &self.compiled.ast_on_idle,
+            &self.log_tx,
+        );
         self.sync_state_back();
         result
     }
@@ -182,7 +231,12 @@ impl Strat for Strategy {
     fn on_open(&mut self, ctx: StratContext, open_pos: &OpenPosInfo) -> Option<Intent> {
         self.push_context(&ctx);
         self.scope.push("open_position", *open_pos);
-        let result = eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_open);
+        let result = eval_ast(
+            &self.engine,
+            &mut self.scope,
+            &self.compiled.ast_on_open,
+            &self.log_tx,
+        );
         self.sync_state_back();
         result
     }
@@ -190,7 +244,12 @@ impl Strat for Strategy {
     fn on_busy(&mut self, ctx: StratContext, busy_reason: BusyType) -> Option<Intent> {
         self.push_context(&ctx);
         self.scope.push("busy_reason", busy_reason);
-        let result = eval_ast(&self.engine, &mut self.scope, &self.compiled.ast_on_busy);
+        let result = eval_ast(
+            &self.engine,
+            &mut self.scope,
+            &self.compiled.ast_on_busy,
+            &self.log_tx,
+        );
         self.sync_state_back();
         result
     }
@@ -224,6 +283,68 @@ pub enum SizeSpec {
     MarginAmount(f64),
     MarginPct(f64),
     RawSize(f64),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{Strategy, replace_self_with_asset};
+    use crate::backend::scripting::{CompiledStrategy, create_engine};
+    use crate::{IndicatorKind, TimeFrame, TimedValue, Value};
+
+    #[test]
+    fn replace_self_with_asset_normalizes_indicator_ids() {
+        let mut indicators = vec![
+            (
+                Arc::<str>::from("self"),
+                IndicatorKind::Rsi(14),
+                TimeFrame::Min15,
+            ),
+            (
+                Arc::<str>::from("SOL"),
+                IndicatorKind::Ema(9),
+                TimeFrame::Hour1,
+            ),
+        ];
+
+        replace_self_with_asset("BTC", &mut indicators);
+
+        assert_eq!(indicators[0].0.as_ref(), "BTC");
+        assert_eq!(indicators[1].0.as_ref(), "SOL");
+    }
+
+    #[test]
+    fn indicators_to_map_exposes_self_alias_for_market_asset_values() {
+        let engine = Arc::new(create_engine());
+        let compiled = CompiledStrategy::noop(engine.as_ref());
+        let asset = Arc::<str>::from("BTC");
+        let kind = IndicatorKind::Rsi(14);
+        let tf = TimeFrame::Min15;
+
+        let strategy = Strategy::new(
+            engine,
+            compiled,
+            vec![(Arc::clone(&asset), kind, tf)],
+            None,
+            Arc::clone(&asset),
+        );
+
+        let mut values = crate::signal::ValuesMap::default();
+        values.insert(
+            (Arc::clone(&asset), kind, tf),
+            TimedValue {
+                value: Value::RsiValue(42.0),
+                on_close: true,
+                ts: 123,
+            },
+        );
+
+        let map = strategy.indicators_to_map(&values);
+
+        assert!(map.contains_key("BTC_rsi_14_15m"));
+        assert!(map.contains_key("self_rsi_14_15m"));
+    }
 }
 
 impl SizeSpec {

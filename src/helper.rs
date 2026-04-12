@@ -101,8 +101,10 @@ pub async fn load_candles(
 }
 
 #[inline]
-pub fn address(address: &str) -> Address {
-    address.parse().unwrap()
+pub fn address(address: &str) -> Result<Address, Error> {
+    address
+        .parse()
+        .map_err(|e| Error::Wallet(format!("Failed to parse user address {}", e)))
 }
 
 pub async fn get_asset(info_client: &InfoClient, token: &str) -> Result<AssetMeta, Error> {

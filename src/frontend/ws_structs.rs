@@ -110,7 +110,15 @@ pub enum UpdateFrontend {
     BacktestResult(Box<BacktestResultUpdate>),
     LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),
     Status(BackendStatus),
+    StrategyLog(ScriptLog),
     NeedsApiKey(bool),
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptLog {
+    pub asset: Arc<str>,
+    pub msg: String,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]

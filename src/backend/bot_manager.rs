@@ -75,7 +75,9 @@ impl BotManager {
             .map_err(|e| crate::Error::Custom(format!("invalid private key: {}", e)))?;
 
         let url = BaseUrl::Mainnet;
-        let wallet = Wallet::new(url, pubkey.to_string(), signer).await?;
+
+        let user_address = crate::helper::address(pubkey)?;
+        let wallet = Wallet::new(url, user_address, signer).await?;
 
         // 4. Create Bot
         let (bot, cmd_tx) =

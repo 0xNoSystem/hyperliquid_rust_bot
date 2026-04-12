@@ -7,13 +7,8 @@ import React, {
     useCallback,
 } from "react";
 import type { ReactNode } from "react";
+import { LineContainerCtx } from "./LineContainerCtx";
 import { timeToX, xToTime, formatUTC, computeTimePan } from "./utils";
-
-// ── Context — lets LineChart know the mouse Y without prop drilling ───────
-
-export const LineContainerCtx = React.createContext<{
-    panelMouseY: number | null;
-}>({ panelMouseY: null });
 
 // ── Time axis tick helpers (ported from TimeScale) ─────────────────────────
 
@@ -207,7 +202,6 @@ const LineChartsContainer: React.FC<LineChartsContainerProps> = ({
 
     const [mouseX, setMouseX] = useState<number | null>(null);
     const [mouseY, setMouseY] = useState<number | null>(null);
-    const [_mouseInside, setMouseInside] = useState(false);
     const [mouseOnChart, setMouseOnChart] = useState(false);
 
     const chartWidth = Math.max(0, totalWidth - VALUE_SCALE_WIDTH);
@@ -568,9 +562,7 @@ const LineChartsContainer: React.FC<LineChartsContainerProps> = ({
             onWheel={onWheel}
             onMouseDown={onMouseDown}
             onMouseMove={handleMouseMove}
-            onMouseEnter={() => setMouseInside(true)}
             onMouseLeave={() => {
-                setMouseInside(false);
                 setMouseOnChart(false);
                 setMouseX(null);
                 setMouseY(null);

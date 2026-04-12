@@ -438,7 +438,6 @@ impl Bot {
             meta,
             margin,
             lev,
-            rhai_engine,
             compiled,
             strat_indicators,
             strategy_name,
@@ -501,15 +500,13 @@ impl Bot {
         if let Some(tx) = self.markets.remove(&asset) {
             let tx = tx.clone();
             let cmd = MarketCommand::Close;
-            let close = tokio::spawn(async move {
-                if let Err(e) = tx.send(cmd).await {
+            let close = match tx.send(cmd).await {
+                Ok(()) => true,
+                Err(e) => {
                     log::warn!("Failed to send Close command: {:?}", e);
-                    return false;
+                    false
                 }
-                true
-            })
-            .await
-            .unwrap();
+            };
 
             if close {
                 let mut book = margin_book.lock().await;
@@ -573,7 +570,9 @@ impl Bot {
         self.rhai_engine = Some(rhai_engine);
         self.strategy_cache = Some(strategy_cache);
 
+        //SAFE
         let mut update_rv = self.update_rv.take().unwrap();
+        //SAFE
         let mut price_router_rv = self.price_router_rv.take().unwrap();
 
         let session: Session = Arc::new(Mutex::new(HashMap::default()));
@@ -754,7 +753,7 @@ impl Bot {
             .info_client
             .subscribe(
                 Subscription::UserEvents {
-                    user: address(&self.wallet.pubkey),
+                    user: self.wallet.pubkey,
                 },
                 user_tx,
             )
@@ -1098,7 +1097,7 @@ impl Bot {
                         ReloadWallet(new_signer) => {
                             log::info!("[bot] reloading wallet for all {} markets", self.markets.len());
                             self.wallet = Arc::new(
-                                Wallet::new(BaseUrl::Mainnet, self.wallet.pubkey.clone(), new_signer.clone()).await
+                                Wallet::new(BaseUrl::Mainnet, self.wallet.pubkey, new_signer.clone()).await
                                     .expect("Wallet::new failed during hot-reload"),
                             );
                             for (asset, tx) in &self.markets {

@@ -2,7 +2,7 @@
 // Alternative “Trading Terminal” layout — keyboard/terminal vibes, split panes, neon accents.
 // Keeps the same backend interactions and batching behavior.
 import { KwantChart } from "kwant";
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { RefreshCw } from "lucide-react";
@@ -162,6 +162,7 @@ export default function MarketDetail() {
         null
     );
     const [confirmForceClose, setConfirmForceClose] = useState(false);
+    const logConsoleRef = useRef<HTMLDivElement | null>(null);
     const assetOptions = useMemo(
         () =>
             universe.map((asset) => ({
@@ -176,6 +177,12 @@ export default function MarketDetail() {
             setPendingAsset((current) => current || market.asset);
         }
     }, [market?.asset]);
+
+    useEffect(() => {
+        const consoleEl = logConsoleRef.current;
+        if (!consoleEl) return;
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+    }, [market?.asset, market?.log]);
 
     const handleForceClose = async () => {
         if (!market) return;
@@ -314,6 +321,7 @@ export default function MarketDetail() {
 
     const marketLev = market.lev ?? 0;
     const marketMargin = market.margin ?? 0;
+    const marketLog = market.log ?? [];
     const currentStrategyName = market.strategyName;
     const pendingStrat = strategies.find((s) => s.id === pendingStrategyId);
     const VIEW_ONLY = "__view_only__";
@@ -692,6 +700,43 @@ export default function MarketDetail() {
                                 </a>{" "}
                                 (PERPS) is likely different
                             </span>
+                        </div>
+                        <div className="px-4 pb-3 pt-4">
+                            <div className="mx-auto w-full max-w-3xl">
+                                <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-wide text-app-text/60">
+                                    <span>Strategy Log</span>
+                                    <span>{marketLog.length} entries</span>
+                                </div>
+                                <div className="rounded-xl border border-line-subtle bg-app-surface-2/90 px-4 py-3 backdrop-blur">
+                                    <div
+                                        ref={logConsoleRef}
+                                        className="max-h-40 overflow-y-auto"
+                                        role="log"
+                                        aria-live="polite"
+                                        aria-relevant="additions text"
+                                    >
+                                        {marketLog.length === 0 ? (
+                                            <div className="py-3 text-[12px] text-app-text/40">
+                                                Waiting for strategy log output...
+                                            </div>
+                                        ) : (
+                                            marketLog.map((entry, index) => (
+                                                <div
+                                                    key={`${index}-${entry}`}
+                                                    className="flex items-start gap-3 border-b border-line-subtle/10 py-1.5 text-[12px] text-app-text/80 last:border-b-0"
+                                                >
+                                                    <span className="text-accent-brand-soft select-none">
+                                                        {">"}
+                                                    </span>
+                                                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+                                                        {entry}
+                                                    </span>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div
                             className={`${Chart} kwant-theme relative min-h-[60vh]`}

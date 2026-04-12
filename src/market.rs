@@ -3,19 +3,20 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use rhai::Engine;
-
 use alloy::signers::local::PrivateKeySigner;
 use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, Error, ExchangeClient, ExchangeResponseStatus};
 
-use crate::backend::scripting::CompiledStrategy;
+use crate::backend::scripting::{CompiledStrategy, create_engine};
 use crate::bot::SyncMarketFeeds;
 use crate::broadcast::{CacheCmdIn, CandleCount, CandleSnapshotRequest, PriceAsset, PriceData};
 use crate::signal::{
     AssetTimeFrameData, EditType, EngineCommand, EngineView, Entry, ExecParam, ExecParams, IndexId,
     SignalEngine, TimeFrameData,
 };
-use crate::{AssetMargin, BotEvent, EditMarketInfo, IndicatorData, MarketStream, UpdateFrontend};
+use crate::strategy::replace_self_with_asset;
+use crate::{
+    AssetMargin, BotEvent, EditMarketInfo, IndicatorData, MarketStream, ScriptLog, UpdateFrontend,
+};
 use crate::{ExecCommand, ExecControl, ExecEvent, Executor};
 use crate::{MarketInfo, Wallet};
 use crate::{OpenPositionLocal, TimeFrame, TradeHistory, TradeInfo};
@@ -174,9 +175,8 @@ impl Market {
         asset: AssetMeta,
         margin: f64,
         lev: usize,
-        rhai_engine: Arc<Engine>,
         compiled: CompiledStrategy,
-        strat_indicators: Vec<IndexId>,
+        mut strat_indicators: Vec<IndexId>,
         strategy_name: String,
         config: Option<Vec<IndexId>>,
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
@@ -185,10 +185,17 @@ impl Market {
         let manual_indicators: HashSet<IndexId> =
             config.clone().unwrap_or_default().into_iter().collect();
 
-        //setup channels
         let (market_tx, market_rv) = channel::<MarketCommand>(7);
         let (exec_tx, exec_rv) = bounded::<ExecCommand>(3);
         let (engine_tx, engine_rv) = unbounded_channel::<EngineCommand>();
+        let (log_tx, log_rv) = channel::<String>(30);
+
+        let mut rhai_engine = create_engine();
+
+        let tx = log_tx.clone();
+        rhai_engine.on_print(move |text| {
+            let _ = tx.try_send(text.to_string());
+        });
 
         let senders = MarketSenders {
             bot_tx,
@@ -200,11 +207,15 @@ impl Market {
         let receivers = MarketReceivers {
             price_rv: px_receiver,
             market_rv,
+            log_rv,
         };
 
         let lev = lev.min(asset.max_leverage);
         let exec_params = ExecParams::new(margin, lev);
 
+        replace_self_with_asset(asset.name.as_str(), &mut strat_indicators);
+
+        let rhai_engine = Arc::new(rhai_engine);
         Ok((
             Market {
                 exchange_client,
@@ -216,12 +227,14 @@ impl Market {
                 manual_indicators,
                 asset: asset.clone(),
                 signal_engine: SignalEngine::new(
+                    asset.name.clone().into(),
                     config,
                     rhai_engine,
                     compiled,
                     strat_indicators,
                     engine_rv,
                     Some(market_tx.clone()),
+                    log_tx,
                     exec_tx,
                     exec_params,
                 )
@@ -421,8 +434,23 @@ impl Market {
                 }
                 let _ = engine_price_tx.send(EngineCommand::UpdatePrice((tick_asset, data)));
             }
-            let _ = bot_price_update.send(MarketUpdate::FeedDied((*asset_name).to_string()));
+            //let _ = bot_price_update.send(MarketUpdate::FeedDied((*asset_name).to_string()));
             Ok(())
+        });
+
+        //Relay Stategy logs to user
+        let log_sender = self.senders.bot_tx.clone();
+        let mut log_rv = self.receivers.log_rv;
+        let asset: Arc<str> = Arc::from(self.asset.name.clone());
+        tokio::spawn(async move {
+            while let Some(msg) = log_rv.recv().await {
+                let _ = log_sender.send(MarketUpdate::RelayToFrontend(
+                    UpdateFrontend::StrategyLog(ScriptLog {
+                        asset: asset.clone(),
+                        msg,
+                    }),
+                ));
+            }
         });
         //listen to changes and trade results
         let engine_update_tx = self.senders.engine_tx.clone();
@@ -457,7 +485,9 @@ impl Market {
                     }
                 }
 
-                MarketCommand::UpdateStrategy(compiled, strat_indicators, name) => {
+                MarketCommand::UpdateStrategy(compiled, mut strat_indicators, name) => {
+                    replace_self_with_asset(asset.name.as_str(), &mut strat_indicators);
+
                     let strategy_entries = strategy_edit_entries(
                         &self.manual_indicators,
                         &self.strategy.1,
@@ -868,6 +898,7 @@ struct MarketSenders {
 struct MarketReceivers {
     pub price_rv: UnboundedReceiver<PriceAsset>,
     pub market_rv: Receiver<MarketCommand>,
+    pub log_rv: Receiver<String>,
 }
 
 #[derive(Debug, Clone)]

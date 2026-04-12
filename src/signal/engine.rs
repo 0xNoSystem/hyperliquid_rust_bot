@@ -11,7 +11,7 @@ use kwant::indicators::Price;
 
 use crate::backend::scripting::CompiledStrategy;
 use crate::broadcast::{PriceAsset, PriceData};
-use crate::strategy::{Strat, StratContext, Strategy};
+use crate::strategy::{Strat, StratContext, Strategy, replace_self_with_asset};
 use crate::trade_setup::TimeFrame;
 use crate::{
     BusyType, EngineOrder, ExecCommand, ExecControl, IndicatorData, Intent, LiqSide,
@@ -42,6 +42,7 @@ fn insert_indicators(trackers: &mut TrackersMap, indicators: impl IntoIterator<I
 }
 
 pub struct SignalEngine {
+    asset: Arc<str>,
     engine_rv: UnboundedReceiver<EngineCommand>,
     trade_tx: Sender<ExecCommand>,
     data_tx: Option<tokioSender<MarketCommand>>,
@@ -51,22 +52,33 @@ pub struct SignalEngine {
     exec_params: ExecParams,
     state: EngineState,
     pending_orders: Option<PendingOpen>,
+    log_tx: Option<tokioSender<String>>,
     paused: bool,
 }
 
 impl SignalEngine {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
+        asset_name: Arc<str>,
         config: Option<Vec<IndexId>>,
         rhai_engine: Arc<Engine>,
         compiled: CompiledStrategy,
-        strat_indicators: Vec<IndexId>,
+        mut strat_indicators: Vec<IndexId>,
         engine_rv: UnboundedReceiver<EngineCommand>,
         data_tx: Option<tokioSender<MarketCommand>>,
+        log_tx: tokioSender<String>,
         trade_tx: Sender<ExecCommand>,
         exec_params: ExecParams,
     ) -> Self {
-        let strategy = Strategy::new(rhai_engine.clone(), compiled, strat_indicators.clone());
+        replace_self_with_asset(asset_name.as_ref(), &mut strat_indicators);
+
+        let strategy = Strategy::new(
+            rhai_engine.clone(),
+            compiled,
+            strat_indicators.clone(),
+            Some(log_tx.clone()),
+            asset_name.clone(),
+        );
 
         let mut all_indicators: HashSet<IndexId> = if let Some(list) = config {
             list.into_iter().collect()
@@ -79,6 +91,7 @@ impl SignalEngine {
         insert_indicators(&mut trackers, all_indicators);
 
         SignalEngine {
+            asset: asset_name,
             engine_rv,
             trade_tx,
             data_tx,
@@ -86,6 +99,7 @@ impl SignalEngine {
             rhai_engine,
             strategy,
             exec_params,
+            log_tx: Some(log_tx),
             state: EngineState::Idle,
             pending_orders: None,
             paused: false,
@@ -680,8 +694,15 @@ impl SignalEngine {
                     }
                 }
 
-                EngineCommand::UpdateStrategy(compiled, indicators) => {
-                    self.strategy = Strategy::new(self.rhai_engine.clone(), compiled, indicators);
+                EngineCommand::UpdateStrategy(compiled, mut indicators) => {
+                    replace_self_with_asset(self.asset.as_ref(), &mut indicators);
+                    self.strategy = Strategy::new(
+                        self.rhai_engine.clone(),
+                        compiled,
+                        indicators,
+                        self.log_tx.clone(),
+                        self.asset.clone(),
+                    );
                     self.state = EngineState::Idle;
                 }
 
@@ -748,9 +769,18 @@ impl SignalEngine {
         lev: usize,
         rhai_engine: Arc<Engine>,
         compiled: CompiledStrategy,
-        strat_indicators: Vec<IndexId>,
+        mut strat_indicators: Vec<IndexId>,
+        asset: Arc<str>,
     ) -> Self {
-        let strategy = Strategy::new(rhai_engine.clone(), compiled, strat_indicators.clone());
+        replace_self_with_asset(asset.as_ref(), &mut strat_indicators);
+
+        let strategy = Strategy::new(
+            rhai_engine.clone(),
+            compiled,
+            strat_indicators.clone(),
+            None,
+            asset.clone(),
+        );
 
         let mut trackers: TrackersMap = HashMap::default();
         insert_indicators(&mut trackers, strat_indicators);
@@ -768,9 +798,11 @@ impl SignalEngine {
             rhai_engine,
             strategy,
             exec_params,
+            log_tx: None,
             state: EngineState::Idle,
             pending_orders: None,
             paused: false,
+            asset,
         }
     }
 
@@ -1146,5 +1178,44 @@ impl PendingOpen {
             .as_ref()
             .map(|t| t.tp.is_some() || t.sl.is_some())
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::SignalEngine;
+    use crate::backend::scripting::{CompiledStrategy, create_engine};
+    use crate::{IndicatorKind, TimeFrame};
+
+    #[test]
+    fn new_backtest_replaces_self_indicators_with_market_asset() {
+        let rhai_engine = Arc::new(create_engine());
+        let compiled = CompiledStrategy::noop(rhai_engine.as_ref());
+        let asset = Arc::<str>::from("BTC");
+        let engine = SignalEngine::new_backtest(
+            100.0,
+            5,
+            rhai_engine,
+            compiled,
+            vec![(
+                Arc::<str>::from("self"),
+                IndicatorKind::Rsi(14),
+                TimeFrame::Min15,
+            )],
+            Arc::clone(&asset),
+        );
+
+        assert!(
+            engine
+                .trackers
+                .contains_key(&(Arc::<str>::from("BTC"), TimeFrame::Min15))
+        );
+        assert!(
+            !engine
+                .trackers
+                .contains_key(&(Arc::<str>::from("self"), TimeFrame::Min15))
+        );
     }
 }

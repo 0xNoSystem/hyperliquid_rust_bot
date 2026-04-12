@@ -182,8 +182,14 @@ impl Backtester {
             }
         };
 
-        let engine =
-            SignalEngine::new_backtest(margin, lev, rhai_engine, compiled, strat_indicators);
+        let engine = SignalEngine::new_backtest(
+            margin,
+            lev,
+            rhai_engine,
+            compiled,
+            strat_indicators,
+            request.config.asset.clone().into(),
+        );
 
         let fetcher = Fetcher::new(source, candle_store.clone());
 

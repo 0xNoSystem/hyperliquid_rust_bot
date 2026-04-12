@@ -13,19 +13,28 @@ import { WebSocketContext } from "./WebSocketContextStore";
 import { useAuth } from "./AuthContextStore";
 
 const UNIVERSE_KEY = "universe.v1";
+const MAX_MARKET_LOG_ENTRIES = 200;
 const userKey = (base: string, addr: string | null) =>
     addr ? `${base}.${addr.toLowerCase()}` : base;
+
+const withMarketDefaults = (market: MarketInfo): MarketInfo => ({
+    ...market,
+    indicators: market.indicators ?? [],
+    trades: market.trades ?? [],
+    log: market.log ?? [],
+});
 
 const toMarketInfo = (market: BackendMarketInfo): MarketInfo => ({
     ...market,
     state: "Ready",
     prev: market.price,
     trades: [],
+    log: [],
 });
 
 const dedupeMarkets = (markets: MarketInfo[]): MarketInfo[] => {
     const map = new Map<string, MarketInfo>();
-    for (const m of markets) map.set(m.asset, m);
+    for (const m of markets) map.set(m.asset, withMarketDefaults(m));
     return Array.from(map.values());
 };
 
@@ -233,6 +242,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                                   margin: null,
                                   pnl: null,
                                   indicators: [],
+                                  log: [],
                                   trades: [],
                                   strategyName: "",
                                   isPaused: false,
@@ -240,6 +250,20 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                                   engineState: "idle",
                               },
                           ]
+                );
+                return;
+            }
+
+            if ("strategyLog" in payload) {
+                const { asset, msg } = payload.strategyLog;
+                setMarkets((prev) =>
+                    prev.map((m) => {
+                        if (m.asset !== asset) return m;
+                        const nextLog = [...(m.log ?? []), msg].slice(
+                            -MAX_MARKET_LOG_ENTRIES
+                        );
+                        return { ...m, log: nextLog };
+                    })
                 );
                 return;
             }
