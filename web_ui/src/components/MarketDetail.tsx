@@ -701,43 +701,7 @@ export default function MarketDetail() {
                                 (PERPS) is likely different
                             </span>
                         </div>
-                        <div className="px-4 pb-3 pt-4">
-                            <div className="mx-auto w-full max-w-3xl">
-                                <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-wide text-app-text/60">
-                                    <span>Strategy Log</span>
-                                    <span>{marketLog.length} entries</span>
-                                </div>
-                                <div className="rounded-xl border border-line-subtle bg-app-surface-2/90 px-4 py-3 backdrop-blur">
-                                    <div
-                                        ref={logConsoleRef}
-                                        className="max-h-40 overflow-y-auto"
-                                        role="log"
-                                        aria-live="polite"
-                                        aria-relevant="additions text"
-                                    >
-                                        {marketLog.length === 0 ? (
-                                            <div className="py-3 text-[12px] text-app-text/40">
-                                                Waiting for strategy log output...
-                                            </div>
-                                        ) : (
-                                            marketLog.map((entry, index) => (
-                                                <div
-                                                    key={`${index}-${entry}`}
-                                                    className="flex items-start gap-3 border-b border-line-subtle/10 py-1.5 text-[12px] text-app-text/80 last:border-b-0"
-                                                >
-                                                    <span className="text-accent-brand-soft select-none">
-                                                        {">"}
-                                                    </span>
-                                                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-                                                        {entry}
-                                                    </span>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        <div className="px-4 pt-4 pb-3"></div>
                         <div
                             className={`${Chart} kwant-theme relative min-h-[60vh]`}
                         >
@@ -972,6 +936,43 @@ export default function MarketDetail() {
                             </div>
                         </div>
                     </>
+                    {/*STRATEGY LOG START*/}
+                    <div className="mx-auto w-full max-w-3xl">
+                        <div className="text-app-text/60 mb-2 flex items-center justify-between text-[11px] tracking-wide uppercase">
+                            <span>Strategy Log</span>
+                            <span>{marketLog.length} entries</span>
+                        </div>
+                        <div className="border-line-subtle bg-app-surface-2/90 rounded-xl border px-1 py-1 backdrop-blur">
+                            <div
+                                ref={logConsoleRef}
+                                className="max-h-40 overflow-y-auto"
+                                role="log"
+                                aria-live="polite"
+                                aria-relevant="additions text"
+                            >
+                                {marketLog.length === 0 ? (
+                                    <div className="text-app-text/40 py-3 text-[12px]">
+                                        Waiting for strategy log output...
+                                    </div>
+                                ) : (
+                                    marketLog.map((entry, index) => (
+                                        <div
+                                            key={`${index}-${entry}`}
+                                            className="bg-app-surface-1 border-line-subtle/10 text-app-text/80 flex items-start gap-3 border-b py-1.5 text-[12px] last:border-b-0"
+                                        >
+                                            <span className="text-accent-brand-soft select-none">
+                                                {">"}
+                                            </span>
+                                            <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">
+                                                {entry}
+                                            </span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    {/*STRATEGY LOG END*/}
                     <section className={Pane}>
                         <div className={Head}>Add Indicator</div>
                         <div className={`${Body} grid grid-cols-2 gap-3`}>

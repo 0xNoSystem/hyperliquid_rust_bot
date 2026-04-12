@@ -216,7 +216,7 @@ const MarketCard = ({
                                 title={get_params(kind)}
                             >
                                 <span className="text-center font-bold">
-                                   {asset}
+                                    {asset}
                                 </span>
 
                                 <span key={i}>

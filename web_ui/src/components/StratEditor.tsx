@@ -175,14 +175,13 @@ export default function StratEditor() {
     const [newParam2, setNewParam2] = useState(14);
     const [newTf, setNewTf] = useState<TimeframeKey>("15m");
     const assetOptions = useMemo(
-        () =>
-            [
-                { value: "self", label: "self" },
-                ...universe.map((asset) => ({
-                    value: asset.name,
-                    label: asset.name,
-                })),
-            ],
+        () => [
+            { value: "self", label: "self" },
+            ...universe.map((asset) => ({
+                value: asset.name,
+                label: asset.name,
+            })),
+        ],
         [universe]
     );
 
