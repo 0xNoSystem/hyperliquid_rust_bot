@@ -175,24 +175,35 @@ This lets a strategy attached to one market use confirmation signals from other 
 
 ### Available Indicators
 
+The terminal now supports **19 indicators total**, including **9 recently added** ones: DEMA, TEMA, OBV, VWAP Deviation, CCI, Ichimoku, MACD, ROC, and Bollinger Bands.
+
 | Indicator | Key format | Parameters |
 |-----------|-----------|------------|
 | RSI | `{asset}_rsi_{periods}_{tf}` | periods |
 | EMA | `{asset}_ema_{periods}_{tf}` | periods |
+| DEMA | `{asset}_dema_{periods}_{tf}` | periods |
+| TEMA | `{asset}_tema_{periods}_{tf}` | periods |
 | SMA | `{asset}_sma_{periods}_{tf}` | periods |
 | ATR | `{asset}_atr_{periods}_{tf}` | periods |
 | ADX | `{asset}_adx_{periods}_{di_length}_{tf}` | periods, DI length |
 | Stochastic RSI | `{asset}_stochRsi_{periods}_{k}_{d}_{tf}` | periods, K smoothing, D smoothing |
 | SMA on RSI | `{asset}_smaRsi_{periods}_{smoothing}_{tf}` | periods, smoothing length |
 | EMA Cross | `{asset}_emaCross_{short}_{long}_{tf}` | short period, long period |
+| MACD | `{asset}_macd_{fast}_{slow}_{signal}_{tf}` | fast, slow, signal |
+| Ichimoku | `{asset}_ichimoku_{tenkan}_{kijun}_{senkou_b}_{tf}` | tenkan, kijun, senkou_b |
+| Bollinger Bands | `{asset}_bollinger_{periods}_{std}_{tf}` | periods, std multiplier (UI value is x100, e.g. 200 -> key uses `2`) |
+| ROC | `{asset}_roc_{periods}_{tf}` | periods |
+| OBV | `{asset}_obv_{tf}` | none |
 | Volume MA | `{asset}_volMa_{periods}_{tf}` | periods |
 | Historical Volatility | `{asset}_histVol_{periods}_{tf}` | periods |
+| VWAP Deviation | `{asset}_vwapDeviation_{periods}_{tf}` | periods |
+| CCI | `{asset}_cci_{periods}_{tf}` | periods |
 
 ### The `extract()` Macro
 
 Use `extract()` to access an indicator. It handles the lookup, null guard, and value unpacking automatically. You write one line and get several ready-to-use variables.
 
-**Single-value indicators** (RSI, EMA, SMA, ATR, ADX, SMA on RSI, Volume MA, Historical Volatility):
+**Single-value indicators** (RSI, EMA, DEMA, TEMA, SMA, ATR, ADX, SMA on RSI, ROC, OBV, VWAP Deviation, CCI, Volume MA, Historical Volatility):
 
 ```rust
 let rsi = extract("BTC_rsi_14_15m");
@@ -213,7 +224,7 @@ After `extract()`, use `rsi_value` directly in your logic.
 **Stochastic RSI:**
 
 ```rust
-let stoch = extract("SOL_stochRsi_14_0_0_15m");
+let stoch = extract("SOL_stochRsi_14_3_3_15m");
 ```
 
 Expands with:
@@ -239,6 +250,57 @@ let ema_long = ...      // long EMA value
 let ema_trend = ...     // true if short > long (bool)
 let ema_on_close = ...
 let ema_ts = ...
+```
+
+**MACD:**
+
+```rust
+let macd = extract("BTC_macd_12_26_9_15m");
+```
+
+Expands with:
+
+```rust
+let macd_macd = ...        // MACD line
+let macd_signal = ...      // signal line
+let macd_histogram = ...   // histogram
+let macd_on_close = ...
+let macd_ts = ...
+```
+
+**Ichimoku:**
+
+```rust
+let ichi = extract("ETH_ichimoku_9_26_52_1h");
+```
+
+Expands with:
+
+```rust
+let ichi_tenkan = ...
+let ichi_kijun = ...
+let ichi_span_a = ...
+let ichi_span_b = ...
+let ichi_chikou = ...
+let ichi_on_close = ...
+let ichi_ts = ...
+```
+
+**Bollinger Bands:**
+
+```rust
+let bb = extract("SOL_bollinger_20_2_15m");
+```
+
+Expands with:
+
+```rust
+let bb_upper = ...
+let bb_mid = ...
+let bb_lower = ...
+let bb_width = ...         // band width (%)
+let bb_on_close = ...
+let bb_ts = ...
 ```
 
 The variable names are always `{your_name}_{field}`. Clicking an indicator badge in the editor inserts the full asset-specific `extract()` call for you. If an asset symbol contains `:`, `extract()` normalizes it to `_` during lookup.
@@ -499,6 +561,9 @@ Key format: {ASSET}_{indicator}_{params}_{tf}
 extract("BTC_rsi_14_15m")  →  {name}_value, {name}_on_close, {name}_ts
                               emaCross: {name}_short, {name}_long, {name}_trend
                               stochRsi: {name}_k, {name}_d
+                              macd: {name}_macd, {name}_signal, {name}_histogram
+                              ichimoku: {name}_tenkan, {name}_kijun, {name}_span_a, {name}_span_b, {name}_chikou
+                              bollinger: {name}_upper, {name}_mid, {name}_lower, {name}_width
 
 -- State --
 Declare in State Variables box:   count = 0 | flag = false | x = null
