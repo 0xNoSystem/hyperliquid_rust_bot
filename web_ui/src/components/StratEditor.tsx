@@ -380,7 +380,11 @@ export default function StratEditor() {
                 break;
             case "macd":
                 cfg = {
-                    macd: { fast: newParam, slow: newParam2, signal: newParam3 },
+                    macd: {
+                        fast: newParam,
+                        slow: newParam2,
+                        signal: newParam3,
+                    },
                 };
                 break;
             case "ichimoku":
@@ -691,9 +695,8 @@ export default function StratEditor() {
                                         <select
                                             value={newKind}
                                             onChange={(e) => {
-                                                const kind =
-                                                    e.target
-                                                        .value as IndicatorName;
+                                                const kind = e.target
+                                                    .value as IndicatorName;
                                                 setNewKind(kind);
                                                 const [p1, p2, p3] =
                                                     indicatorDefaults[kind];

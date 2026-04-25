@@ -3,19 +3,22 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     type WalletProvider,
-    phantomProvider,
-    backpackProvider,
+    ALL_WALLETS,
     authenticateWallet,
 } from "../wallet";
 import { useAuth } from "../context/AuthContextStore";
 import RotatingCube from "./Cube";
 import { BackgroundFX } from "./BackgroundFX";
 
-const wallets: WalletProvider[] = [phantomProvider, backpackProvider];
+const wallets: WalletProvider[] = ALL_WALLETS;
+const FEATURED_WALLET_COUNT = 4;
+const featuredWallets = wallets.slice(0, FEATURED_WALLET_COUNT);
+const otherWallets = wallets.slice(FEATURED_WALLET_COUNT);
 
 export default function Login() {
     const [error, setError] = useState<string | null>(null);
     const [connecting, setConnecting] = useState(false);
+    const [showOtherWallets, setShowOtherWallets] = useState(false);
     const { login } = useAuth();
     const navigate = useNavigate();
 
@@ -75,7 +78,7 @@ export default function Login() {
                     </p>
 
                     <div className="flex flex-col gap-3">
-                        {wallets.map((wallet) => (
+                        {featuredWallets.map((wallet) => (
                             <button
                                 key={wallet.name}
                                 onClick={() => handleConnect(wallet)}
@@ -92,6 +95,64 @@ export default function Login() {
                                 </span>
                             </button>
                         ))}
+
+                        {otherWallets.length > 0 && (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        setShowOtherWallets(
+                                            (current) => !current
+                                        )
+                                    }
+                                    disabled={connecting}
+                                    className="hover:text-accent-brand text-app-text/80 w-full text-center text-sm transition disabled:opacity-50"
+                                >
+                                    <span>
+                                        {showOtherWallets
+                                            ? "▲ Hide "
+                                            : "▼ Show "}
+                                        other wallets
+                                    </span>
+                                </button>
+
+                                <AnimatePresence initial={false}>
+                                    {showOtherWallets && (
+                                        <motion.div
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{
+                                                opacity: 1,
+                                                height: "auto",
+                                            }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            className="flex flex-col gap-3 overflow-hidden"
+                                        >
+                                            {otherWallets.map((wallet) => (
+                                                <button
+                                                    key={wallet.name}
+                                                    onClick={() =>
+                                                        handleConnect(wallet)
+                                                    }
+                                                    disabled={connecting}
+                                                    className="border-line-subtle bg-app-surface-2 hover:bg-glow-10 flex w-full items-center gap-4 rounded-lg border px-4 py-3 transition disabled:opacity-50"
+                                                >
+                                                    <img
+                                                        src={wallet.icon}
+                                                        alt={wallet.name}
+                                                        className="h-8 w-8 rounded-md"
+                                                    />
+                                                    <span className="text-sm font-medium">
+                                                        {connecting
+                                                            ? "Connecting..."
+                                                            : wallet.name}
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </>
+                        )}
                     </div>
                 </motion.div>
 

@@ -96,7 +96,10 @@ export const indicatorParamLabels: Record<IndicatorName, string[]> = {
     sma: ["Periods"],
 };
 
-export const indicatorDefaults: Record<IndicatorName, [number, number, number]> = {
+export const indicatorDefaults: Record<
+    IndicatorName,
+    [number, number, number]
+> = {
     rsi: [14, 14, 9],
     smaOnRsi: [14, 9, 9],
     stochRsi: [14, 3, 3],

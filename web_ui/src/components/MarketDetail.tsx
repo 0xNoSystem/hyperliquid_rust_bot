@@ -1024,8 +1024,8 @@ export default function MarketDetail() {
                                     className={Select}
                                     value={kindKey}
                                     onChange={(e) => {
-                                        const kind =
-                                            e.target.value as IndicatorName;
+                                        const kind = e.target
+                                            .value as IndicatorName;
                                         setKindKey(kind);
                                         const [newP1, newP2, newP3] =
                                             indicatorDefaults[kind];

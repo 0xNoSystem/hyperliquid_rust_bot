@@ -10,11 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContextStore";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
-import {
-    phantomProvider,
-    backpackProvider,
-    type WalletProvider,
-} from "../wallet";
+import { ALL_WALLETS, type WalletProvider } from "../wallet";
 
 function getActiveProvider(): WalletProvider {
     const w = window as unknown as Record<string, unknown>;
@@ -22,8 +18,16 @@ function getActiveProvider(): WalletProvider {
         ?.ethereum;
     const hasPhantom = !!(w.phantom as { ethereum?: unknown } | undefined)
         ?.ethereum;
-    if (hasBackpack) return backpackProvider;
-    if (hasPhantom) return phantomProvider;
+
+    // Find active provider from ALL_WALLETS
+    if (hasBackpack) {
+        const provider = ALL_WALLETS.find((w) => w.name === "Backpack");
+        if (provider) return provider;
+    }
+    if (hasPhantom) {
+        const provider = ALL_WALLETS.find((w) => w.name === "Phantom");
+        if (provider) return provider;
+    }
     throw new Error("No wallet found. Please install Phantom or Backpack.");
 }
 import { API_URL } from "../consts";
