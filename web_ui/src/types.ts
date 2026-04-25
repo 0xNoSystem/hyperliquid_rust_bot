@@ -1,19 +1,29 @@
 import { formatVolume } from "./chart/utils.ts";
 
 export const indicatorKinds: IndicatorName[] = [
+    "obv",
     "rsi",
     "smaOnRsi",
     "stochRsi",
     "adx",
     "atr",
     "ema",
+    "dema",
+    "tema",
     "emaCross",
+    "macd",
+    "ichimoku",
     "sma",
+    "bollingerBands",
+    "roc",
     "histVolatility",
     "volMa",
+    "vwapDeviation",
+    "cci",
 ];
 
 export type IndicatorName =
+    | "obv"
     | "volMa"
     | "rsi"
     | "smaOnRsi"
@@ -21,14 +31,27 @@ export type IndicatorName =
     | "adx"
     | "atr"
     | "ema"
+    | "dema"
+    | "tema"
     | "emaCross"
     | "sma"
-    | "histVolatility";
+    | "histVolatility"
+    | "vwapDeviation"
+    | "cci"
+    | "ichimoku"
+    | "macd"
+    | "roc"
+    | "bollingerBands";
 
 export type IndicatorKind =
+    | "obv"
     | { histVolatility: number }
     | { volMa: number }
     | { rsi: number }
+    | { dema: number }
+    | { tema: number }
+    | { vwapDeviation: number }
+    | { cci: number }
     | { smaOnRsi: { periods: number; smoothing_length: number } }
     | {
           stochRsi: {
@@ -41,19 +64,58 @@ export type IndicatorKind =
     | { atr: number }
     | { ema: number }
     | { emaCross: { short: number; long: number } }
+    | { macd: { fast: number; slow: number; signal: number } }
+    | {
+          ichimoku: { tenkan: number; kijun: number; senkou_b: number };
+      }
+    | {
+          bollingerBands: { periods: number; std_multiplier_x100: number };
+      }
+    | { roc: number }
     | { sma: number };
 
 export const indicatorParamLabels: Record<IndicatorName, string[]> = {
+    obv: [],
     histVolatility: ["Periods"],
     volMa: ["Periods"],
     rsi: ["Periods"],
+    dema: ["Periods"],
+    tema: ["Periods"],
+    vwapDeviation: ["Periods"],
+    cci: ["Periods"],
     smaOnRsi: ["Periods", "Smoothing"],
     stochRsi: ["Periods", "kSmoothing", "dSmoothing"],
     adx: ["Periods", "DiLength"],
     atr: ["Periods"],
     ema: ["Periods"],
     emaCross: ["Short", "Long"],
+    macd: ["Fast", "Slow", "Signal"],
+    ichimoku: ["Tenkan", "Kijun", "Senkou B"],
+    bollingerBands: ["Periods", "StdMultiplier x100"],
+    roc: ["Periods"],
     sma: ["Periods"],
+};
+
+export const indicatorDefaults: Record<IndicatorName, [number, number, number]> = {
+    rsi: [14, 14, 9],
+    smaOnRsi: [14, 9, 9],
+    stochRsi: [14, 3, 3],
+    macd: [12, 26, 9],
+    roc: [12, 14, 9],
+    cci: [20, 14, 9],
+    adx: [14, 14, 9],
+    atr: [14, 14, 9],
+    ema: [9, 14, 9],
+    emaCross: [9, 21, 9],
+    sma: [9, 14, 9],
+    dema: [9, 14, 9],
+    tema: [9, 14, 9],
+    ichimoku: [9, 26, 52],
+    bollingerBands: [20, 200, 9],
+    histVolatility: [20, 14, 9],
+    obv: [14, 14, 9],
+    volMa: [20, 14, 9],
+    vwapDeviation: [20, 14, 9],
 };
 
 export type EngineView = "idle" | "armed" | "opening" | "closing" | "open";
@@ -102,9 +164,39 @@ export type Value =
     | { rsiValue: number }
     | { stochRsiValue: { k: number; d: number } }
     | { emaValue: number }
+    | { demaValue: number }
+    | { temaValue: number }
+    | { obvValue: number }
+    | { vwapDeviationValue: number }
+    | { cciValue: number }
+    | {
+          ichimokuValue: {
+              tenkan: number;
+              kijun: number;
+              span_a: number;
+              span_b: number;
+              chikou: number;
+          };
+      }
     | { emaCrossValue: { short: number; long: number; trend: boolean } }
+    | {
+          macdValue: {
+              macd: number;
+              signal: number;
+              histogram: number;
+          };
+      }
     | { smaValue: number }
     | { smaRsiValue: number }
+    | { rocValue: number }
+    | {
+          bollingerValue: {
+              upper: number;
+              mid: number;
+              lower: number;
+              width: number;
+          };
+      }
     | { adxValue: number }
     | { atrValue: number }
     | { histVolatilityValue: number }
@@ -115,26 +207,53 @@ export function get_value(v: Value, decimals: number): string {
     if ("histVolatilityValue" in v)
         return `${v.histVolatilityValue.toFixed(2)}`;
     if ("volumeMaValue" in v) return formatVolume(v.volumeMaValue);
+    if ("obvValue" in v) return formatVolume(v.obvValue);
     if ("rsiValue" in v) return `${v.rsiValue.toFixed(2)}`;
+    if ("vwapDeviationValue" in v) return `${v.vwapDeviationValue.toFixed(2)}`;
+    if ("cciValue" in v) return `${v.cciValue.toFixed(2)}`;
+    if ("demaValue" in v) return `${v.demaValue.toFixed(decimals)}`;
+    if ("temaValue" in v) return `${v.temaValue.toFixed(decimals)}`;
     if ("stochRsiValue" in v)
         return `K=${v.stochRsiValue.k.toFixed(2)}, D=${v.stochRsiValue.d.toFixed(2)}`;
     if ("emaValue" in v) return `${v.emaValue.toFixed(decimals)}`;
+    if ("macdValue" in v)
+        return `M=${v.macdValue.macd.toFixed(decimals)}, S=${v.macdValue.signal.toFixed(decimals)}, H=${v.macdValue.histogram.toFixed(decimals)}`;
+    if ("ichimokuValue" in v)
+        return `T=${v.ichimokuValue.tenkan.toFixed(decimals)}, K=${v.ichimokuValue.kijun.toFixed(decimals)}, A=${v.ichimokuValue.span_a.toFixed(decimals)}, B=${v.ichimokuValue.span_b.toFixed(decimals)}, C=${v.ichimokuValue.chikou.toFixed(decimals)}`;
+    if ("bollingerValue" in v)
+        return `U=${v.bollingerValue.upper.toFixed(decimals)}, M=${v.bollingerValue.mid.toFixed(decimals)}, L=${v.bollingerValue.lower.toFixed(decimals)}, W=${v.bollingerValue.width.toFixed(2)}%`;
     if ("emaCrossValue" in v)
         return `short=${v.emaCrossValue.short.toFixed(decimals)}, long=${v.emaCrossValue.long.toFixed(decimals)}, trend=${v.emaCrossValue.trend ? "↑" : "↓"}`;
     if ("smaValue" in v) return `${v.smaValue.toFixed(decimals)}`;
     if ("smaRsiValue" in v) return `${v.smaRsiValue.toFixed(2)}`;
+    if ("rocValue" in v) return `${v.rocValue.toFixed(2)}%`;
     if ("adxValue" in v) return `${v.adxValue.toFixed(2)}`;
     if ("atrValue" in v) return `${v.atrValue.toFixed(decimals)}`;
     return "Unknown";
 }
 
 export function get_params(k: IndicatorKind): string {
+    if (k === "obv") {
+        return "No params";
+    }
     if ("histVolatility" in k) {
         return `Periods: ${k.histVolatility}`;
     }
 
     if ("volMa" in k) {
         return `Periods: ${k.volMa}`;
+    }
+    if ("dema" in k) {
+        return `Periods: ${k.dema}`;
+    }
+    if ("tema" in k) {
+        return `Periods: ${k.tema}`;
+    }
+    if ("vwapDeviation" in k) {
+        return `Periods: ${k.vwapDeviation}`;
+    }
+    if ("cci" in k) {
+        return `Periods: ${k.cci}`;
     }
     if ("rsi" in k) {
         return `Periods: ${k.rsi}`;
@@ -161,10 +280,30 @@ export function get_params(k: IndicatorKind): string {
         const { short, long } = k.emaCross;
         return `Short: ${short}, Long: ${long}`;
     }
+    if ("macd" in k) {
+        const { fast, slow, signal } = k.macd;
+        return `Fast: ${fast}, Slow: ${slow}, Signal: ${signal}`;
+    }
+    if ("ichimoku" in k) {
+        const { tenkan, kijun, senkou_b } = k.ichimoku;
+        return `Tenkan: ${tenkan}, Kijun: ${kijun}, Senkou B: ${senkou_b}`;
+    }
+    if ("bollingerBands" in k) {
+        const { periods, std_multiplier_x100 } = k.bollingerBands;
+        return `Periods: ${periods}, StdMultiplier x100: ${std_multiplier_x100}`;
+    }
+    if ("roc" in k) {
+        return `Periods: ${k.roc}`;
+    }
     if ("sma" in k) {
         return `Periods: ${k.sma}`;
     }
     return "Unknown";
+}
+
+export function indicator_name(kind: IndicatorKind): IndicatorName {
+    if (typeof kind === "string") return kind;
+    return Object.keys(kind)[0] as IndicatorName;
 }
 
 export type Decomposed = {
@@ -486,41 +625,68 @@ export interface OpenPositionLocal {
 }
 
 export const indicatorLabels: Record<IndicatorName, string> = {
+    obv: "OBV",
     histVolatility: "Historical Volatility",
     volMa: "Volume MA",
     rsi: "RSI",
+    dema: "DEMA",
+    tema: "TEMA",
+    vwapDeviation: "VWAP Deviation",
+    cci: "CCI",
     smaOnRsi: "SMA on RSI",
     stochRsi: "Stoch RSI",
     adx: "ADX",
     atr: "ATR",
     ema: "EMA",
     emaCross: "EMA Cross",
+    macd: "MACD",
+    ichimoku: "Ichimoku",
+    bollingerBands: "Bollinger Bands",
+    roc: "ROC",
     sma: "SMA",
 };
 
 export const indicatorColors: Record<IndicatorName, string> = {
+    obv: "bg-indicator-vol-ma-bg text-indicator-vol-ma-text",
     histVolatility: "bg-indicator-hist-vol-bg text-indicator-hist-vol-text",
     volMa: "bg-indicator-vol-ma-bg text-indicator-vol-ma-text",
     rsi: "bg-indicator-rsi-bg text-indicator-rsi-text",
+    dema: "bg-indicator-ema-bg text-indicator-ema-text",
+    tema: "bg-indicator-ema-bg text-indicator-ema-text",
+    vwapDeviation: "bg-indicator-stoch-rsi-bg text-indicator-stoch-rsi-text",
+    cci: "bg-indicator-adx-bg text-indicator-adx-text",
     smaOnRsi: "bg-indicator-sma-on-rsi-bg text-indicator-sma-on-rsi-text",
     stochRsi: "bg-indicator-stoch-rsi-bg text-indicator-stoch-rsi-text",
     adx: "bg-indicator-adx-bg text-indicator-adx-text",
     atr: "bg-indicator-atr-bg text-indicator-atr-text",
     ema: "bg-indicator-ema-bg text-indicator-ema-text",
     emaCross: "bg-indicator-ema-cross-bg text-indicator-ema-cross-text",
+    macd: "bg-indicator-sma-on-rsi-bg text-indicator-sma-on-rsi-text",
+    ichimoku: "bg-indicator-ema-cross-bg text-indicator-ema-cross-text",
+    bollingerBands: "bg-indicator-hist-vol-bg text-indicator-hist-vol-text",
+    roc: "bg-indicator-atr-bg text-indicator-atr-text",
     sma: "bg-indicator-sma-bg text-indicator-sma-text",
 };
 
 export const indicatorValueColors: Record<IndicatorName, string> = {
+    obv: "text-indicator-vol-ma-text",
     histVolatility: "text-indicator-hist-vol-text",
     volMa: "text-indicator-vol-ma-text",
     rsi: "text-indicator-rsi-text",
+    dema: "text-indicator-ema-text",
+    tema: "text-indicator-ema-text",
+    vwapDeviation: "text-indicator-stoch-rsi-text",
+    cci: "text-indicator-adx-text",
     smaOnRsi: "text-indicator-sma-on-rsi-text",
     stochRsi: "text-indicator-stoch-rsi-text",
     adx: "text-indicator-adx-text",
     atr: "text-indicator-atr-text",
     ema: "text-indicator-ema-text",
     emaCross: "text-indicator-ema-cross-text",
+    macd: "text-indicator-sma-on-rsi-text",
+    ichimoku: "text-indicator-ema-cross-text",
+    bollingerBands: "text-indicator-hist-vol-text",
+    roc: "text-indicator-atr-text",
     sma: "text-indicator-sma-text",
 };
 

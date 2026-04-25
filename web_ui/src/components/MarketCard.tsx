@@ -2,10 +2,11 @@ import { motion } from "framer-motion";
 
 import { Pause, Play, Trash2, ExternalLink } from "lucide-react";
 import Spinner from "./Spinner";
-import type { MarketInfo, assetMeta, IndicatorName } from "../types";
+import type { MarketInfo, assetMeta } from "../types";
 import {
     indicatorLabels,
     indicatorColors,
+    indicator_name,
     decompose,
     get_value,
     get_params,
@@ -208,7 +209,7 @@ const MarketCard = ({
                     indicators.map((data, i) => {
                         const { asset, kind, timeframe, value } =
                             decompose(data);
-                        const kindKey = Object.keys(kind)[0] as IndicatorName;
+                        const kindKey = indicator_name(kind);
 
                         return (
                             <div

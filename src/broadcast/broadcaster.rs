@@ -369,12 +369,10 @@ async fn spawn_hl_feed(
                 }
                 Err(e) => log::warn!("malformed candle for {}: {:?}", &asset, e),
             },
-            Message::NoData => {
-                if !disconnected {
-                    disconnected = true;
-                    disconnection_start = Some(Instant::now());
-                    log::info!("{} price stream disconnected", &asset);
-                }
+            Message::NoData if !disconnected => {
+                disconnected = true;
+                disconnection_start = Some(Instant::now());
+                log::info!("{} price stream disconnected", &asset);
             }
             _ => {}
         }

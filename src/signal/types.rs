@@ -125,8 +125,27 @@ fn match_kind(kind: IndicatorKind) -> Box<dyn Indicator> {
         IndicatorKind::Adx { periods, di_length } => Box::new(Adx::new(periods, di_length)),
         IndicatorKind::Atr(periods) => Box::new(Atr::new(periods)),
         IndicatorKind::Ema(periods) => Box::new(Ema::new(periods)),
+        IndicatorKind::Dema(periods) => Box::new(Dema::new(periods)),
+        IndicatorKind::Tema(periods) => Box::new(Tema::new(periods)),
+        IndicatorKind::Obv => Box::new(Obv::new()),
+        IndicatorKind::VwapDeviation(periods) => Box::new(VwapDeviation::new(periods)),
+        IndicatorKind::Cci(periods) => Box::new(Cci::new(periods)),
+        IndicatorKind::Ichimoku {
+            tenkan,
+            kijun,
+            senkou_b,
+        } => Box::new(Ichimoku::new(tenkan, kijun, senkou_b)),
         IndicatorKind::EmaCross { short, long } => Box::new(EmaCross::new(short, long)),
+        IndicatorKind::Macd { fast, slow, signal } => Box::new(Macd::new(fast, slow, signal)),
         IndicatorKind::Sma(periods) => Box::new(Sma::new(periods)),
+        IndicatorKind::Roc(periods) => Box::new(Roc::new(periods)),
+        IndicatorKind::BollingerBands {
+            periods,
+            std_multiplier_x100,
+        } => Box::new(BollingerBands::new(
+            periods,
+            std_multiplier_x100 as f64 / 100.0,
+        )),
         IndicatorKind::VolMa(periods) => Box::new(VolumeMa::new(periods)),
         IndicatorKind::HistVolatility(periods) => Box::new(HistVolatility::new(periods)),
     }

@@ -4,6 +4,8 @@ import {
     TIMEFRAME_CAMELCASE,
     indicatorLabels,
     indicatorColors,
+    indicatorDefaults,
+    indicator_name,
     indicatorParamLabels,
     indicatorKinds,
 } from "../types";
@@ -46,8 +48,15 @@ export const AddMarket: React.FC<AddMarketProps> = ({
 
     const [indicatorAsset, setIndicatorAsset] = useState<string>(asset);
     const [newKind, setNewKind] = useState<IndicatorName>("rsi");
-    const [newParam, setNewParam] = useState(14);
-    const [newParam2, setNewParam2] = useState(14);
+    const [newParam, setNewParam] = useState(
+        () => indicatorDefaults[newKind][0]
+    );
+    const [newParam2, setNewParam2] = useState(
+        () => indicatorDefaults[newKind][1]
+    );
+    const [newParam3, setNewParam3] = useState(
+        () => indicatorDefaults[newKind][2]
+    );
     const [newTf, setNewTf] = useState<TimeframeKey>("1m");
 
     const computedAmount = useMemo(
@@ -77,8 +86,48 @@ export const AddMarket: React.FC<AddMarketProps> = ({
             case "volMa":
                 cfg = { volMa: newParam };
                 break;
+            case "obv":
+                cfg = "obv";
+                break;
+            case "dema":
+                cfg = { dema: newParam };
+                break;
+            case "tema":
+                cfg = { tema: newParam };
+                break;
+            case "vwapDeviation":
+                cfg = { vwapDeviation: newParam };
+                break;
+            case "cci":
+                cfg = { cci: newParam };
+                break;
             case "emaCross":
                 cfg = { emaCross: { short: newParam, long: newParam2 } };
+                break;
+            case "macd":
+                cfg = {
+                    macd: { fast: newParam, slow: newParam2, signal: newParam3 },
+                };
+                break;
+            case "ichimoku":
+                cfg = {
+                    ichimoku: {
+                        tenkan: newParam,
+                        kijun: newParam2,
+                        senkou_b: newParam3,
+                    },
+                };
+                break;
+            case "bollingerBands":
+                cfg = {
+                    bollingerBands: {
+                        periods: newParam,
+                        std_multiplier_x100: newParam2,
+                    },
+                };
+                break;
+            case "roc":
+                cfg = { roc: newParam };
                 break;
             case "smaOnRsi":
                 cfg = {
@@ -92,8 +141,8 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                 cfg = {
                     stochRsi: {
                         periods: newParam,
-                        k_smoothing: null,
-                        d_smoothing: null,
+                        k_smoothing: 3,
+                        d_smoothing: 3,
                     },
                 };
                 break;
@@ -338,9 +387,7 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                     <div className="flex flex-col gap-2">
                         <div className="flex flex-wrap">
                             {config.map(([assetName, ind, tf], i) => {
-                                const kind = Object.keys(
-                                    ind
-                                )[0] as IndicatorName;
+                                const kind = indicator_name(ind);
 
                                 return (
                                     <div
@@ -394,9 +441,15 @@ export const AddMarket: React.FC<AddMarketProps> = ({
 
                             <select
                                 value={newKind}
-                                onChange={(e) =>
-                                    setNewKind(e.target.value as IndicatorName)
-                                }
+                                onChange={(e) => {
+                                    const kind = e.target.value as IndicatorName;
+                                    setNewKind(kind);
+                                    const [p1, p2, p3] =
+                                        indicatorDefaults[kind];
+                                    setNewParam(p1);
+                                    setNewParam2(p2);
+                                    setNewParam3(p3);
+                                }}
                                 className={selectClass}
                             >
                                 {indicatorKinds.map((k) => (
@@ -406,51 +459,41 @@ export const AddMarket: React.FC<AddMarketProps> = ({
                                 ))}
                             </select>
                             <div className="mt-2 mb-6 flex grid grid-cols-2 flex-col gap-2">
-                                {["emaCross", "smaOnRsi", "adx"].includes(
-                                    newKind
-                                ) ? (
-                                    <>
-                                        {" "}
-                                        <label className="mt-2 text-right">
-                                            {indicatorParamLabels[newKind][0]}
-                                        </label>
-                                        <input
-                                            type="number"
-                                            value={newParam}
-                                            onChange={(e) =>
-                                                setNewParam(+e.target.value)
-                                            }
-                                            placeholder="Param1"
-                                            className={inputClass}
-                                        />
-                                        <label className="mt-2 text-right">
-                                            {indicatorParamLabels[newKind][1]}
-                                        </label>
-                                        <input
-                                            type="number"
-                                            value={newParam2}
-                                            onChange={(e) =>
-                                                setNewParam2(+e.target.value)
-                                            }
-                                            placeholder="Param2"
-                                            className={inputClass}
-                                        />{" "}
-                                    </>
+                                {indicatorParamLabels[newKind].length === 0 ? (
+                                    <p className="text-app-text/70 col-span-2 text-xs">
+                                        This indicator has no parameters.
+                                    </p>
                                 ) : (
-                                    <>
-                                        {" "}
-                                        <label className="mt-2 text-right">
-                                            {indicatorParamLabels[newKind][0]}
-                                        </label>
-                                        <input
-                                            type="number"
-                                            value={newParam}
-                                            onChange={(e) =>
-                                                setNewParam(+e.target.value)
-                                            }
-                                            className={inputClass}
-                                        />
-                                    </>
+                                    indicatorParamLabels[newKind].map(
+                                        (label, idx) => (
+                                            <React.Fragment key={label}>
+                                                <label className="mt-2 text-right">
+                                                    {label}
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={
+                                                        idx === 0
+                                                            ? newParam
+                                                            : idx === 1
+                                                              ? newParam2
+                                                              : newParam3
+                                                    }
+                                                    onChange={(e) => {
+                                                        const value =
+                                                            +e.target.value;
+                                                        if (idx === 0)
+                                                            setNewParam(value);
+                                                        else if (idx === 1)
+                                                            setNewParam2(value);
+                                                        else
+                                                            setNewParam3(value);
+                                                    }}
+                                                    className={inputClass}
+                                                />
+                                            </React.Fragment>
+                                        )
+                                    )
                                 )}
                             </div>
                             <label>Time Frame</label>

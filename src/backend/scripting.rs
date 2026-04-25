@@ -203,6 +203,33 @@ fn expand_extract(src: &str) -> String {
                  let {var}_on_close = {var}.on_close;\n\
                  let {var}_ts = {var}.ts;\n"
             ));
+        } else if key_matches_indicator_prefix(&key, "macd_") {
+            out.push_str(&format!(
+                "let {var}_macd = macd_line({var}.value);\n\
+                 let {var}_signal = macd_signal({var}.value);\n\
+                 let {var}_histogram = macd_histogram({var}.value);\n\
+                 let {var}_on_close = {var}.on_close;\n\
+                 let {var}_ts = {var}.ts;\n"
+            ));
+        } else if key_matches_indicator_prefix(&key, "ichimoku_") {
+            out.push_str(&format!(
+                "let {var}_tenkan = ichimoku_tenkan({var}.value);\n\
+                 let {var}_kijun = ichimoku_kijun({var}.value);\n\
+                 let {var}_span_a = ichimoku_span_a({var}.value);\n\
+                 let {var}_span_b = ichimoku_span_b({var}.value);\n\
+                 let {var}_chikou = ichimoku_chikou({var}.value);\n\
+                 let {var}_on_close = {var}.on_close;\n\
+                 let {var}_ts = {var}.ts;\n"
+            ));
+        } else if key_matches_indicator_prefix(&key, "bollinger_") {
+            out.push_str(&format!(
+                "let {var}_upper = bollinger_upper({var}.value);\n\
+                 let {var}_mid = bollinger_mid({var}.value);\n\
+                 let {var}_lower = bollinger_lower({var}.value);\n\
+                 let {var}_width = bollinger_width({var}.value);\n\
+                 let {var}_on_close = {var}.on_close;\n\
+                 let {var}_ts = {var}.ts;\n"
+            ));
         } else {
             out.push_str(&format!(
                 "let {var}_value = as_f64({var}.value);\n\
@@ -289,8 +316,14 @@ fn register_value(engine: &mut Engine) {
         match *v {
             Value::RsiValue(x) => x,
             Value::EmaValue(x) => x,
+            Value::DemaValue(x) => x,
+            Value::TemaValue(x) => x,
+            Value::ObvValue(x) => x,
+            Value::VwapDeviationValue(x) => x,
+            Value::CciValue(x) => x,
             Value::SmaValue(x) => x,
             Value::SmaRsiValue(x) => x,
+            Value::RocValue(x) => x,
             Value::AdxValue(x) => x,
             Value::AtrValue(x) => x,
             Value::VolumeMaValue(x) => x,
@@ -298,6 +331,9 @@ fn register_value(engine: &mut Engine) {
             Value::HistVolatilityValue(x) => x,
             Value::StochRsiValue { k, .. } => k,
             Value::EmaCrossValue { short, .. } => short,
+            Value::MacdValue { macd, .. } => macd,
+            Value::IchimokuValue { tenkan, .. } => tenkan,
+            Value::BollingerValue { mid, .. } => mid,
         }
     });
     engine.register_fn("stoch_k", |v: &mut Value| -> f64 {
@@ -328,6 +364,78 @@ fn register_value(engine: &mut Engine) {
         match *v {
             Value::EmaCrossValue { trend, .. } => trend,
             _ => false,
+        }
+    });
+    engine.register_fn("macd_line", |v: &mut Value| -> f64 {
+        match *v {
+            Value::MacdValue { macd, .. } => macd,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("macd_signal", |v: &mut Value| -> f64 {
+        match *v {
+            Value::MacdValue { signal, .. } => signal,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("macd_histogram", |v: &mut Value| -> f64 {
+        match *v {
+            Value::MacdValue { histogram, .. } => histogram,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("ichimoku_tenkan", |v: &mut Value| -> f64 {
+        match *v {
+            Value::IchimokuValue { tenkan, .. } => tenkan,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("ichimoku_kijun", |v: &mut Value| -> f64 {
+        match *v {
+            Value::IchimokuValue { kijun, .. } => kijun,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("ichimoku_span_a", |v: &mut Value| -> f64 {
+        match *v {
+            Value::IchimokuValue { span_a, .. } => span_a,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("ichimoku_span_b", |v: &mut Value| -> f64 {
+        match *v {
+            Value::IchimokuValue { span_b, .. } => span_b,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("ichimoku_chikou", |v: &mut Value| -> f64 {
+        match *v {
+            Value::IchimokuValue { chikou, .. } => chikou,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("bollinger_upper", |v: &mut Value| -> f64 {
+        match *v {
+            Value::BollingerValue { upper, .. } => upper,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("bollinger_mid", |v: &mut Value| -> f64 {
+        match *v {
+            Value::BollingerValue { mid, .. } => mid,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("bollinger_lower", |v: &mut Value| -> f64 {
+        match *v {
+            Value::BollingerValue { lower, .. } => lower,
+            _ => f64::NAN,
+        }
+    });
+    engine.register_fn("bollinger_width", |v: &mut Value| -> f64 {
+        match *v {
+            Value::BollingerValue { width, .. } => width,
+            _ => f64::NAN,
         }
     });
 }
@@ -497,5 +605,41 @@ mod tests {
         assert!(expanded.contains("let rsi_value = as_f64(rsi.value);"));
         assert!(!expanded.contains("let rsi_short ="));
         assert!(!expanded.contains("let rsi_k ="));
+    }
+
+    #[test]
+    fn expand_extract_uses_macd_unpacking_with_asset_prefix() {
+        let expanded = expand_extract(r#"let m = extract("BTC_macd_12_26_9_15m");"#);
+
+        assert!(expanded.contains(r#"indicators["BTC_macd_12_26_9_15m"]"#));
+        assert!(expanded.contains("let m_macd = macd_line(m.value);"));
+        assert!(expanded.contains("let m_signal = macd_signal(m.value);"));
+        assert!(expanded.contains("let m_histogram = macd_histogram(m.value);"));
+        assert!(!expanded.contains("let m_value ="));
+    }
+
+    #[test]
+    fn expand_extract_uses_ichimoku_unpacking_with_asset_prefix() {
+        let expanded = expand_extract(r#"let i = extract("ETH_ichimoku_9_26_52_1h");"#);
+
+        assert!(expanded.contains(r#"indicators["ETH_ichimoku_9_26_52_1h"]"#));
+        assert!(expanded.contains("let i_tenkan = ichimoku_tenkan(i.value);"));
+        assert!(expanded.contains("let i_kijun = ichimoku_kijun(i.value);"));
+        assert!(expanded.contains("let i_span_a = ichimoku_span_a(i.value);"));
+        assert!(expanded.contains("let i_span_b = ichimoku_span_b(i.value);"));
+        assert!(expanded.contains("let i_chikou = ichimoku_chikou(i.value);"));
+        assert!(!expanded.contains("let i_value ="));
+    }
+
+    #[test]
+    fn expand_extract_uses_bollinger_unpacking_with_asset_prefix() {
+        let expanded = expand_extract(r#"let b = extract("SOL_bollinger_20_2_4h");"#);
+
+        assert!(expanded.contains(r#"indicators["SOL_bollinger_20_2_4h"]"#));
+        assert!(expanded.contains("let b_upper = bollinger_upper(b.value);"));
+        assert!(expanded.contains("let b_mid = bollinger_mid(b.value);"));
+        assert!(expanded.contains("let b_lower = bollinger_lower(b.value);"));
+        assert!(expanded.contains("let b_width = bollinger_width(b.value);"));
+        assert!(!expanded.contains("let b_value ="));
     }
 }

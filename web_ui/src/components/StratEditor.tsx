@@ -27,6 +27,8 @@ import {
     TIMEFRAME_CAMELCASE,
     indicatorLabels,
     indicatorColors,
+    indicatorDefaults,
+    indicator_name,
     indicatorParamLabels,
     indicatorKinds,
     get_params,
@@ -40,21 +42,44 @@ type TimeframeKey = keyof typeof TIMEFRAME_CAMELCASE;
 
 /** Mirrors Rust `IndicatorKind::key()` + `_` + `TimeFrame::as_str()` */
 function indicatorKey(asset: string, ind: IndicatorKind, tf: string): string {
+    if (ind === "obv") return `${asset}_obv_${tf}`;
     if ("rsi" in ind) return `${asset}_rsi_${ind.rsi}_${tf}`;
     if ("atr" in ind) return `${asset}_atr_${ind.atr}_${tf}`;
     if ("ema" in ind) return `${asset}_ema_${ind.ema}_${tf}`;
+    if ("dema" in ind) return `${asset}_dema_${ind.dema}_${tf}`;
+    if ("tema" in ind) return `${asset}_tema_${ind.tema}_${tf}`;
     if ("sma" in ind) return `${asset}_sma_${ind.sma}_${tf}`;
     if ("volMa" in ind) return `${asset}_volMa_${ind.volMa}_${tf}`;
+    if ("vwapDeviation" in ind)
+        return `${asset}_vwapDeviation_${ind.vwapDeviation}_${tf}`;
+    if ("cci" in ind) return `${asset}_cci_${ind.cci}_${tf}`;
     if ("histVolatility" in ind)
         return `${asset}_histVol_${ind.histVolatility}_${tf}`;
     if ("smaOnRsi" in ind)
         return `${asset}_smaRsi_${ind.smaOnRsi.periods}_${ind.smaOnRsi.smoothing_length}_${tf}`;
     if ("stochRsi" in ind)
-        return `${asset}_stochRsi_${ind.stochRsi.periods}_${ind.stochRsi.k_smoothing ?? 0}_${ind.stochRsi.d_smoothing ?? 0}_${tf}`;
+        return `${asset}_stochRsi_${ind.stochRsi.periods}_${ind.stochRsi.k_smoothing ?? 3}_${ind.stochRsi.d_smoothing ?? 3}_${tf}`;
     if ("adx" in ind)
         return `${asset}_adx_${ind.adx.periods}_${ind.adx.di_length}_${tf}`;
     if ("emaCross" in ind)
         return `${asset}_emaCross_${ind.emaCross.short}_${ind.emaCross.long}_${tf}`;
+    if ("macd" in ind)
+        return `${asset}_macd_${ind.macd.fast}_${ind.macd.slow}_${ind.macd.signal}_${tf}`;
+    if ("ichimoku" in ind)
+        return `${asset}_ichimoku_${ind.ichimoku.tenkan}_${ind.ichimoku.kijun}_${ind.ichimoku.senkou_b}_${tf}`;
+    if ("roc" in ind) return `${asset}_roc_${ind.roc}_${tf}`;
+    if ("bollingerBands" in ind) {
+        const x100 = ind.bollingerBands.std_multiplier_x100;
+        const whole = Math.floor(x100 / 100);
+        const frac = x100 % 100;
+        const formatted =
+            frac === 0
+                ? `${whole}`
+                : frac % 10 === 0
+                  ? `${whole}.${Math.floor(frac / 10)}`
+                  : `${whole}.${String(frac).padStart(2, "0")}`;
+        return `${asset}_bollinger_${ind.bollingerBands.periods}_${formatted}_${tf}`;
+    }
     return "unknown";
 }
 
@@ -169,10 +194,17 @@ export default function StratEditor() {
     };
     // Indicator picker
     const [showIndicatorPicker, setShowIndicatorPicker] = useState(false);
-    const [newAsset, setNewAsset] = useState("BTC");
+    const [newAsset, setNewAsset] = useState("self");
     const [newKind, setNewKind] = useState<IndicatorName>("rsi");
-    const [newParam, setNewParam] = useState(14);
-    const [newParam2, setNewParam2] = useState(14);
+    const [newParam, setNewParam] = useState(
+        () => indicatorDefaults[newKind][0]
+    );
+    const [newParam2, setNewParam2] = useState(
+        () => indicatorDefaults[newKind][1]
+    );
+    const [newParam3, setNewParam3] = useState(
+        () => indicatorDefaults[newKind][2]
+    );
     const [newTf, setNewTf] = useState<TimeframeKey>("15m");
     const assetOptions = useMemo(
         () => [
@@ -328,8 +360,48 @@ export default function StratEditor() {
             case "volMa":
                 cfg = { volMa: newParam };
                 break;
+            case "obv":
+                cfg = "obv";
+                break;
+            case "dema":
+                cfg = { dema: newParam };
+                break;
+            case "tema":
+                cfg = { tema: newParam };
+                break;
+            case "vwapDeviation":
+                cfg = { vwapDeviation: newParam };
+                break;
+            case "cci":
+                cfg = { cci: newParam };
+                break;
             case "emaCross":
                 cfg = { emaCross: { short: newParam, long: newParam2 } };
+                break;
+            case "macd":
+                cfg = {
+                    macd: { fast: newParam, slow: newParam2, signal: newParam3 },
+                };
+                break;
+            case "ichimoku":
+                cfg = {
+                    ichimoku: {
+                        tenkan: newParam,
+                        kijun: newParam2,
+                        senkou_b: newParam3,
+                    },
+                };
+                break;
+            case "bollingerBands":
+                cfg = {
+                    bollingerBands: {
+                        periods: newParam,
+                        std_multiplier_x100: newParam2,
+                    },
+                };
+                break;
+            case "roc":
+                cfg = { roc: newParam };
                 break;
             case "smaOnRsi":
                 cfg = {
@@ -343,8 +415,8 @@ export default function StratEditor() {
                 cfg = {
                     stochRsi: {
                         periods: newParam,
-                        k_smoothing: null,
-                        d_smoothing: null,
+                        k_smoothing: 3,
+                        d_smoothing: 3,
                     },
                 };
                 break;
@@ -384,7 +456,6 @@ export default function StratEditor() {
         "w-full rounded border border-line-solid bg-surface-input px-3 py-2 text-app-text text-sm font-mono";
     const selectClass =
         "w-full cursor-pointer rounded border border-line-solid bg-surface-input px-3 py-2 text-app-text text-sm";
-    const hasDualParams = ["emaCross", "smaOnRsi", "adx"].includes(newKind);
 
     return (
         <div className="text-app-text z-1 flex h-[120vh] min-h-screen">
@@ -542,9 +613,7 @@ export default function StratEditor() {
                                     </span>
                                 )}
                                 {indicators.map(([asset, ind, tf], i) => {
-                                    const kind = Object.keys(
-                                        ind
-                                    )[0] as IndicatorName;
+                                    const kind = indicator_name(ind);
                                     return (
                                         <div
                                             key={i}
@@ -621,12 +690,17 @@ export default function StratEditor() {
                                         </div>
                                         <select
                                             value={newKind}
-                                            onChange={(e) =>
-                                                setNewKind(
+                                            onChange={(e) => {
+                                                const kind =
                                                     e.target
-                                                        .value as IndicatorName
-                                                )
-                                            }
+                                                        .value as IndicatorName;
+                                                setNewKind(kind);
+                                                const [p1, p2, p3] =
+                                                    indicatorDefaults[kind];
+                                                setNewParam(p1);
+                                                setNewParam2(p2);
+                                                setNewParam3(p3);
+                                            }}
                                             className={selectClass}
                                         >
                                             {indicatorKinds.map((k) => (
@@ -636,41 +710,57 @@ export default function StratEditor() {
                                             ))}
                                         </select>
                                         <div className="mt-2 grid grid-cols-2 gap-2">
-                                            <label className="text-app-text/60 mt-1 text-right text-xs">
-                                                {
-                                                    indicatorParamLabels[
-                                                        newKind
-                                                    ][0]
-                                                }
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={newParam}
-                                                onChange={(e) =>
-                                                    setNewParam(+e.target.value)
-                                                }
-                                                className={inputClass}
-                                            />
-                                            {hasDualParams && (
-                                                <>
-                                                    <label className="text-app-text/60 mt-1 text-right text-xs">
-                                                        {
-                                                            indicatorParamLabels[
-                                                                newKind
-                                                            ][1]
-                                                        }
-                                                    </label>
-                                                    <input
-                                                        type="number"
-                                                        value={newParam2}
-                                                        onChange={(e) =>
-                                                            setNewParam2(
-                                                                +e.target.value
-                                                            )
-                                                        }
-                                                        className={inputClass}
-                                                    />
-                                                </>
+                                            {indicatorParamLabels[newKind]
+                                                .length === 0 ? (
+                                                <p className="text-app-text/70 col-span-2 text-xs">
+                                                    This indicator has no
+                                                    parameters.
+                                                </p>
+                                            ) : (
+                                                indicatorParamLabels[
+                                                    newKind
+                                                ].map((label, idx) => (
+                                                    <div
+                                                        key={`${newKind}-${label}-${idx}`}
+                                                        className="contents"
+                                                    >
+                                                        <label className="text-app-text/60 mt-1 text-right text-xs">
+                                                            {label}
+                                                        </label>
+                                                        <input
+                                                            type="number"
+                                                            value={
+                                                                idx === 0
+                                                                    ? newParam
+                                                                    : idx === 1
+                                                                      ? newParam2
+                                                                      : newParam3
+                                                            }
+                                                            onChange={(e) => {
+                                                                const value =
+                                                                    +e.target
+                                                                        .value;
+                                                                if (idx === 0)
+                                                                    setNewParam(
+                                                                        value
+                                                                    );
+                                                                else if (
+                                                                    idx === 1
+                                                                )
+                                                                    setNewParam2(
+                                                                        value
+                                                                    );
+                                                                else
+                                                                    setNewParam3(
+                                                                        value
+                                                                    );
+                                                            }}
+                                                            className={
+                                                                inputClass
+                                                            }
+                                                        />
+                                                    </div>
+                                                ))
                                             )}
                                         </div>
                                         <div className="mt-2">

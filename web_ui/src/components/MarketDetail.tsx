@@ -17,6 +17,8 @@ import {
     decompose,
     get_params,
     indicatorLabels,
+    indicatorDefaults,
+    indicator_name,
     indicatorParamLabels,
     indicatorColors,
     indicatorValueColors,
@@ -152,8 +154,9 @@ export default function MarketDetail() {
         market?.asset ?? ""
     );
     const [kindKey, setKindKey] = useState<IndicatorName>("rsi");
-    const [p1, setP1] = useState<number>(14);
-    const [p2, setP2] = useState<number>(14);
+    const [p1, setP1] = useState<number>(() => indicatorDefaults[kindKey][0]);
+    const [p2, setP2] = useState<number>(() => indicatorDefaults[kindKey][1]);
+    const [p3, setP3] = useState<number>(() => indicatorDefaults[kindKey][2]);
     const [tfSym, setTfSym] = useState<string>("1m");
 
     // batch
@@ -203,16 +206,39 @@ export default function MarketDetail() {
                 return { histVolatility: p1 };
             case "volMa":
                 return { volMa: p1 };
+            case "obv":
+                return "obv";
+            case "dema":
+                return { dema: p1 };
+            case "tema":
+                return { tema: p1 };
+            case "vwapDeviation":
+                return { vwapDeviation: p1 };
+            case "cci":
+                return { cci: p1 };
             case "emaCross":
                 return { emaCross: { short: p1, long: p2 } };
+            case "macd":
+                return { macd: { fast: p1, slow: p2, signal: p3 } };
+            case "ichimoku":
+                return { ichimoku: { tenkan: p1, kijun: p2, senkou_b: p3 } };
+            case "bollingerBands":
+                return {
+                    bollingerBands: {
+                        periods: p1,
+                        std_multiplier_x100: p2,
+                    },
+                };
+            case "roc":
+                return { roc: p1 };
             case "smaOnRsi":
                 return { smaOnRsi: { periods: p1, smoothing_length: p2 } };
             case "stochRsi":
                 return {
                     stochRsi: {
                         periods: p1,
-                        k_smoothing: null,
-                        d_smoothing: null,
+                        k_smoothing: 3,
+                        d_smoothing: 3,
                     },
                 };
             case "adx":
@@ -228,7 +254,7 @@ export default function MarketDetail() {
             default:
                 return { rsi: 14 };
         }
-    }, [kindKey, p1, p2]);
+    }, [kindKey, p1, p2, p3]);
 
     const queueAdd = (id: IndexId) =>
         setPending((prev) => {
@@ -741,9 +767,7 @@ export default function MarketDetail() {
                             {market.indicators.map((data, i) => {
                                 const { asset, kind, timeframe, value } =
                                     decompose(data);
-                                const kindKey = Object.keys(
-                                    kind
-                                )[0] as IndicatorName;
+                                const kindKey = indicator_name(kind);
                                 return (
                                     <div className="group border-line-subtle flex flex-col items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px]">
                                         <div
@@ -1000,11 +1024,14 @@ export default function MarketDetail() {
                                     className={Select}
                                     value={kindKey}
                                     onChange={(e) => {
-                                        setKindKey(
-                                            e.target.value as IndicatorName
-                                        );
-                                        setP1(14);
-                                        setP2(14);
+                                        const kind =
+                                            e.target.value as IndicatorName;
+                                        setKindKey(kind);
+                                        const [newP1, newP2, newP3] =
+                                            indicatorDefaults[kind];
+                                        setP1(newP1);
+                                        setP2(newP2);
+                                        setP3(newP3);
                                     }}
                                 >
                                     {kindKeys.map((k) => (
@@ -1019,37 +1046,27 @@ export default function MarketDetail() {
                                 </select>
                             </div>
 
-                            <div>
-                                <label className="text-app-text/50 text-[10px] uppercase">
-                                    {indicatorParamLabels[kindKey]?.[0] ??
-                                        "Param"}
-                                </label>
-                                <input
-                                    type="number"
-                                    min="2"
-                                    className={Input}
-                                    value={p1}
-                                    onChange={(e) => setP1(+e.target.value)}
-                                />
-                            </div>
-
-                            {["emaCross", "smaOnRsi", "adx"].includes(
-                                kindKey
-                            ) && (
-                                <div>
+                            {indicatorParamLabels[kindKey].map((label, idx) => (
+                                <div key={`${kindKey}-${label}-${idx}`}>
                                     <label className="text-app-text/50 text-[10px] uppercase">
-                                        {indicatorParamLabels[kindKey]?.[1] ??
-                                            "Param2"}
+                                        {label}
                                     </label>
                                     <input
                                         type="number"
                                         min="2"
                                         className={Input}
-                                        value={p2}
-                                        onChange={(e) => setP2(+e.target.value)}
+                                        value={
+                                            idx === 0 ? p1 : idx === 1 ? p2 : p3
+                                        }
+                                        onChange={(e) => {
+                                            const value = +e.target.value;
+                                            if (idx === 0) setP1(value);
+                                            else if (idx === 1) setP2(value);
+                                            else setP3(value);
+                                        }}
                                     />
                                 </div>
-                            )}
+                            ))}
 
                             <div className="col-span-2">
                                 <label className="text-app-text/50 text-[10px] uppercase">
@@ -1125,9 +1142,7 @@ export default function MarketDetail() {
                                     <div className="mb-3 flex flex-wrap gap-2">
                                         {pending.map((e, idx) => {
                                             const [asset_name, kind, tf] = e.id;
-                                            const k = Object.keys(
-                                                kind
-                                            )[0] as IndicatorName;
+                                            const k = indicator_name(kind);
                                             return (
                                                 <div
                                                     key={idx}
