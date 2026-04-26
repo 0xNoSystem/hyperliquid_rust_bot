@@ -461,456 +461,490 @@ export default function StratEditor() {
         "w-full cursor-pointer rounded border border-line-solid bg-surface-input px-3 py-2 text-app-text text-sm";
 
     return (
-        <div className="text-app-text z-1 flex min-h-screen flex-col lg:flex-row">
-            {/* ---- Left sidebar: strategy list ---- */}
-            <div className="border-line-subtle bg-surface-pane flex w-full shrink-0 flex-col border-b lg:w-64 lg:border-r lg:border-b-0">
-                <div className="border-line-subtle flex items-center gap-2 border-b px-4 py-3">
-                    <FlaskConical className="text-accent-brand-soft h-5 w-5" />
-                    <h2 className="text-base font-semibold">Strategy Lab</h2>
+        <div className="z-1">
+            <div className="text-app-text flex min-h-screen flex-col lg:flex-row">
+                {/* ---- Left sidebar: strategy list ---- */}
+                <div className="border-line-subtle bg-surface-pane flex w-full shrink-0 flex-col border-b lg:w-64 lg:border-r lg:border-b-0">
+                    <div className="border-line-subtle flex items-center gap-2 border-b px-4 py-3">
+                        <FlaskConical className="text-accent-brand-soft h-5 w-5" />
+                        <h2 className="text-base font-semibold">
+                            Strategy Lab
+                        </h2>
+                    </div>
+
+                    <div className="max-h-[40vh] flex-1 overflow-y-auto lg:max-h-none">
+                        {strategies.map((s) => (
+                            <button
+                                key={s.id}
+                                onClick={() => loadStrategy(s)}
+                                className={`border-line-subtle flex w-full items-center justify-between border-b px-4 py-3 text-left text-sm transition ${
+                                    active?.id === s.id && !isNew
+                                        ? "bg-glow-10 text-accent-brand-soft"
+                                        : "text-app-text/70 hover:bg-glow-5"
+                                }`}
+                            >
+                                <span className="truncate">{s.name}</span>
+                                <ChevronRight className="h-4 w-4 shrink-0 opacity-40" />
+                            </button>
+                        ))}
+                    </div>
+
+                    <button
+                        onClick={startNew}
+                        className="border-line-subtle text-accent-brand-soft hover:bg-glow-5 flex items-center gap-2 border-t px-4 py-3 text-sm font-medium"
+                    >
+                        <Plus className="h-4 w-4" />
+                        New Strategy
+                    </button>
                 </div>
 
-                <div className="max-h-[40vh] flex-1 overflow-y-auto lg:max-h-none">
-                    {strategies.map((s) => (
-                        <button
-                            key={s.id}
-                            onClick={() => loadStrategy(s)}
-                            className={`border-line-subtle flex w-full items-center justify-between border-b px-4 py-3 text-left text-sm transition ${
-                                active?.id === s.id && !isNew
-                                    ? "bg-glow-10 text-accent-brand-soft"
-                                    : "text-app-text/70 hover:bg-glow-5"
-                            }`}
-                        >
-                            <span className="truncate">{s.name}</span>
-                            <ChevronRight className="h-4 w-4 shrink-0 opacity-40" />
-                        </button>
-                    ))}
-                </div>
-
-                <button
-                    onClick={startNew}
-                    className="border-line-subtle text-accent-brand-soft hover:bg-glow-5 flex items-center gap-2 border-t px-4 py-3 text-sm font-medium"
-                >
-                    <Plus className="h-4 w-4" />
-                    New Strategy
-                </button>
-            </div>
-
-            {/* ---- Main editor area ---- */}
-            <div className="flex min-h-[70vh] flex-1 flex-col lg:min-h-screen lg:overflow-hidden">
-                {!active ? (
-                    <div className="text-app-text/40 text-md flex flex-1 flex-col items-center justify-center">
-                        Select a strategy or create a new one
-                        <button
-                            onClick={startNew}
-                            className="border-line-subtle text-accent-brand-soft hover:bg-glow-5 mt-1 flex items-center gap-2 rounded-sm px-2 py-2 text-sm font-medium hover:bg-orange-200/30"
-                        >
-                            <Plus className="h-4 w-4" />
-                            New Strategy
-                        </button>
-                    </div>
-                ) : loading ? (
-                    <div className="text-app-text/40 flex flex-1 items-center justify-center text-sm">
-                        Loading...
-                    </div>
-                ) : (
-                    <>
-                        {/* Top bar: name + actions */}
-                        <div className="border-line-subtle flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:gap-3 sm:px-6">
-                            {editing ? (
-                                <input
-                                    type="text"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    placeholder="Strategy name"
-                                    spellCheck={false}
-                                    className="text-app-text placeholder:text-app-text/30 min-w-0 flex-1 basis-full bg-transparent text-lg font-semibold outline-none sm:basis-auto"
-                                />
-                            ) : (
-                                <span className="text-app-text min-w-0 flex-1 basis-full text-lg font-semibold sm:basis-auto">
-                                    {name || "Untitled"}
-                                </span>
-                            )}
-
-                            {editing ? (
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        onClick={handleSave}
-                                        disabled={saving}
-                                        className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
-                                    >
-                                        <Save className="h-3.5 w-3.5" />
-                                        {saving ? "Saving..." : "Save"}
-                                    </button>
-                                    {!isNew && (
-                                        <button
-                                            onClick={handleDelete}
-                                            className="border-accent-danger-soft/40 text-accent-danger-soft hover:bg-accent-danger-soft/10 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm"
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                            Delete
-                                        </button>
-                                    )}
-                                    <button className="rounded bg-green-600/30 px-3 font-bold">
-                                        <span
-                                            className="font-normal"
-                                            onClick={() => setVimMode(!vimMode)}
-                                        >
-                                            vim {vimMode ? "on " : "Off "}
-                                        </span>
-                                    </button>
-                                </div>
-                            ) : (
-                                <button
-                                    onClick={() => setEditing(true)}
-                                    className="border-line-subtle text-accent-brand-soft hover:bg-glow-5 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm"
-                                >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                    Edit
-                                </button>
-                            )}
+                {/* ---- Main editor area ---- */}
+                <div className="flex min-h-[70vh] flex-1 flex-col lg:min-h-screen lg:overflow-hidden">
+                    {!active ? (
+                        <div className="text-app-text/40 text-md flex flex-1 flex-col items-center justify-center">
+                            Select a strategy or create a new one
+                            <button
+                                onClick={startNew}
+                                className="border-line-subtle text-accent-brand-soft hover:bg-glow-5 mt-1 flex items-center gap-2 rounded-sm px-2 py-2 text-sm font-medium hover:bg-orange-200/30"
+                            >
+                                <Plus className="h-4 w-4" />
+                                New Strategy
+                            </button>
                         </div>
-
-                        {/* Status messages */}
-                        <AnimatePresence>
-                            {(error || success) && (
-                                <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: "auto", opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    className="overflow-hidden"
-                                >
-                                    <div
-                                        className={`px-6 py-2 text-sm ${
-                                            error
-                                                ? "bg-surface-pane text-accent-danger-soft"
-                                                : "bg-surface-success text-success-faint"
-                                        }`}
-                                    >
-                                        {error ?? success}
-                                    </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-
-                        {/* Indicators */}
-                        <div className="border-line-subtle relative border-b px-4 py-3 sm:px-6">
-                            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                <span className="text-app-text/50 text-xs font-medium tracking-wide uppercase">
-                                    Indicators
-                                </span>
-                                {editing && (
-                                    <button
-                                        onClick={() =>
-                                            setShowIndicatorPicker((p) => !p)
+                    ) : loading ? (
+                        <div className="text-app-text/40 flex flex-1 items-center justify-center text-sm">
+                            Loading...
+                        </div>
+                    ) : (
+                        <>
+                            {/* Top bar: name + actions */}
+                            <div className="border-line-subtle flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:gap-3 sm:px-6">
+                                {editing ? (
+                                    <input
+                                        type="text"
+                                        value={name}
+                                        onChange={(e) =>
+                                            setName(e.target.value)
                                         }
-                                        className="text-accent-brand-soft text-xs hover:underline"
+                                        placeholder="Strategy name"
+                                        spellCheck={false}
+                                        className="text-app-text placeholder:text-app-text/30 min-w-0 flex-1 basis-full bg-transparent text-lg font-semibold outline-none sm:basis-auto"
+                                    />
+                                ) : (
+                                    <span className="text-app-text min-w-0 flex-1 basis-full text-lg font-semibold sm:basis-auto">
+                                        {name || "Untitled"}
+                                    </span>
+                                )}
+
+                                {editing ? (
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            onClick={handleSave}
+                                            disabled={saving}
+                                            className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+                                        >
+                                            <Save className="h-3.5 w-3.5" />
+                                            {saving ? "Saving..." : "Save"}
+                                        </button>
+                                        {!isNew && (
+                                            <button
+                                                onClick={handleDelete}
+                                                className="border-accent-danger-soft/40 text-accent-danger-soft hover:bg-accent-danger-soft/10 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                                Delete
+                                            </button>
+                                        )}
+                                        <button className="rounded bg-green-600/30 px-3 font-bold">
+                                            <span
+                                                className="font-normal"
+                                                onClick={() =>
+                                                    setVimMode(!vimMode)
+                                                }
+                                            >
+                                                vim {vimMode ? "on " : "Off "}
+                                            </span>
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={() => setEditing(true)}
+                                        className="border-line-subtle text-accent-brand-soft hover:bg-glow-5 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm"
                                     >
-                                        + Add
+                                        <Pencil className="h-3.5 w-3.5" />
+                                        Edit
                                     </button>
                                 )}
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                                {indicators.length === 0 && (
-                                    <span className="text-app-text/30 text-xs">
-                                        No indicators added
-                                    </span>
-                                )}
-                                {indicators.map(([asset, ind, tf], i) => {
-                                    const kind = indicator_name(ind);
-                                    return (
+
+                            {/* Status messages */}
+                            <AnimatePresence>
+                                {(error || success) && (
+                                    <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: "auto", opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        className="overflow-hidden"
+                                    >
                                         <div
-                                            key={i}
-                                            className="flex items-center gap-1"
+                                            className={`px-6 py-2 text-sm ${
+                                                error
+                                                    ? "bg-surface-pane text-accent-danger-soft"
+                                                    : "bg-surface-success text-success-faint"
+                                            }`}
                                         >
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    insertAtCursor(
-                                                        `let x = extract("${indicatorKey(asset, ind, fromTimeFrame(tf))}");`
-                                                    )
-                                                }
-                                                title="Click to insert extract() into editor"
-                                                className={`${indicatorColors[kind]} cursor-pointer rounded-full px-2.5 py-0.5 text-xs hover:opacity-80`}
+                                            {error ?? success}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+
+                            {/* Indicators */}
+                            <div className="border-line-subtle relative border-b px-4 py-3 sm:px-6">
+                                <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                    <span className="text-app-text/50 text-xs font-medium tracking-wide uppercase">
+                                        Indicators
+                                    </span>
+                                    {editing && (
+                                        <button
+                                            onClick={() =>
+                                                setShowIndicatorPicker(
+                                                    (p) => !p
+                                                )
+                                            }
+                                            className="text-accent-brand-soft text-xs hover:underline"
+                                        >
+                                            + Add
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {indicators.length === 0 && (
+                                        <span className="text-app-text/30 text-xs">
+                                            No indicators added
+                                        </span>
+                                    )}
+                                    {indicators.map(([asset, ind, tf], i) => {
+                                        const kind = indicator_name(ind);
+                                        return (
+                                            <div
+                                                key={i}
+                                                className="flex items-center gap-1"
                                             >
-                                                <strong>({asset})</strong>{" "}
-                                                {indicatorLabels[kind]}{" "}
-                                                {get_params(ind)}{" "}
-                                                {fromTimeFrame(tf)}
-                                            </button>
-                                            {editing && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        insertAtCursor(
+                                                            `let x = extract("${indicatorKey(asset, ind, fromTimeFrame(tf))}");`
+                                                        )
+                                                    }
+                                                    title="Click to insert extract() into editor"
+                                                    className={`${indicatorColors[kind]} cursor-pointer rounded-full px-2.5 py-0.5 text-xs hover:opacity-80`}
+                                                >
+                                                    <strong>({asset})</strong>{" "}
+                                                    {indicatorLabels[kind]}{" "}
+                                                    {get_params(ind)}{" "}
+                                                    {fromTimeFrame(tf)}
+                                                </button>
+                                                {editing && (
+                                                    <button
+                                                        onClick={() =>
+                                                            removeIndicator(i)
+                                                        }
+                                                        className="text-accent-danger-strong cursor-pointer text-sm leading-none"
+                                                    >
+                                                        x
+                                                    </button>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Indicator picker popover */}
+                                <AnimatePresence>
+                                    {showIndicatorPicker && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: -4 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            exit={{ opacity: 0, y: -4 }}
+                                            className="border-line-solid bg-surface-popover absolute top-full right-4 left-4 z-50 mt-2 w-auto rounded-md border p-4 shadow-lg sm:right-6 sm:left-auto sm:w-72"
+                                        >
+                                            <div className="mb-3 flex items-center justify-between">
+                                                <h3 className="text-sm font-semibold">
+                                                    Add Indicator
+                                                </h3>
                                                 <button
                                                     onClick={() =>
-                                                        removeIndicator(i)
+                                                        setShowIndicatorPicker(
+                                                            false
+                                                        )
                                                     }
-                                                    className="text-accent-danger-strong cursor-pointer text-sm leading-none"
                                                 >
-                                                    x
+                                                    <X className="text-app-text/40 h-4 w-4" />
                                                 </button>
-                                            )}
+                                            </div>
+                                            <div className="mb-2">
+                                                <label className="text-app-text/60 text-xs">
+                                                    Asset
+                                                </label>
+                                                <SearchBar
+                                                    value={newAsset}
+                                                    onChange={setNewAsset}
+                                                    options={assetOptions}
+                                                    placeholder="Select asset"
+                                                    searchPlaceholder="Search assets..."
+                                                    emptyMessage="No assets found."
+                                                    ariaLabel="Indicator asset"
+                                                    containerClassName="mt-1"
+                                                    buttonClassName={
+                                                        selectClass
+                                                    }
+                                                />
+                                            </div>
+                                            <select
+                                                value={newKind}
+                                                onChange={(e) => {
+                                                    const kind = e.target
+                                                        .value as IndicatorName;
+                                                    setNewKind(kind);
+                                                    const [p1, p2, p3] =
+                                                        indicatorDefaults[kind];
+                                                    setNewParam(p1);
+                                                    setNewParam2(p2);
+                                                    setNewParam3(p3);
+                                                }}
+                                                className={selectClass}
+                                            >
+                                                {indicatorKinds.map((k) => (
+                                                    <option key={k} value={k}>
+                                                        {indicatorLabels[k]}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                                {indicatorParamLabels[newKind]
+                                                    .length === 0 ? (
+                                                    <p className="text-app-text/70 col-span-2 text-xs">
+                                                        This indicator has no
+                                                        parameters.
+                                                    </p>
+                                                ) : (
+                                                    indicatorParamLabels[
+                                                        newKind
+                                                    ].map((label, idx) => (
+                                                        <div
+                                                            key={`${newKind}-${label}-${idx}`}
+                                                            className="contents"
+                                                        >
+                                                            <label className="text-app-text/60 mt-1 text-right text-xs">
+                                                                {label}
+                                                            </label>
+                                                            <input
+                                                                type="number"
+                                                                value={
+                                                                    idx === 0
+                                                                        ? newParam
+                                                                        : idx ===
+                                                                            1
+                                                                          ? newParam2
+                                                                          : newParam3
+                                                                }
+                                                                onChange={(
+                                                                    e
+                                                                ) => {
+                                                                    const value =
+                                                                        +e
+                                                                            .target
+                                                                            .value;
+                                                                    if (
+                                                                        idx ===
+                                                                        0
+                                                                    )
+                                                                        setNewParam(
+                                                                            value
+                                                                        );
+                                                                    else if (
+                                                                        idx ===
+                                                                        1
+                                                                    )
+                                                                        setNewParam2(
+                                                                            value
+                                                                        );
+                                                                    else
+                                                                        setNewParam3(
+                                                                            value
+                                                                        );
+                                                                }}
+                                                                className={
+                                                                    inputClass
+                                                                }
+                                                            />
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                            <div className="mt-2">
+                                                <label className="text-app-text/60 text-xs">
+                                                    Time Frame
+                                                </label>
+                                                <select
+                                                    value={newTf}
+                                                    onChange={(e) =>
+                                                        setNewTf(
+                                                            e.target
+                                                                .value as TimeframeKey
+                                                        )
+                                                    }
+                                                    className={selectClass}
+                                                >
+                                                    {Object.keys(
+                                                        TIMEFRAME_CAMELCASE
+                                                    ).map((t) => (
+                                                        <option
+                                                            key={t}
+                                                            value={t}
+                                                        >
+                                                            {t}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <button
+                                                onClick={handleAddIndicator}
+                                                className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover mt-3 w-full rounded-md border py-1.5 text-sm"
+                                            >
+                                                Add
+                                            </button>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* State declarations */}
+                            {(editing || stateText.trim()) && (
+                                <div className="border-line-subtle border-b px-4 py-3 sm:px-6">
+                                    <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                                        <span className="text-app-text/50 text-xs font-medium tracking-wide uppercase">
+                                            State Variables
+                                        </span>
+                                        <span className="text-app-text/30 text-xs">
+                                            one per line: name = default
+                                        </span>
+                                    </div>
+                                    <textarea
+                                        value={stateText}
+                                        onChange={(e) =>
+                                            setStateText(e.target.value)
+                                        }
+                                        readOnly={!editing}
+                                        placeholder={
+                                            'count = 0\nlast_signal = "none"'
+                                        }
+                                        rows={Math.max(
+                                            2,
+                                            stateText.split("\n").length
+                                        )}
+                                        className="border-line-solid bg-surface-input text-app-text placeholder:text-app-text/20 w-full resize-none rounded border px-3 py-2 font-mono text-sm"
+                                    />
+                                </div>
+                            )}
+
+                            {/* Script editors */}
+                            <div className="relative flex min-h-[60vh] flex-1 flex-col gap-px overflow-hidden lg:min-h-300">
+                                {(
+                                    [
+                                        ["on_idle", onIdle, setOnIdle],
+                                        ["on_open", onOpen, setOnOpen],
+                                        ["on_busy", onBusy, setOnBusy],
+                                    ] as const
+                                ).map(([label, value, setter]) => {
+                                    const isFullscreen =
+                                        fullscreenPanel === label;
+                                    return (
+                                        <div
+                                            key={label}
+                                            className={
+                                                isFullscreen
+                                                    ? "bg-app-surface-3 absolute inset-0 z-30 flex flex-col"
+                                                    : "bg-app-surface-3 group relative flex min-h-[280px] flex-1 flex-col sm:min-h-[320px] lg:min-h-0"
+                                            }
+                                        >
+                                            <div className="border-line-subtle bg-surface-pane flex items-center justify-between border-b px-4 py-2">
+                                                <span className="text-app-text/50 text-xs font-medium tracking-wider uppercase">
+                                                    {label.replace("_", " ")}
+                                                </span>
+                                                <button
+                                                    onClick={() =>
+                                                        isFullscreen
+                                                            ? setFullscreenPanel(
+                                                                  null
+                                                              )
+                                                            : setFullscreenPanel(
+                                                                  label
+                                                              )
+                                                    }
+                                                    className={`transition ${
+                                                        isFullscreen
+                                                            ? "text-app-text/40 hover:text-app-text"
+                                                            : "text-app-text/40 hover:text-app-text opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                                                    }`}
+                                                    title={
+                                                        isFullscreen
+                                                            ? "Exit fullscreen"
+                                                            : "Fullscreen"
+                                                    }
+                                                >
+                                                    {isFullscreen ? (
+                                                        <X className="h-4 w-4" />
+                                                    ) : (
+                                                        <Maximize2 className="h-4 w-4" />
+                                                    )}
+                                                </button>
+                                            </div>
+                                            <AceEditor
+                                                mode={rhaiMode}
+                                                showPrintMargin={false}
+                                                theme={
+                                                    theme == "light"
+                                                        ? "solarized_light"
+                                                        : "monokai"
+                                                }
+                                                ref={(el) => {
+                                                    textareaRefs.current[
+                                                        label
+                                                    ] = el;
+                                                }}
+                                                onFocus={() => {
+                                                    lastFocusedRef.current =
+                                                        label;
+                                                }}
+                                                value={value}
+                                                onChange={(newValue) =>
+                                                    setter(newValue)
+                                                }
+                                                readOnly={!editing}
+                                                setOptions={{
+                                                    useWorker: false,
+                                                    fontFamily: "monospace",
+                                                }}
+                                                className="min-h-[220px] flex-1"
+                                                width="100%"
+                                                height="100%"
+                                                keyboardHandler={
+                                                    vimMode ? "vim" : undefined
+                                                }
+                                            />
                                         </div>
                                     );
                                 })}
                             </div>
-
-                            {/* Indicator picker popover */}
-                            <AnimatePresence>
-                                {showIndicatorPicker && (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: -4 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        exit={{ opacity: 0, y: -4 }}
-                                        className="border-line-solid bg-surface-popover absolute top-full right-4 left-4 z-50 mt-2 w-auto rounded-md border p-4 shadow-lg sm:left-auto sm:right-6 sm:w-72"
-                                    >
-                                        <div className="mb-3 flex items-center justify-between">
-                                            <h3 className="text-sm font-semibold">
-                                                Add Indicator
-                                            </h3>
-                                            <button
-                                                onClick={() =>
-                                                    setShowIndicatorPicker(
-                                                        false
-                                                    )
-                                                }
-                                            >
-                                                <X className="text-app-text/40 h-4 w-4" />
-                                            </button>
-                                        </div>
-                                        <div className="mb-2">
-                                            <label className="text-app-text/60 text-xs">
-                                                Asset
-                                            </label>
-                                            <SearchBar
-                                                value={newAsset}
-                                                onChange={setNewAsset}
-                                                options={assetOptions}
-                                                placeholder="Select asset"
-                                                searchPlaceholder="Search assets..."
-                                                emptyMessage="No assets found."
-                                                ariaLabel="Indicator asset"
-                                                containerClassName="mt-1"
-                                                buttonClassName={selectClass}
-                                            />
-                                        </div>
-                                        <select
-                                            value={newKind}
-                                            onChange={(e) => {
-                                                const kind = e.target
-                                                    .value as IndicatorName;
-                                                setNewKind(kind);
-                                                const [p1, p2, p3] =
-                                                    indicatorDefaults[kind];
-                                                setNewParam(p1);
-                                                setNewParam2(p2);
-                                                setNewParam3(p3);
-                                            }}
-                                            className={selectClass}
-                                        >
-                                            {indicatorKinds.map((k) => (
-                                                <option key={k} value={k}>
-                                                    {indicatorLabels[k]}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                            {indicatorParamLabels[newKind]
-                                                .length === 0 ? (
-                                                <p className="text-app-text/70 col-span-2 text-xs">
-                                                    This indicator has no
-                                                    parameters.
-                                                </p>
-                                            ) : (
-                                                indicatorParamLabels[
-                                                    newKind
-                                                ].map((label, idx) => (
-                                                    <div
-                                                        key={`${newKind}-${label}-${idx}`}
-                                                        className="contents"
-                                                    >
-                                                        <label className="text-app-text/60 mt-1 text-right text-xs">
-                                                            {label}
-                                                        </label>
-                                                        <input
-                                                            type="number"
-                                                            value={
-                                                                idx === 0
-                                                                    ? newParam
-                                                                    : idx === 1
-                                                                      ? newParam2
-                                                                      : newParam3
-                                                            }
-                                                            onChange={(e) => {
-                                                                const value =
-                                                                    +e.target
-                                                                        .value;
-                                                                if (idx === 0)
-                                                                    setNewParam(
-                                                                        value
-                                                                    );
-                                                                else if (
-                                                                    idx === 1
-                                                                )
-                                                                    setNewParam2(
-                                                                        value
-                                                                    );
-                                                                else
-                                                                    setNewParam3(
-                                                                        value
-                                                                    );
-                                                            }}
-                                                            className={
-                                                                inputClass
-                                                            }
-                                                        />
-                                                    </div>
-                                                ))
-                                            )}
-                                        </div>
-                                        <div className="mt-2">
-                                            <label className="text-app-text/60 text-xs">
-                                                Time Frame
-                                            </label>
-                                            <select
-                                                value={newTf}
-                                                onChange={(e) =>
-                                                    setNewTf(
-                                                        e.target
-                                                            .value as TimeframeKey
-                                                    )
-                                                }
-                                                className={selectClass}
-                                            >
-                                                {Object.keys(
-                                                    TIMEFRAME_CAMELCASE
-                                                ).map((t) => (
-                                                    <option key={t} value={t}>
-                                                        {t}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <button
-                                            onClick={handleAddIndicator}
-                                            className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover mt-3 w-full rounded-md border py-1.5 text-sm"
-                                        >
-                                            Add
-                                        </button>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
-
-                        {/* State declarations */}
-                        {(editing || stateText.trim()) && (
-                            <div className="border-line-subtle border-b px-4 py-3 sm:px-6">
-                                <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                                    <span className="text-app-text/50 text-xs font-medium tracking-wide uppercase">
-                                        State Variables
-                                    </span>
-                                    <span className="text-app-text/30 text-xs">
-                                        one per line: name = default
-                                    </span>
-                                </div>
-                                <textarea
-                                    value={stateText}
-                                    onChange={(e) =>
-                                        setStateText(e.target.value)
-                                    }
-                                    readOnly={!editing}
-                                    placeholder={
-                                        'count = 0\nlast_signal = "none"'
-                                    }
-                                    rows={Math.max(
-                                        2,
-                                        stateText.split("\n").length
-                                    )}
-                                    className="border-line-solid bg-surface-input text-app-text placeholder:text-app-text/20 w-full resize-none rounded border px-3 py-2 font-mono text-sm"
-                                />
-                            </div>
-                        )}
-
-                        {/* Script editors */}
-                        <div className="relative flex min-h-[60vh] flex-1 flex-col gap-px overflow-hidden lg:min-h-0 lg:flex-row">
-                            {(
-                                [
-                                    ["on_idle", onIdle, setOnIdle],
-                                    ["on_open", onOpen, setOnOpen],
-                                    ["on_busy", onBusy, setOnBusy],
-                                ] as const
-                            ).map(([label, value, setter]) => {
-                                const isFullscreen = fullscreenPanel === label;
-                                return (
-                                    <div
-                                        key={label}
-                                        className={
-                                            isFullscreen
-                                                ? "bg-app-surface-3 absolute inset-0 z-30 flex flex-col"
-                                                : "bg-app-surface-3 group relative flex min-h-[280px] flex-1 flex-col sm:min-h-[320px] lg:min-h-0"
-                                        }
-                                    >
-                                        <div className="border-line-subtle bg-surface-pane flex items-center justify-between border-b px-4 py-2">
-                                            <span className="text-app-text/50 text-xs font-medium tracking-wider uppercase">
-                                                {label.replace("_", " ")}
-                                            </span>
-                                            <button
-                                                onClick={() =>
-                                                    isFullscreen
-                                                        ? setFullscreenPanel(null)
-                                                        : setFullscreenPanel(label)
-                                                }
-                                                className={`transition ${
-                                                    isFullscreen
-                                                        ? "text-app-text/40 hover:text-app-text"
-                                                        : "text-app-text/40 hover:text-app-text opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-                                                }`}
-                                                title={
-                                                    isFullscreen
-                                                        ? "Exit fullscreen"
-                                                        : "Fullscreen"
-                                                }
-                                            >
-                                                {isFullscreen ? (
-                                                    <X className="h-4 w-4" />
-                                                ) : (
-                                                    <Maximize2 className="h-4 w-4" />
-                                                )}
-                                            </button>
-                                        </div>
-                                        <AceEditor
-                                            mode={rhaiMode}
-                                            theme={
-                                                theme == "light"
-                                                    ? "solarized_light"
-                                                    : "monokai"
-                                            }
-                                            ref={(el) => {
-                                                textareaRefs.current[label] =
-                                                    el;
-                                            }}
-                                            onFocus={() => {
-                                                lastFocusedRef.current = label;
-                                            }}
-                                            value={value}
-                                            onChange={(newValue) =>
-                                                setter(newValue)
-                                            }
-                                            readOnly={!editing}
-                                            setOptions={{
-                                                useWorker: false,
-                                                fontFamily: "monospace",
-                                            }}
-                                            className="min-h-[220px] flex-1"
-                                            width="100%"
-                                            height="100%"
-                                            keyboardHandler={
-                                                vimMode ? "vim" : undefined
-                                            }
-                                        />
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </>
-                )}
+                        </>
+                    )}
+                </div>
+            </div>
+            <div className="bg-accent-brand border-accent-brand mb-50 border py-30 text-center font-bold">
+                QUANT AGENT COMING SOON
             </div>
         </div>
     );

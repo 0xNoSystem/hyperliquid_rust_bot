@@ -81,8 +81,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     const reconnectRef = useRef<number | null>(null);
     const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const hasLocalMarketsRef = useRef(false);
-    const activeRef = useRef(true);
-
     /** ---------- utils ---------- **/
     const tokenRef = useRef(token);
     useEffect(() => {
@@ -431,10 +429,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         if (!token) return;
 
         let retry = 0;
-        activeRef.current = true;
+        let active = true;
 
         const connect = () => {
-            if (!activeRef.current) return;
+            if (!active) return;
 
             const wsUrl = `${WS_ENDPOINT}?token=${encodeURIComponent(token)}`;
             const ws = new WebSocket(wsUrl);
@@ -449,24 +447,41 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
             ws.addEventListener("message", handleMessage);
             ws.addEventListener("close", () => {
-                if (!activeRef.current) return;
+                if (!active) return;
                 const delay = Math.min(1000 * 2 ** retry, 15000);
                 retry++;
                 reconnectRef.current = window.setTimeout(connect, delay);
             });
 
-            ws.addEventListener("error", console.error);
+            ws.addEventListener("error", (event) => {
+                if (!active) return;
+                console.error(event);
+                setErrorWithTimeout("WebSocket connection error");
+            });
         };
 
         connect();
 
         return () => {
-            activeRef.current = false;
-            if (reconnectRef.current) clearTimeout(reconnectRef.current);
+            active = false;
+            if (reconnectRef.current) {
+                clearTimeout(reconnectRef.current);
+                reconnectRef.current = null;
+            }
             wsRef.current?.close();
-            if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+            if (errorTimeoutRef.current) {
+                clearTimeout(errorTimeoutRef.current);
+                errorTimeoutRef.current = null;
+            }
         };
-    }, [token, handleMessage, sendCommand, fetchStrategies, requestSyncMargin]);
+    }, [
+        token,
+        handleMessage,
+        sendCommand,
+        fetchStrategies,
+        requestSyncMargin,
+        setErrorWithTimeout,
+    ]);
 
     /** ---------- API ---------- **/
     const cacheMarket = useCallback((asset: string) => {

@@ -8,5 +8,6 @@ async fn main() {
     println!("{dexs:#?}");
 
     let all_assets = info.all_perp_metas().await.unwrap();
-    println!("Total assets across all dexes: {}", all_assets.len());
+    let asset_names: Vec<String> = all_assets.into_iter().map(|a| a.name).collect();
+    dbg!(asset_names);
 }

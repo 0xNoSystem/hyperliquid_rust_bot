@@ -398,30 +398,28 @@ export default function MarketDetail() {
         <div className="bg-surface-tone text-app-text relative z-40 mx-auto min-h-screen w-full max-w-[3300px] overflow-x-hidden py-4 pb-32 font-mono sm:py-6 sm:pb-48 lg:py-8 lg:pb-80">
             <ErrorBanner message={errorMsg} onDismiss={dismissError} />
             <div className="mt-6 mb-4 px-4 sm:mt-10 sm:px-6 lg:px-8">
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                    <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col justify-center gap-4 xl:flex-row xl:flex-wrap xl:items-center xl:gap-4">
+                    <div className="order-2 flex flex-wrap items-center gap-3 xl:order-1">
                         <button
                             onClick={() =>
-                                handleConfirmToggle(market.asset, market.isPaused)
+                                handleConfirmToggle(
+                                    market.asset,
+                                    market.isPaused
+                                )
                             }
                             className={Chip}
                         >
                             {market.isPaused ? "Paused" : "Live"}
                         </button>
-                        <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>
-                            <div className="border-accent-brand-strong/40 text-accent-brand w-fit rounded border px-3 py-1 text-sm font-semibold">
-                                {"BACKTEST (BETA)"}
-                            </div>
-                        </Link>
                     </div>
-                    <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
+                    <div className="order-1 flex flex-wrap items-end gap-x-3 gap-y-1 xl:order-2">
                         <h1 className="text-3xl tracking-[0.2em] sm:text-[40px]">
                             {market.asset}
                         </h1>
                         <span
                             className={`text-xl sm:text-[24px] ${leverageColor(marketLev, maxLev)}`}
                         >
-                            {marketLev}x
+                            x{marketLev}
                         </span>
                     </div>
                 </div>
@@ -625,24 +623,34 @@ export default function MarketDetail() {
                             </p>
                             {currentStrategyName &&
                                 currentStrategyName !== "View Only" && (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            const strat = strategies.find(
-                                                (s) =>
-                                                    s.name ===
-                                                    currentStrategyName
-                                            );
-                                            navigate("/lab", {
-                                                state: {
-                                                    strategyId: strat?.id,
-                                                },
-                                            });
-                                        }}
-                                        className="text-accent-brand-soft hover:bg-glow-5 border-line-subtle mx-auto block rounded border px-2 py-0.5 text-[10px] uppercase"
-                                    >
-                                        Open in Lab
-                                    </button>
+                                    <>
+                                        <Link
+                                            to={`/backtest/${sanitizeAsset(market.asset)}`}
+                                        >
+                                            <div className="text-accent-brand-soft hover:bg-glow-5 border-line-subtle mx-auto mb-1 block w-min rounded border px-2 py-0.5 text-center text-[10px] uppercase">
+                                                {"BACKTEST"}
+                                            </div>
+                                        </Link>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const strat = strategies.find(
+                                                    (s) =>
+                                                        s.name ===
+                                                        currentStrategyName
+                                                );
+                                                navigate("/lab", {
+                                                    state: {
+                                                        strategyId: strat?.id,
+                                                    },
+                                                });
+                                            }}
+                                            className="text-accent-brand-soft hover:bg-glow-5 border-line-subtle mx-auto block rounded border px-2 py-0.5 text-[10px] uppercase"
+                                        >
+                                            Open in Lab
+                                        </button>
+                                    </>
                                 )}
                             <div className="mt-2 grid gap-2">
                                 {[
@@ -715,7 +723,9 @@ export default function MarketDetail() {
                 {/* CENTER — chart area + active indicators + trades */}
                 <main className="min-w-0 space-y-4">
                     {/* Chart placeholder with scanlines */}
-                    <section className={`${Pane} min-h-[50vh] overflow-hidden sm:min-h-[60vh] lg:min-h-[65vh]`}>
+                    <section
+                        className={`${Pane} min-h-[50vh] overflow-hidden sm:min-h-[60vh] lg:min-h-[65vh]`}
+                    >
                         <div className={`${Head} flex flex-col gap-2 sm:block`}>
                             Chart{" "}
                             <span className="text-accent-danger-muted/50">
@@ -1002,7 +1012,9 @@ export default function MarketDetail() {
                     {/*STRATEGY LOG END*/}
                     <section className={Pane}>
                         <div className={Head}>Add Indicator</div>
-                        <div className={`${Body} grid grid-cols-1 gap-3 sm:grid-cols-2`}>
+                        <div
+                            className={`${Body} grid grid-cols-1 gap-3 sm:grid-cols-2`}
+                        >
                             <div className="col-span-2">
                                 <label className="text-app-text/50 text-[10px] uppercase">
                                     Asset

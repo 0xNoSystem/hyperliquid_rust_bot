@@ -6,7 +6,7 @@ RUST_LOG=info cargo run --release --bin kwant & #PREFIX WITH "RUST_LOG=info" for
 cd ./web_ui
 
 bun install
-bun run dev
+bun run dev --host
 
 
 

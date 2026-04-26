@@ -86,7 +86,7 @@ const MarketCard = ({
             <div className="mb-3 flex items-start justify-between">
                 <div>
                     <div className="text-app-text/50 text-[10px]">
-                        ASSET {asset.includes(":")? "(HIP-3)": "(core)"}
+                        ASSET {asset.includes(":") ? "(HIP-3)" : "(core)"}
                     </div>
                     <div className="-mt-0.5 flex items-baseline gap-3">
                         <h2 className="text-3xl font-semibold tracking-tight">
