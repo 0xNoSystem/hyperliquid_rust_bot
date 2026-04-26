@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { createEIP1193Provider } from "./eip1193";
 import type { WalletProvider } from "./provider";
 

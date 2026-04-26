@@ -51,7 +51,7 @@ export default function Login() {
                 {/* Logo */}
                 <div className="flex items-center gap-4">
                     <div className="border-line-subtle bg-app-surface-2 grid place-items-center rounded-md border">
-                        <RotatingCube foreground="#05DF72" />
+                        <RotatingCube foreground="#FF8909" />
                     </div>
                     <div className="leading-tight">
                         <h1 className="font-mono text-2xl tracking-[0.22em]">

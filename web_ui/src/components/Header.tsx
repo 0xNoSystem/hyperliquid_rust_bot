@@ -52,16 +52,17 @@ const Header: React.FC = () => {
 
                 {/* Desktop nav */}
                 <div className="hidden items-center gap-2 md:flex">
-                    <Link to="/backtest/BTC">
-                        <div className="hover:border-accent-brand-strong/60 text-app-text relative w-fit rounded border px-3 py-1 text-sm">
-                            BACKTESTING
-                        </div>
-                    </Link>
                     <Link to="/lab">
-                        <div className="hover:border-accent-brand-strong/60 text-app-text relative w-fit rounded border px-3 py-1 text-sm">
+                        <div className="border-accent-brand hover:border-accent-brand-strong/60 text-app-text relative w-fit rounded border px-3 py-1 text-sm">
                             LAB
                         </div>
                     </Link>
+                    <Link to="/backtest/BTC">
+                        <div className="border-accent-brand hover:border-accent-brand-strong/60 text-app-text relative w-fit rounded border px-3 py-1 text-sm">
+                            BACKTESTING
+                        </div>
+                    </Link>
+
                     <a
                         href="https://app.hyperliquid.xyz"
                         target="_blank"
@@ -97,7 +98,7 @@ const Header: React.FC = () => {
                     </button>
                     <Link
                         to="/settings"
-                        className="border-accent-brand bg-app-surface-2 text-app-text hover:bg-glow-5 inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1"
+                        className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-glow-5 inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1"
                     >
                         Settings
                     </Link>
@@ -189,7 +190,7 @@ const Header: React.FC = () => {
                     <Link
                         to="/settings"
                         onClick={() => setMenuOpen(false)}
-                        className="border-accent-brand bg-app-surface-2 text-app-text hover:bg-glow-5 inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border px-3 py-2"
+                        className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-glow-5 inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border px-3 py-2"
                     >
                         Settings
                     </Link>
