@@ -925,10 +925,15 @@ impl SignalEngine {
         }
     }
 
-    pub fn tick_backtest(&mut self, price: Price) -> Vec<BtAction> {
+    pub fn tick_backtest(
+        &mut self,
+        asset: &Arc<str>,
+        tf: TimeFrame,
+        price: Price,
+        execution_price: Price,
+    ) -> Vec<BtAction> {
         let mut actions = Vec::new();
-        // Backtest: all trackers get the same price (single-asset backtest)
-        for tracker in self.trackers.values_mut() {
+        if let Some(tracker) = self.trackers.get_mut(&(Arc::clone(asset), tf)) {
             tracker.digest(price);
         }
         if self.paused {
@@ -979,8 +984,8 @@ impl SignalEngine {
                 return actions;
             }
 
-            if let Some(pending) = self.translate_intent(&intent, &price) {
-                if let Err(e) = self.validate_trade(pending, price.close) {
+            if let Some(pending) = self.translate_intent(&intent, &execution_price) {
+                if let Err(e) = self.validate_trade(pending, execution_price.close) {
                     log::warn!("Trade rejected: {}", e);
                 } else {
                     if let Some(bt_order) = self.bt_order_from_pending(pending)
@@ -1040,18 +1045,6 @@ impl SignalEngine {
             }
         }
         actions
-    }
-
-    pub fn tick(&mut self, price: Price) -> Option<EngineOrder> {
-        self.tick_backtest(price)
-            .into_iter()
-            .find_map(|action| match action {
-                BtAction::Submit { order, .. } => Some(match order {
-                    BtOrder::Open(open) => open.order,
-                    BtOrder::Close(close) => close.order,
-                }),
-                _ => None,
-            })
     }
 }
 
@@ -1186,8 +1179,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::SignalEngine;
-    use crate::backend::scripting::{CompiledStrategy, create_engine};
-    use crate::{IndicatorKind, TimeFrame};
+    use crate::backend::scripting::{CompiledStrategy, compile_strategy, create_engine};
+    use crate::{BtAction, BtOrder, IndicatorKind, TimeFrame};
 
     #[test]
     fn new_backtest_replaces_self_indicators_with_market_asset() {
@@ -1217,5 +1210,62 @@ mod tests {
                 .trackers
                 .contains_key(&(Arc::<str>::from("self"), TimeFrame::Min15))
         );
+    }
+
+    #[test]
+    fn backtest_secondary_tick_uses_primary_execution_price() {
+        let rhai_engine = Arc::new(create_engine());
+        let compiled = compile_strategy(
+            rhai_engine.as_ref(),
+            "open_market(LONG, margin_amount(100.0))",
+            "()",
+            "()",
+            None,
+        )
+        .expect("strategy compiles");
+        let execution_asset = Arc::<str>::from("BTC");
+        let secondary_asset = Arc::<str>::from("SOL");
+        let mut engine = SignalEngine::new_backtest(
+            100.0,
+            2,
+            Arc::clone(&rhai_engine),
+            compiled,
+            Vec::new(),
+            Arc::clone(&execution_asset),
+        );
+
+        let secondary_price = crate::Price {
+            open_time: 1_000,
+            close_time: 1_060,
+            open: 20.0,
+            high: 21.0,
+            low: 19.0,
+            close: 20.0,
+            vlm: 10.0,
+        };
+        let execution_price = crate::Price {
+            open_time: 1_000,
+            close_time: 1_060,
+            open: 100.0,
+            high: 101.0,
+            low: 99.0,
+            close: 100.0,
+            vlm: 10.0,
+        };
+
+        let actions = engine.tick_backtest(
+            &secondary_asset,
+            TimeFrame::Min1,
+            secondary_price,
+            execution_price,
+        );
+
+        let Some(BtAction::Submit { order, .. }) = actions.first().copied() else {
+            panic!("expected submit action");
+        };
+        let BtOrder::Open(open) = order else {
+            panic!("expected open order");
+        };
+        assert!((open.order.size - 2.0).abs() < 1e-9);
     }
 }

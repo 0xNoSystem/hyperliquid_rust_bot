@@ -162,7 +162,6 @@ export default function StratEditor() {
 
     // Fullscreen editor
     const [fullscreenPanel, setFullscreenPanel] = useState<string | null>(null);
-    const [hoveredPanel, setHoveredPanel] = useState<string | null>(null);
 
     useEffect(() => {
         if (!fullscreenPanel || vimMode) return;
@@ -462,15 +461,15 @@ export default function StratEditor() {
         "w-full cursor-pointer rounded border border-line-solid bg-surface-input px-3 py-2 text-app-text text-sm";
 
     return (
-        <div className="text-app-text z-1 flex h-[120vh] min-h-screen">
+        <div className="text-app-text z-1 flex min-h-screen flex-col lg:flex-row">
             {/* ---- Left sidebar: strategy list ---- */}
-            <div className="border-line-subtle bg-surface-pane flex w-64 shrink-0 flex-col border-r">
+            <div className="border-line-subtle bg-surface-pane flex w-full shrink-0 flex-col border-b lg:w-64 lg:border-r lg:border-b-0">
                 <div className="border-line-subtle flex items-center gap-2 border-b px-4 py-3">
                     <FlaskConical className="text-accent-brand-soft h-5 w-5" />
                     <h2 className="text-base font-semibold">Strategy Lab</h2>
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
+                <div className="max-h-[40vh] flex-1 overflow-y-auto lg:max-h-none">
                     {strategies.map((s) => (
                         <button
                             key={s.id}
@@ -497,7 +496,7 @@ export default function StratEditor() {
             </div>
 
             {/* ---- Main editor area ---- */}
-            <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex min-h-[70vh] flex-1 flex-col lg:min-h-screen lg:overflow-hidden">
                 {!active ? (
                     <div className="text-app-text/40 text-md flex flex-1 flex-col items-center justify-center">
                         Select a strategy or create a new one
@@ -516,7 +515,7 @@ export default function StratEditor() {
                 ) : (
                     <>
                         {/* Top bar: name + actions */}
-                        <div className="border-line-subtle flex items-center gap-3 border-b px-6 py-3">
+                        <div className="border-line-subtle flex flex-wrap items-center gap-2 border-b px-4 py-3 sm:gap-3 sm:px-6">
                             {editing ? (
                                 <input
                                     type="text"
@@ -524,16 +523,16 @@ export default function StratEditor() {
                                     onChange={(e) => setName(e.target.value)}
                                     placeholder="Strategy name"
                                     spellCheck={false}
-                                    className="text-app-text placeholder:text-app-text/30 flex-1 bg-transparent text-lg font-semibold outline-none"
+                                    className="text-app-text placeholder:text-app-text/30 min-w-0 flex-1 basis-full bg-transparent text-lg font-semibold outline-none sm:basis-auto"
                                 />
                             ) : (
-                                <span className="text-app-text flex-1 text-lg font-semibold">
+                                <span className="text-app-text min-w-0 flex-1 basis-full text-lg font-semibold sm:basis-auto">
                                     {name || "Untitled"}
                                 </span>
                             )}
 
                             {editing ? (
-                                <>
+                                <div className="flex flex-wrap items-center gap-2">
                                     <button
                                         onClick={handleSave}
                                         disabled={saving}
@@ -559,7 +558,7 @@ export default function StratEditor() {
                                             vim {vimMode ? "on " : "Off "}
                                         </span>
                                     </button>
-                                </>
+                                </div>
                             ) : (
                                 <button
                                     onClick={() => setEditing(true)}
@@ -594,8 +593,8 @@ export default function StratEditor() {
                         </AnimatePresence>
 
                         {/* Indicators */}
-                        <div className="border-line-subtle relative border-b px-6 py-3">
-                            <div className="mb-2 flex items-center justify-between">
+                        <div className="border-line-subtle relative border-b px-4 py-3 sm:px-6">
+                            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <span className="text-app-text/50 text-xs font-medium tracking-wide uppercase">
                                     Indicators
                                 </span>
@@ -660,7 +659,7 @@ export default function StratEditor() {
                                         initial={{ opacity: 0, y: -4 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         exit={{ opacity: 0, y: -4 }}
-                                        className="border-line-solid bg-surface-popover absolute top-full right-6 z-20 mt-1 w-72 rounded-md border p-4 shadow-lg"
+                                        className="border-line-solid bg-surface-popover absolute top-full right-4 left-4 z-20 mt-2 w-auto rounded-md border p-4 shadow-lg sm:left-auto sm:right-6 sm:w-72"
                                     >
                                         <div className="mb-3 flex items-center justify-between">
                                             <h3 className="text-sm font-semibold">
@@ -712,7 +711,7 @@ export default function StratEditor() {
                                                 </option>
                                             ))}
                                         </select>
-                                        <div className="mt-2 grid grid-cols-2 gap-2">
+                                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                                             {indicatorParamLabels[newKind]
                                                 .length === 0 ? (
                                                 <p className="text-app-text/70 col-span-2 text-xs">
@@ -802,12 +801,12 @@ export default function StratEditor() {
 
                         {/* State declarations */}
                         {(editing || stateText.trim()) && (
-                            <div className="border-line-subtle border-b px-6 py-3">
-                                <div className="mb-2">
+                            <div className="border-line-subtle border-b px-4 py-3 sm:px-6">
+                                <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
                                     <span className="text-app-text/50 text-xs font-medium tracking-wide uppercase">
                                         State Variables
                                     </span>
-                                    <span className="text-app-text/30 ml-2 text-xs">
+                                    <span className="text-app-text/30 text-xs">
                                         one per line: name = default
                                     </span>
                                 </div>
@@ -830,7 +829,7 @@ export default function StratEditor() {
                         )}
 
                         {/* Script editors */}
-                        <div className="relative flex flex-1 flex-col gap-px overflow-hidden lg:flex-row">
+                        <div className="relative flex min-h-[60vh] flex-1 flex-col gap-px overflow-hidden lg:min-h-0 lg:flex-row">
                             {(
                                 [
                                     ["on_idle", onIdle, setOnIdle],
@@ -845,45 +844,37 @@ export default function StratEditor() {
                                         className={
                                             isFullscreen
                                                 ? "bg-app-surface-3 absolute inset-0 z-30 flex flex-col"
-                                                : "bg-app-surface-3 relative flex flex-1 flex-col"
-                                        }
-                                        onMouseEnter={() =>
-                                            setHoveredPanel(label)
-                                        }
-                                        onMouseLeave={() =>
-                                            setHoveredPanel(null)
+                                                : "bg-app-surface-3 group relative flex min-h-[280px] flex-1 flex-col sm:min-h-[320px] lg:min-h-0"
                                         }
                                     >
                                         <div className="border-line-subtle bg-surface-pane flex items-center justify-between border-b px-4 py-2">
                                             <span className="text-app-text/50 text-xs font-medium tracking-wider uppercase">
                                                 {label.replace("_", " ")}
                                             </span>
-                                            {isFullscreen && (
-                                                <button
-                                                    onClick={() =>
-                                                        setFullscreenPanel(null)
-                                                    }
-                                                    className="text-app-text/40 hover:text-app-text transition"
-                                                >
+                                            <button
+                                                onClick={() =>
+                                                    isFullscreen
+                                                        ? setFullscreenPanel(null)
+                                                        : setFullscreenPanel(label)
+                                                }
+                                                className={`transition ${
+                                                    isFullscreen
+                                                        ? "text-app-text/40 hover:text-app-text"
+                                                        : "text-app-text/40 hover:text-app-text opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                                                }`}
+                                                title={
+                                                    isFullscreen
+                                                        ? "Exit fullscreen"
+                                                        : "Fullscreen"
+                                                }
+                                            >
+                                                {isFullscreen ? (
                                                     <X className="h-4 w-4" />
-                                                </button>
-                                            )}
-                                        </div>
-                                        {/* Fullscreen button on hover */}
-                                        {!isFullscreen &&
-                                            hoveredPanel === label && (
-                                                <button
-                                                    onClick={() =>
-                                                        setFullscreenPanel(
-                                                            label
-                                                        )
-                                                    }
-                                                    className="absolute top-10 right-2 z-10 rounded bg-black/50 p-1.5 text-white/70 transition hover:text-white"
-                                                    title="Fullscreen"
-                                                >
+                                                ) : (
                                                     <Maximize2 className="h-4 w-4" />
-                                                </button>
-                                            )}
+                                                )}
+                                            </button>
+                                        </div>
                                         <AceEditor
                                             mode={rhaiMode}
                                             theme={
@@ -907,7 +898,7 @@ export default function StratEditor() {
                                                 useWorker: false,
                                                 fontFamily: "monospace",
                                             }}
-                                            className="flex-1"
+                                            className="min-h-[220px] flex-1"
                                             width="100%"
                                             height="100%"
                                             keyboardHandler={

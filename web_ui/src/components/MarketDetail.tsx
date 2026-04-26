@@ -73,7 +73,7 @@ const BtnOK =
 const Chip =
     "inline-flex items-center gap-2 rounded-md border border-btn-chip-border bg-btn-chip-bg px-2 py-1 text-[15px] text-btn-chip-text hover:cursor-pointer hover:bg-btn-chip-hover";
 const GridCols =
-    "grid grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)_360px] gap-4 p-8 ";
+    "grid grid-cols-1 gap-4 px-4 pb-6 sm:px-6 lg:px-8 xl:grid-cols-[minmax(260px,300px)_minmax(0,1fr)_minmax(280px,360px)]";
 
 function PnlTicker({ pnl }: { pnl: number | null }) {
     if (pnl == null)
@@ -395,42 +395,45 @@ export default function MarketDetail() {
 
     /* ====== UI LAYOUT: rail | center (chart & indicators) | inspector ====== */
     return (
-        <div className="bg-surface-tone text-app-text relative z-40 min-h-screen max-w-[3300px] overflow-hidden py-8 pb-80 font-mono">
+        <div className="bg-surface-tone text-app-text relative z-40 mx-auto min-h-screen w-full max-w-[3300px] overflow-x-hidden py-4 pb-32 font-mono sm:py-6 sm:pb-48 lg:py-8 lg:pb-80">
             <ErrorBanner message={errorMsg} onDismiss={dismissError} />
-            <div className="mt-10 mb-1 flex items-center justify-around">
-                <div className="relative right-[3vw] flex items-center gap-3">
-                    <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>
-                        <div className="text-md border-accent-brand-strong/40 text-accent-brand relative right-20 w-fit rounded border px-3 py-1 font-semibold">
-                            {"BACKTEST (BETA)"}
-                        </div>
-                    </Link>
-
-                    <button
-                        onClick={() =>
-                            handleConfirmToggle(market.asset, market.isPaused)
-                        }
-                        className={Chip}
-                    >
-                        {market.isPaused ? "Paused" : "Live"}
-                    </button>
-                    <h1 className="text-[40px] tracking-widest">
-                        {market.asset}
+            <div className="mt-6 mb-4 px-4 sm:mt-10 sm:px-6 lg:px-8">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <button
+                            onClick={() =>
+                                handleConfirmToggle(market.asset, market.isPaused)
+                            }
+                            className={Chip}
+                        >
+                            {market.isPaused ? "Paused" : "Live"}
+                        </button>
+                        <Link to={`/backtest/${sanitizeAsset(market.asset)}`}>
+                            <div className="border-accent-brand-strong/40 text-accent-brand w-fit rounded border px-3 py-1 text-sm font-semibold">
+                                {"BACKTEST (BETA)"}
+                            </div>
+                        </Link>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
+                        <h1 className="text-3xl tracking-[0.2em] sm:text-[40px]">
+                            {market.asset}
+                        </h1>
                         <span
-                            className={`ml-3 text-[24px] ${leverageColor(marketLev, maxLev)}`}
+                            className={`text-xl sm:text-[24px] ${leverageColor(marketLev, maxLev)}`}
                         >
                             {marketLev}x
                         </span>
-                    </h1>
+                    </div>
                 </div>
             </div>
 
             <div className={GridCols}>
                 {/* LEFT RAIL — quick stats & knobs */}
-                <aside className={Rail}>
+                <aside className={`${Rail} xl:sticky xl:top-24 xl:self-start`}>
                     <div className="space-y-4">
                         <Link
                             to="/"
-                            className={`mb-10 w-full text-[20px] ${BtnGhost}`}
+                            className={`mb-4 w-full text-base sm:text-lg ${BtnGhost}`}
                         >
                             <ArrowLeft className="mr-2 h-6 w-6" />
                             Back to Markets
@@ -530,7 +533,7 @@ export default function MarketDetail() {
                         {/* Margin */}
                         <div className="border-line-subtle bg-ink-20 rounded-lg border p-3">
                             {showMinOrderWarning && (
-                                <>
+                                <div className="mb-3 flex items-start gap-2">
                                     <img
                                         src="https://cdn-icons-png.flaticon.com/512/14022/14022507.png"
                                         width="12"
@@ -543,9 +546,9 @@ export default function MarketDetail() {
                                         MAX ORDER VALUE is lower than 10$, no
                                         orders can be passed
                                     </p>
-                                </>
+                                </div>
                             )}
-                            <div className="flex">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div
                                     className="text-app-text/50 cursor-pointer text-[12px] uppercase"
                                     onClick={() =>
@@ -567,7 +570,7 @@ export default function MarketDetail() {
                                     />
                                 </button>
                             </div>
-                            <div className="mt-2 items-center gap-2">
+                            <div className="mt-2">
                                 <div className="flex flex-col py-4">
                                     <input
                                         type="range"
@@ -595,7 +598,7 @@ export default function MarketDetail() {
                                         </span>
                                     </div>
                                 </div>
-                                <div className="flex items-end justify-between">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                                     <button
                                         onClick={onSaveMargin}
                                         className={BtnOK}
@@ -710,10 +713,10 @@ export default function MarketDetail() {
                 </aside>
 
                 {/* CENTER — chart area + active indicators + trades */}
-                <main className="flex flex-col space-y-4">
+                <main className="min-w-0 space-y-4">
                     {/* Chart placeholder with scanlines */}
-                    <section className={`${Pane} min-h-[65vh]`}>
-                        <div className={Head}>
+                    <section className={`${Pane} min-h-[50vh] overflow-hidden sm:min-h-[60vh] lg:min-h-[65vh]`}>
+                        <div className={`${Head} flex flex-col gap-2 sm:block`}>
                             Chart{" "}
                             <span className="text-accent-danger-muted/50">
                                 Note: This is a reference spot price chart,{" "}
@@ -729,7 +732,7 @@ export default function MarketDetail() {
                         </div>
                         <div className="px-4 pt-4 pb-3"></div>
                         <div
-                            className={`${Chart} kwant-theme relative min-h-[60vh]`}
+                            className={`${Chart} kwant-theme relative min-h-[42vh] sm:min-h-[52vh] lg:min-h-[60vh]`}
                         >
                             <KwantChart
                                 asset={routeAsset}
@@ -919,7 +922,7 @@ export default function MarketDetail() {
                 </main>
 
                 {/* RIGHT — Indicator builder + Pending batch */}
-                <aside className="space-y-4">
+                <aside className="min-w-0 space-y-4">
                     <>
                         <p className="text-app-text text-center font-semibold">
                             Engine:{" "}
@@ -961,7 +964,7 @@ export default function MarketDetail() {
                         </div>
                     </>
                     {/*STRATEGY LOG START*/}
-                    <div className="mx-auto w-full max-w-3xl">
+                    <div className="w-full min-w-0">
                         <div className="text-app-text/60 mb-2 flex items-center justify-between text-[11px] tracking-wide uppercase">
                             <span>Strategy Log</span>
                             <span>{marketLog.length} entries</span>
@@ -999,7 +1002,7 @@ export default function MarketDetail() {
                     {/*STRATEGY LOG END*/}
                     <section className={Pane}>
                         <div className={Head}>Add Indicator</div>
-                        <div className={`${Body} grid grid-cols-2 gap-3`}>
+                        <div className={`${Body} grid grid-cols-1 gap-3 sm:grid-cols-2`}>
                             <div className="col-span-2">
                                 <label className="text-app-text/50 text-[10px] uppercase">
                                     Asset
@@ -1181,7 +1184,7 @@ export default function MarketDetail() {
                                             );
                                         })}
                                     </div>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-col gap-2 sm:flex-row">
                                         <button
                                             onClick={discardPending}
                                             className={BtnGhost}
@@ -1217,7 +1220,7 @@ export default function MarketDetail() {
                             initial={{ y: 24, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             exit={{ y: 10, opacity: 0 }}
-                            className="border-accent-warning/40 bg-surface-warning relative mx-auto mt-28 w-full max-w-md rounded-md border p-6"
+                            className="border-accent-warning/40 bg-surface-warning relative mx-4 mt-20 w-auto max-w-md rounded-md border p-4 sm:mx-auto sm:mt-28 sm:w-full sm:p-6"
                         >
                             <h3 className="text-lg font-semibold">
                                 Pause{" "}
@@ -1230,7 +1233,7 @@ export default function MarketDetail() {
                                 This will close any ongoing trade initiated by
                                 the Bot.
                             </p>
-                            <div className="mt-6 flex justify-end gap-2">
+                            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                                 <button
                                     className="border-line-weak hover:bg-glow-10 rounded-md border px-4 py-2"
                                     onClick={() => setMarketToToggle(null)}
@@ -1266,7 +1269,7 @@ export default function MarketDetail() {
                             initial={{ y: 24, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             exit={{ y: 10, opacity: 0 }}
-                            className="border-accent-danger/40 bg-surface-danger-soft relative mx-auto mt-28 w-full max-w-md rounded-md border p-6"
+                            className="border-accent-danger/40 bg-surface-danger-soft relative mx-4 mt-20 w-auto max-w-md rounded-md border p-4 sm:mx-auto sm:mt-28 sm:w-full sm:p-6"
                         >
                             <h3 className="text-lg font-semibold">
                                 Force close{" "}
@@ -1279,7 +1282,7 @@ export default function MarketDetail() {
                                 This will immediately close the open position at
                                 market price.
                             </p>
-                            <div className="mt-6 flex justify-end gap-2">
+                            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                                 <button
                                     className="border-line-weak hover:bg-glow-10 rounded-md border px-4 py-2"
                                     onClick={() => setConfirmForceClose(false)}

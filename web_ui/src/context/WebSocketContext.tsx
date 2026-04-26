@@ -442,9 +442,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
             ws.addEventListener("open", () => {
                 retry = 0;
-                if (universeRef.current.length === 0) {
-                    sendCommand({ getSession: null }).catch(console.error);
-                }
+                sendCommand({ getSession: null }).catch(console.error);
                 requestSyncMargin();
                 fetchStrategies();
             });

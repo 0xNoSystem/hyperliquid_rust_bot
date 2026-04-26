@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use log::{info, warn};
@@ -12,6 +12,7 @@ use super::types::{
     EquityPoint, PositionSnapshot, SnapshotReason,
 };
 use crate::backend::app_state::StrategyCache;
+use crate::strategy::replace_self_with_asset;
 use crate::{
     BtAction, BtIntent, BtOrder, CloseOrder, EngineOrder, Error, FillInfo, FillType, OpenOrder,
     OpenPosInfo, OpenPositionLocal, PositionOp, Price, Side, SignalEngine, TimeFrame, TradeInfo,
@@ -99,11 +100,25 @@ struct WorkerResult {
     result: Result<Vec<Price>, String>,
 }
 
+#[derive(Clone, Debug)]
+struct BacktestSeries {
+    asset: Arc<str>,
+    tf: TimeFrame,
+    prices: Vec<Price>,
+    first_sim_idx: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SeriesEvent {
+    series_idx: usize,
+    price: Price,
+}
+
 pub struct Backtester {
     request: BacktestRunRequest,
-    fetcher: Fetcher,
     candle_store: Arc<super::candle_store::CandleStore>,
     engine: SignalEngine,
+    required_series: Vec<(Arc<str>, TimeFrame)>,
     next_order_id: u64,
     next_snapshot_id: u64,
     balance: f64,
@@ -126,8 +141,6 @@ impl Backtester {
         let sid = request.config.strategy_id;
         let margin = request.config.margin;
         let lev = request.config.lev;
-        let source = request.config.source.clone();
-
         // Cache is kept in sync on save/update/delete — prefer it over DB
         let (compiled, strat_indicators) = {
             let cached = {
@@ -182,6 +195,14 @@ impl Backtester {
             }
         };
 
+        let mut strat_indicators = strat_indicators;
+        replace_self_with_asset(request.config.asset.as_str(), &mut strat_indicators);
+        let required_series = collect_required_series(
+            &strat_indicators,
+            Arc::<str>::from(request.config.asset.as_str()),
+            request.config.resolution,
+        );
+
         let engine = SignalEngine::new_backtest(
             margin,
             lev,
@@ -191,13 +212,11 @@ impl Backtester {
             request.config.asset.clone().into(),
         );
 
-        let fetcher = Fetcher::new(source, candle_store.clone());
-
         Ok(Self {
             request,
-            fetcher,
             candle_store,
             engine,
+            required_series,
             next_order_id: 1,
             next_snapshot_id: 1,
             balance: margin,
@@ -226,8 +245,6 @@ impl Backtester {
         F: FnMut(BacktestProgress),
     {
         self.reset_runtime();
-        self.fetcher.set_source(self.request.config.source.clone());
-
         on_progress(BacktestProgress::Initializing);
 
         let started_at = get_time_now();
@@ -238,8 +255,7 @@ impl Backtester {
             .clone()
             .filter(|id| !id.trim().is_empty())
             .unwrap_or_else(|| format!("bt-{}-{started_at}", cfg.asset));
-        let asset = cfg.asset.clone();
-        let asset_arc: Arc<str> = Arc::from(asset.as_str());
+        let execution_asset: Arc<str> = Arc::from(cfg.asset.as_str());
         let tf = cfg.resolution;
         let sim_start = cfg.start_time;
         let sim_end = cfg.end_time;
@@ -253,35 +269,43 @@ impl Backtester {
         }
 
         let warmup_target = self.request.warmup_candles;
-        let warmup_span_ms = warmup_target.saturating_mul(tf_ms);
-        let fetch_start = sim_start.saturating_sub(warmup_span_ms);
         let fetch_end = sim_end;
-
-        let fetch_total = estimate_candle_count(fetch_start, fetch_end, tf_ms).max(1);
-        let sim_total = estimate_candle_count(sim_start, sim_end, tf_ms).max(1);
+        let fetch_total = self
+            .required_series
+            .iter()
+            .map(|(_, series_tf)| {
+                let series_tf_ms = series_tf.to_millis();
+                let fetch_start =
+                    sim_start.saturating_sub(warmup_target.saturating_mul(series_tf_ms));
+                estimate_candle_count(fetch_start, fetch_end, series_tf_ms).max(1)
+            })
+            .sum::<u64>()
+            .max(1);
+        let sim_total = self
+            .required_series
+            .iter()
+            .map(|(_, series_tf)| {
+                estimate_candle_count(sim_start, sim_end, series_tf.to_millis()).max(1)
+            })
+            .sum::<u64>()
+            .max(1);
+        let warmup_total = warmup_target.saturating_mul(self.required_series.len() as u64);
         let loading_log_step = (fetch_total / 10).max(1);
         let mut next_loading_log = loading_log_step;
         let sim_log_step = (sim_total / 10).max(1);
         let mut next_sim_log = sim_log_step;
 
-        let window_candles = FETCH_WINDOW_CANDLES.max(1);
-        let window_span_ms = window_candles.saturating_mul(tf_ms).max(tf_ms);
-        let estimated_windows =
-            div_ceil_u64(fetch_end.saturating_sub(fetch_start), window_span_ms).max(1);
-
         info!(
-            "backtest[{run_id}] start asset={} source={:?} tf={:?} sim={}..{} warmup={} fetch={}..{} est_fetch={} est_sim={} windows={} workers={} rps={}",
+            "backtest[{run_id}] start asset={} source={:?} exec_tf={:?} sim={}..{} warmup={} required_series=[{}] est_fetch={} est_sim={} workers={} rps={}",
             cfg.asset,
             cfg.source,
             tf,
             sim_start,
             sim_end,
             warmup_target,
-            fetch_start,
-            fetch_end,
+            format_series_keys(&self.required_series),
             fetch_total,
             sim_total,
-            estimated_windows,
             MAX_FETCH_WORKERS,
             MAX_FETCH_REQUESTS_PER_SEC
         );
@@ -292,286 +316,212 @@ impl Backtester {
         });
         on_progress(BacktestProgress::WarmingEngine {
             loaded: 0,
-            total: warmup_target,
+            total: warmup_total,
         });
 
-        let mut loaded_candles = 0_u64;
         let mut loading_reported = 0_u64;
-        let mut last_seen_open_time: Option<u64> = None;
-
-        let mut warmup_buffer: VecDeque<Price> = VecDeque::new();
-        let mut sim_started = false;
-        let mut sim_processed = 0_u64;
-        let mut last_sim_candle: Option<Price> = None;
-        let mut stopped_by_liquidation = false;
-        let mut pending_windows: BTreeMap<usize, Vec<Price>> = BTreeMap::new();
-        let mut next_window_idx = 0usize;
-        let (loading_tx, mut loading_rx) = tokio::sync::mpsc::unbounded_channel::<(u64, u64)>();
-        let (window_tx, mut window_rx) = tokio::sync::mpsc::channel::<FetchWindowEvent>(2);
-
-        let producer = tokio::spawn(stream_fetch_windows_parallel(
-            run_id.clone(),
-            cfg.source.clone(),
-            asset,
-            tf,
-            fetch_start,
-            fetch_end,
-            window_span_ms,
-            fetch_total,
-            MAX_FETCH_WORKERS,
-            loading_tx,
-            window_tx,
-            self.candle_store.clone(),
-        ));
-
-        let mut fatal_error: Option<Error> = None;
-        let mut producer_done = false;
-
-        'event_loop: while !producer_done {
-            tokio::select! {
-                maybe_loading = loading_rx.recv(), if !loading_rx.is_closed() => {
-                    if let Some((loaded, total)) = maybe_loading {
-                        let loaded = loaded.min(total);
-                        if loaded > loading_reported {
-                            loading_reported = loaded;
-                            on_progress(BacktestProgress::LoadingCandles { loaded, total });
-                            maybe_log_milestone(
-                                &run_id,
-                                "loading",
-                                loaded,
-                                total,
-                                &mut next_loading_log,
-                                loading_log_step,
-                            );
-                        }
-                    }
-                }
-                maybe_event = window_rx.recv() => {
-                    let Some(event) = maybe_event else {
-                        warn!("backtest[{run_id}] fetch window channel closed unexpectedly");
-                        fatal_error = Some(Error::Custom(
-                            "Backtest fetch pipeline closed unexpectedly".to_string(),
-                        ));
-                        break;
-                    };
-
-                    match event {
-                        FetchWindowEvent::Window { idx, prices } => {
-                            pending_windows.insert(idx, prices);
-
-                            while let Some(prices) = pending_windows.remove(&next_window_idx) {
-                                for candle in prices {
-                                    if candle.open_time < fetch_start || candle.open_time >= fetch_end {
-                                        continue;
-                                    }
-                                    if let Some(last_ts) = last_seen_open_time
-                                        && candle.open_time <= last_ts
-                                    {
-                                        continue;
-                                    }
-
-                                    last_seen_open_time = Some(candle.open_time);
-                                    loaded_candles = loaded_candles.saturating_add(1);
-
-                                    let loaded_now = loaded_candles.min(fetch_total);
-                                    if loaded_now > loading_reported
-                                        && (loaded_candles.is_multiple_of(200) || loaded_candles >= fetch_total)
-                                    {
-                                        loading_reported = loaded_now;
-                                        on_progress(BacktestProgress::LoadingCandles {
-                                            loaded: loaded_now,
-                                            total: fetch_total,
-                                        });
-                                        maybe_log_milestone(
-                                            &run_id,
-                                            "loading",
-                                            loaded_now,
-                                            fetch_total,
-                                            &mut next_loading_log,
-                                            loading_log_step,
-                                        );
-                                    }
-                                    if loaded_candles.is_multiple_of(1_000) {
-                                        tokio::task::yield_now().await;
-                                        drain_loading_progress(
-                                            &mut loading_rx,
-                                            &mut loading_reported,
-                                            &mut on_progress,
-                                        );
-                                        maybe_log_milestone(
-                                            &run_id,
-                                            "loading",
-                                            loading_reported,
-                                            fetch_total,
-                                            &mut next_loading_log,
-                                            loading_log_step,
-                                        );
-                                    }
-
-                                    if candle.open_time < sim_start {
-                                        if warmup_target > 0 {
-                                            if warmup_buffer.len() as u64 >= warmup_target {
-                                                let _ = warmup_buffer.pop_front();
-                                            }
-                                            warmup_buffer.push_back(candle);
-                                            let warmup_loaded = warmup_buffer.len() as u64;
-                                            if warmup_loaded.is_multiple_of(100) || warmup_loaded == warmup_target {
-                                                on_progress(BacktestProgress::WarmingEngine {
-                                                    loaded: warmup_loaded,
-                                                    total: warmup_target,
-                                                });
-                                            }
-                                        }
-                                        continue;
-                                    }
-
-                                    if !sim_started {
-                                        let warmup_loaded = warmup_buffer.len() as u64;
-                                        if warmup_loaded > 0 {
-                                            self.engine.load(&asset_arc, tf, warmup_buffer.iter().copied()).await;
-                                        }
-                                        on_progress(BacktestProgress::WarmingEngine {
-                                            loaded: warmup_loaded,
-                                            total: warmup_target,
-                                        });
-                                        on_progress(BacktestProgress::Simulating {
-                                            processed: 0,
-                                            total: sim_total,
-                                        });
-                                        self.init_funding(candle.open_time);
-                                        info!(
-                                            "backtest[{run_id}] simulation started warmup_loaded={} first_sim_ts={} sim_total={}",
-                                            warmup_loaded,
-                                            candle.open_time,
-                                            sim_total
-                                        );
-                                        sim_started = true;
-                                    }
-
-                                    let liquidated = self.process_candle(candle, sim_processed);
-                                    last_sim_candle = Some(candle);
-                                    sim_processed = sim_processed.saturating_add(1);
-                                    if liquidated {
-                                        stopped_by_liquidation = true;
-                                        producer_done = true;
-                                        producer.abort();
-                                        info!(
-                                            "backtest[{run_id}] liquidation stop at candle_ts={} processed={}",
-                                            candle.open_time,
-                                            sim_processed
-                                        );
-                                        break;
-                                    }
-                                    if sim_processed.is_multiple_of(200) || sim_processed >= sim_total {
-                                        drain_loading_progress(
-                                            &mut loading_rx,
-                                            &mut loading_reported,
-                                            &mut on_progress,
-                                        );
-                                        on_progress(BacktestProgress::Simulating {
-                                            processed: sim_processed,
-                                            total: sim_total,
-                                        });
-                                        maybe_log_milestone(
-                                            &run_id,
-                                            "simulating",
-                                            sim_processed,
-                                            sim_total,
-                                            &mut next_sim_log,
-                                            sim_log_step,
-                                        );
-                                    }
-                                }
-                                if stopped_by_liquidation {
-                                    break;
-                                }
-                                next_window_idx = next_window_idx.saturating_add(1);
-                            }
-                            if stopped_by_liquidation {
-                                break 'event_loop;
-                            }
-                        }
-                        FetchWindowEvent::Done => {
-                            info!("backtest[{run_id}] fetch pipeline done");
-                            producer_done = true;
-                        }
-                        FetchWindowEvent::Failed(message) => {
-                            warn!("backtest[{run_id}] fetch pipeline failed: {message}");
-                            fatal_error = Some(Error::Custom(message));
-                            producer_done = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        drain_loading_progress(&mut loading_rx, &mut loading_reported, &mut on_progress);
-        maybe_log_milestone(
-            &run_id,
-            "loading",
-            loading_reported.max(loaded_candles.min(fetch_total)),
-            fetch_total,
-            &mut next_loading_log,
-            loading_log_step,
-        );
-        drop(window_rx);
-        drop(loading_rx);
-
-        if !pending_windows.is_empty() && fatal_error.is_none() && !stopped_by_liquidation {
-            warn!(
-                "backtest[{run_id}] unresolved pending windows: {}",
-                pending_windows.len()
-            );
-            fatal_error = Some(Error::Custom(
-                "Backtest fetch pipeline ended with unresolved window ordering".to_string(),
-            ));
-        }
-
-        if let Err(e) = producer.await {
-            if stopped_by_liquidation && e.is_cancelled() {
-                info!("backtest[{run_id}] fetch producer cancelled after liquidation");
-            } else {
-                let err = Error::Custom(format!("Backtest fetch task join failed: {e}"));
-                warn!("backtest[{run_id}] fetch task join failed: {e}");
+        let mut loaded_candles = 0_u64;
+        let mut series_data = Vec::with_capacity(self.required_series.len());
+        for (series_asset, series_tf) in &self.required_series {
+            let series_tf_ms = series_tf.to_millis();
+            if series_tf_ms == 0 {
+                let err = Error::Custom(format!(
+                    "Unsupported timeframe {:?} for series {}",
+                    series_tf, series_asset
+                ));
                 on_progress(BacktestProgress::Failed {
                     message: err.to_string(),
                 });
                 return Err(err);
             }
-        }
 
-        if let Some(err) = fatal_error {
-            warn!("backtest[{run_id}] failed before simulation end: {err}");
-            on_progress(BacktestProgress::Failed {
-                message: err.to_string(),
+            let series_fetch_start =
+                sim_start.saturating_sub(warmup_target.saturating_mul(series_tf_ms));
+            let series_prices = fetch_series_history_with_progress(
+                &run_id,
+                cfg.source.clone(),
+                Arc::clone(series_asset),
+                *series_tf,
+                series_fetch_start,
+                fetch_end,
+                loaded_candles,
+                fetch_total,
+                self.candle_store.clone(),
+                &mut loading_reported,
+                &mut next_loading_log,
+                loading_log_step,
+                &mut on_progress,
+            )
+            .await?;
+
+            if series_prices.is_empty() {
+                let err = Error::Custom(format!(
+                    "Backtest requires candle data for {} {} but none was loaded",
+                    series_asset, series_tf
+                ));
+                on_progress(BacktestProgress::Failed {
+                    message: err.to_string(),
+                });
+                return Err(err);
+            }
+
+            let first_sim_idx = series_prices.partition_point(|price| price.open_time < sim_start);
+            if *series_asset == execution_asset
+                && *series_tf == tf
+                && first_sim_idx >= series_prices.len()
+            {
+                let err = Error::Custom("No simulation candles left after warmup".to_string());
+                on_progress(BacktestProgress::Failed {
+                    message: err.to_string(),
+                });
+                return Err(err);
+            }
+
+            loaded_candles = loaded_candles.saturating_add(series_prices.len() as u64);
+            series_data.push(BacktestSeries {
+                asset: Arc::clone(series_asset),
+                tf: *series_tf,
+                prices: series_prices,
+                first_sim_idx,
             });
-            return Err(err);
         }
 
-        on_progress(BacktestProgress::LoadingCandles {
-            loaded: loading_reported.max(loaded_candles.min(fetch_total)),
-            total: fetch_total,
-        });
+        let loaded_now = loaded_candles.min(fetch_total);
+        if loaded_now > loading_reported {
+            loading_reported = loaded_now;
+            on_progress(BacktestProgress::LoadingCandles {
+                loaded: loaded_now,
+                total: fetch_total,
+            });
+        }
         maybe_log_milestone(
             &run_id,
             "loading",
-            loading_reported.max(loaded_candles.min(fetch_total)),
+            loading_reported,
             fetch_total,
             &mut next_loading_log,
             loading_log_step,
         );
 
-        if !sim_started {
-            let warmup_loaded = warmup_buffer.len() as u64;
-            on_progress(BacktestProgress::WarmingEngine {
-                loaded: warmup_loaded,
-                total: warmup_target,
+        let Some(primary_series_idx) = series_data
+            .iter()
+            .position(|series| series.asset == execution_asset && series.tf == tf)
+        else {
+            let err = Error::Custom("Primary execution series was not prepared".to_string());
+            on_progress(BacktestProgress::Failed {
+                message: err.to_string(),
             });
+            return Err(err);
+        };
 
-            warn!(
-                "backtest[{run_id}] no simulation candles left after warmup (fetch_loaded={} warmup_loaded={} sim_start={} fetch_start={} fetch_end={})",
-                loaded_candles, warmup_loaded, sim_start, fetch_start, fetch_end
-            );
+        let mut warmup_loaded = 0_u64;
+        for series in &series_data {
+            let warmup_start_idx = series.first_sim_idx.saturating_sub(warmup_target as usize);
+            let warmup_slice = &series.prices[warmup_start_idx..series.first_sim_idx];
+            if !warmup_slice.is_empty() {
+                self.engine
+                    .load(&series.asset, series.tf, warmup_slice.iter().copied())
+                    .await;
+            }
+            warmup_loaded = warmup_loaded.saturating_add(warmup_slice.len() as u64);
+            if warmup_loaded.is_multiple_of(100) || warmup_loaded >= warmup_total {
+                on_progress(BacktestProgress::WarmingEngine {
+                    loaded: warmup_loaded,
+                    total: warmup_total,
+                });
+            }
+        }
+        on_progress(BacktestProgress::WarmingEngine {
+            loaded: warmup_loaded,
+            total: warmup_total,
+        });
+        on_progress(BacktestProgress::Simulating {
+            processed: 0,
+            total: sim_total,
+        });
+
+        let mut sim_started = false;
+        let mut sim_processed = 0_u64;
+        let mut last_sim_candle = series_data[primary_series_idx]
+            .prices
+            .get(
+                series_data[primary_series_idx]
+                    .first_sim_idx
+                    .saturating_sub(1),
+            )
+            .copied();
+        let mut current_execution_candle = last_sim_candle;
+        let mut stopped_by_liquidation = false;
+        let mut next_indices: Vec<usize> = series_data
+            .iter()
+            .map(|series| series.first_sim_idx)
+            .collect();
+
+        while let Some(batch) = next_event_batch(&series_data, &mut next_indices) {
+            let primary_candle = batch
+                .iter()
+                .find_map(|event| (event.series_idx == primary_series_idx).then_some(event.price));
+
+            if let Some(candle) = primary_candle {
+                current_execution_candle = Some(candle);
+                if !sim_started {
+                    self.init_funding(candle.open_time);
+                    info!(
+                        "backtest[{run_id}] simulation started warmup_loaded={} first_sim_ts={} sim_total={}",
+                        warmup_loaded, candle.open_time, sim_total
+                    );
+                    sim_started = true;
+                }
+                self.apply_funding_if_due(candle);
+                self.sync_engine_position();
+            }
+
+            let Some(execution_candle) = current_execution_candle else {
+                continue;
+            };
+
+            for event in batch {
+                let series = &series_data[event.series_idx];
+                let actions = self.engine.tick_backtest(
+                    &series.asset,
+                    series.tf,
+                    event.price,
+                    execution_candle,
+                );
+                self.apply_engine_actions(actions, execution_candle);
+                sim_processed = sim_processed.saturating_add(1);
+            }
+
+            if let Some(candle) = primary_candle {
+                let liquidated = self.process_candle(candle);
+                last_sim_candle = Some(candle);
+                if liquidated {
+                    stopped_by_liquidation = true;
+                    info!(
+                        "backtest[{run_id}] liquidation stop at candle_ts={} processed={}",
+                        candle.open_time, sim_processed
+                    );
+                    break;
+                }
+            }
+
+            if sim_processed.is_multiple_of(200) || sim_processed >= sim_total {
+                on_progress(BacktestProgress::Simulating {
+                    processed: sim_processed,
+                    total: sim_total,
+                });
+                maybe_log_milestone(
+                    &run_id,
+                    "simulating",
+                    sim_processed,
+                    sim_total,
+                    &mut next_sim_log,
+                    sim_log_step,
+                );
+            }
+        }
+
+        if !sim_started {
             let err = Error::Custom("No simulation candles left after warmup".to_string());
             on_progress(BacktestProgress::Failed {
                 message: err.to_string(),
@@ -636,18 +586,17 @@ impl Backtester {
         self.next_funding_time = None;
     }
 
-    fn process_candle(&mut self, candle: Price, _idx: u64) -> bool {
-        self.apply_funding_if_due(candle);
-
-        let actions = self.engine.tick_backtest(candle);
+    fn apply_engine_actions(&mut self, actions: Vec<BtAction>, execution_candle: Price) {
         for action in actions {
-            self.apply_action(action, candle);
+            self.apply_action(action, execution_candle);
             self.sync_engine_position();
             if let Some(reason) = snapshot_reason_from_action(action) {
-                self.capture_snapshot(candle, reason);
+                self.capture_snapshot(execution_candle, reason);
             }
         }
+    }
 
+    fn process_candle(&mut self, candle: Price) -> bool {
         let fills = self.fill_resting_orders(candle);
         if fills > 0 {
             self.sync_engine_position();
@@ -1177,6 +1126,47 @@ impl Backtester {
     }
 }
 
+fn collect_required_series(
+    indicators: &[crate::IndexId],
+    execution_asset: Arc<str>,
+    execution_tf: TimeFrame,
+) -> Vec<(Arc<str>, TimeFrame)> {
+    let execution_key = (Arc::clone(&execution_asset), execution_tf);
+    let mut seen: HashSet<(Arc<str>, TimeFrame)> = HashSet::from([execution_key.clone()]);
+    let mut out = vec![execution_key.clone()];
+
+    for (asset, _, tf) in indicators {
+        let key = (Arc::clone(asset), *tf);
+        if seen.insert(key.clone()) {
+            out.push(key);
+        }
+    }
+
+    out.sort_by(|a, b| {
+        let a_primary = *a == execution_key;
+        let b_primary = *b == execution_key;
+        match (a_primary, b_primary) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => {
+                a.0.as_ref()
+                    .cmp(b.0.as_ref())
+                    .then_with(|| a.1.as_str().cmp(b.1.as_str()))
+            }
+        }
+    });
+
+    out
+}
+
+fn format_series_keys(series: &[(Arc<str>, TimeFrame)]) -> String {
+    series
+        .iter()
+        .map(|(asset, tf)| format!("{asset}@{}", tf.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn stream_fetch_windows_parallel(
     run_id: String,
@@ -1431,20 +1421,223 @@ async fn fetch_window_worker(
     }
 }
 
-fn drain_loading_progress<F>(
-    loading_rx: &mut tokio::sync::mpsc::UnboundedReceiver<(u64, u64)>,
+#[allow(clippy::too_many_arguments)]
+async fn fetch_series_history_with_progress<F>(
+    run_id: &str,
+    source: DataSource,
+    asset: Arc<str>,
+    tf: TimeFrame,
+    fetch_start: u64,
+    fetch_end: u64,
+    loaded_offset: u64,
+    global_total: u64,
+    candle_store: Arc<super::candle_store::CandleStore>,
     loading_reported: &mut u64,
+    next_loading_log: &mut u64,
+    loading_log_step: u64,
     on_progress: &mut F,
-) where
+) -> Result<Vec<Price>, Error>
+where
     F: FnMut(BacktestProgress),
 {
-    while let Ok((loaded, total)) = loading_rx.try_recv() {
-        let loaded = loaded.min(total);
-        if loaded > *loading_reported {
-            *loading_reported = loaded;
-            on_progress(BacktestProgress::LoadingCandles { loaded, total });
+    let tf_ms = tf.to_millis();
+    let series_total = estimate_candle_count(fetch_start, fetch_end, tf_ms).max(1);
+    let window_span_ms = FETCH_WINDOW_CANDLES.max(1).saturating_mul(tf_ms).max(tf_ms);
+    let estimated_windows =
+        div_ceil_u64(fetch_end.saturating_sub(fetch_start), window_span_ms).max(1);
+    info!(
+        "backtest[{run_id}] fetch series asset={} tf={:?} range={}..{} est_total={} windows={}",
+        asset, tf, fetch_start, fetch_end, series_total, estimated_windows
+    );
+
+    let (loading_tx, mut loading_rx) = tokio::sync::mpsc::unbounded_channel::<(u64, u64)>();
+    let (window_tx, mut window_rx) = tokio::sync::mpsc::channel::<FetchWindowEvent>(2);
+    let producer = tokio::spawn(stream_fetch_windows_parallel(
+        run_id.to_string(),
+        source,
+        asset.to_string(),
+        tf,
+        fetch_start,
+        fetch_end,
+        window_span_ms,
+        series_total,
+        MAX_FETCH_WORKERS,
+        loading_tx,
+        window_tx,
+        candle_store,
+    ));
+
+    let mut out = Vec::new();
+    let mut fatal_error: Option<Error> = None;
+    let mut pending_windows: BTreeMap<usize, Vec<Price>> = BTreeMap::new();
+    let mut next_window_idx = 0usize;
+    let mut last_seen_open_time: Option<u64> = None;
+    let mut producer_done = false;
+
+    while !producer_done {
+        tokio::select! {
+            maybe_loading = loading_rx.recv(), if !loading_rx.is_closed() => {
+                if let Some((loaded, total)) = maybe_loading {
+                    let global_loaded = loaded_offset
+                        .saturating_add(loaded.min(total))
+                        .min(global_total);
+                    if global_loaded > *loading_reported {
+                        *loading_reported = global_loaded;
+                        on_progress(BacktestProgress::LoadingCandles {
+                            loaded: global_loaded,
+                            total: global_total,
+                        });
+                        maybe_log_milestone(
+                            run_id,
+                            "loading",
+                            global_loaded,
+                            global_total,
+                            next_loading_log,
+                            loading_log_step,
+                        );
+                    }
+                }
+            }
+            maybe_event = window_rx.recv() => {
+                let Some(event) = maybe_event else {
+                    fatal_error = Some(Error::Custom(
+                        "Backtest fetch pipeline closed unexpectedly".to_string(),
+                    ));
+                    break;
+                };
+
+                match event {
+                    FetchWindowEvent::Window { idx, prices } => {
+                        pending_windows.insert(idx, prices);
+                        while let Some(prices) = pending_windows.remove(&next_window_idx) {
+                            for candle in prices {
+                                if candle.open_time < fetch_start || candle.open_time >= fetch_end {
+                                    continue;
+                                }
+                                if let Some(last_ts) = last_seen_open_time
+                                    && candle.open_time <= last_ts
+                                {
+                                    continue;
+                                }
+                                last_seen_open_time = Some(candle.open_time);
+                                out.push(candle);
+                            }
+                            next_window_idx = next_window_idx.saturating_add(1);
+                        }
+                    }
+                    FetchWindowEvent::Done => producer_done = true,
+                    FetchWindowEvent::Failed(message) => {
+                        fatal_error = Some(Error::Custom(message));
+                        producer_done = true;
+                    }
+                }
+            }
         }
     }
+
+    while let Ok((loaded, total)) = loading_rx.try_recv() {
+        let global_loaded = loaded_offset
+            .saturating_add(loaded.min(total))
+            .min(global_total);
+        if global_loaded > *loading_reported {
+            *loading_reported = global_loaded;
+            on_progress(BacktestProgress::LoadingCandles {
+                loaded: global_loaded,
+                total: global_total,
+            });
+            maybe_log_milestone(
+                run_id,
+                "loading",
+                global_loaded,
+                global_total,
+                next_loading_log,
+                loading_log_step,
+            );
+        }
+    }
+
+    if !pending_windows.is_empty() && fatal_error.is_none() {
+        fatal_error = Some(Error::Custom(
+            "Backtest fetch pipeline ended with unresolved window ordering".to_string(),
+        ));
+    }
+
+    if let Err(e) = producer.await {
+        let err = Error::Custom(format!("Backtest fetch task join failed: {e}"));
+        warn!("backtest[{run_id}] fetch task join failed: {e}");
+        return Err(err);
+    }
+
+    if let Some(err) = fatal_error {
+        warn!(
+            "backtest[{run_id}] failed while fetching {asset} {:?}: {err}",
+            tf
+        );
+        return Err(err);
+    }
+
+    let final_loaded = loaded_offset
+        .saturating_add(out.len() as u64)
+        .min(global_total);
+    if final_loaded > *loading_reported {
+        *loading_reported = final_loaded;
+        on_progress(BacktestProgress::LoadingCandles {
+            loaded: final_loaded,
+            total: global_total,
+        });
+        maybe_log_milestone(
+            run_id,
+            "loading",
+            final_loaded,
+            global_total,
+            next_loading_log,
+            loading_log_step,
+        );
+    }
+
+    Ok(out)
+}
+
+fn next_event_batch(
+    series_data: &[BacktestSeries],
+    next_indices: &mut [usize],
+) -> Option<Vec<SeriesEvent>> {
+    let next_ts = series_data
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, series)| {
+            series
+                .prices
+                .get(next_indices[idx])
+                .map(|price| price.open_time)
+        })
+        .min()?;
+
+    let mut batch = Vec::new();
+    for (idx, series) in series_data.iter().enumerate() {
+        let Some(price) = series.prices.get(next_indices[idx]).copied() else {
+            continue;
+        };
+        if price.open_time != next_ts {
+            continue;
+        }
+        batch.push(SeriesEvent {
+            series_idx: idx,
+            price,
+        });
+        next_indices[idx] = next_indices[idx].saturating_add(1);
+    }
+
+    batch.sort_by(|a, b| {
+        let series_a = &series_data[a.series_idx];
+        let series_b = &series_data[b.series_idx];
+        series_a
+            .asset
+            .as_ref()
+            .cmp(series_b.asset.as_ref())
+            .then_with(|| series_a.tf.as_str().cmp(series_b.tf.as_str()))
+    });
+    Some(batch)
 }
 
 fn maybe_log_milestone(
@@ -1757,5 +1950,92 @@ fn snapshot_reason_from_action(action: BtAction) -> Option<SnapshotReason> {
         }),
         BtAction::CancelAllResting => Some(SnapshotReason::CancelResting),
         BtAction::ForceCloseMarket => Some(SnapshotReason::ForceClose),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{BacktestSeries, SeriesEvent, collect_required_series, next_event_batch};
+    use crate::{IndicatorKind, Price, TimeFrame};
+
+    fn price(ts: u64, close: f64) -> Price {
+        Price {
+            open_time: ts,
+            close_time: ts + 60_000,
+            open: close,
+            high: close,
+            low: close,
+            close,
+            vlm: 1.0,
+        }
+    }
+
+    #[test]
+    fn collect_required_series_includes_execution_series_first() {
+        let execution_asset = Arc::<str>::from("BTC");
+        let series = collect_required_series(
+            &[
+                (
+                    Arc::<str>::from("BTC"),
+                    IndicatorKind::Rsi(14),
+                    TimeFrame::Hour1,
+                ),
+                (
+                    Arc::<str>::from("SOL"),
+                    IndicatorKind::Ema(9),
+                    TimeFrame::Min15,
+                ),
+                (
+                    Arc::<str>::from("SOL"),
+                    IndicatorKind::Rsi(7),
+                    TimeFrame::Min15,
+                ),
+            ],
+            Arc::clone(&execution_asset),
+            TimeFrame::Min1,
+        );
+
+        assert_eq!(series[0], (execution_asset, TimeFrame::Min1));
+        assert!(series.contains(&(Arc::<str>::from("BTC"), TimeFrame::Hour1)));
+        assert!(series.contains(&(Arc::<str>::from("SOL"), TimeFrame::Min15)));
+        assert_eq!(series.len(), 3);
+    }
+
+    #[test]
+    fn next_event_batch_merges_matching_timestamps() {
+        let series_data = vec![
+            BacktestSeries {
+                asset: Arc::<str>::from("BTC"),
+                tf: TimeFrame::Min1,
+                prices: vec![price(60_000, 100.0), price(120_000, 101.0)],
+                first_sim_idx: 0,
+            },
+            BacktestSeries {
+                asset: Arc::<str>::from("SOL"),
+                tf: TimeFrame::Min15,
+                prices: vec![price(60_000, 20.0), price(180_000, 21.0)],
+                first_sim_idx: 0,
+            },
+        ];
+        let mut next_indices = vec![0, 0];
+
+        let first = next_event_batch(&series_data, &mut next_indices).expect("first batch");
+        assert_eq!(
+            first
+                .iter()
+                .map(|event: &SeriesEvent| event.price.open_time)
+                .collect::<Vec<_>>(),
+            vec![60_000, 60_000]
+        );
+
+        let second = next_event_batch(&series_data, &mut next_indices).expect("second batch");
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].price.open_time, 120_000);
+
+        let third = next_event_batch(&series_data, &mut next_indices).expect("third batch");
+        assert_eq!(third.len(), 1);
+        assert_eq!(third[0].price.open_time, 180_000);
     }
 }

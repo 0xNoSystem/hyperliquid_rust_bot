@@ -59,7 +59,7 @@ const Header: React.FC = () => {
                     </Link>
                     <Link to="/backtest/BTC">
                         <div className="border-accent-brand hover:border-accent-brand-strong/60 text-app-text relative w-fit rounded border px-3 py-1 text-sm">
-                            BACKTESTING
+                            BACKTEST
                         </div>
                     </Link>
 
