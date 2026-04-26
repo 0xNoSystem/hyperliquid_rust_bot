@@ -659,7 +659,7 @@ export default function StratEditor() {
                                         initial={{ opacity: 0, y: -4 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         exit={{ opacity: 0, y: -4 }}
-                                        className="border-line-solid bg-surface-popover absolute top-full right-4 left-4 z-20 mt-2 w-auto rounded-md border p-4 shadow-lg sm:left-auto sm:right-6 sm:w-72"
+                                        className="border-line-solid bg-surface-popover absolute top-full right-4 left-4 z-50 mt-2 w-auto rounded-md border p-4 shadow-lg sm:left-auto sm:right-6 sm:w-72"
                                     >
                                         <div className="mb-3 flex items-center justify-between">
                                             <h3 className="text-sm font-semibold">
