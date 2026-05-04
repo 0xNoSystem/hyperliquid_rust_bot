@@ -7,14 +7,28 @@ import {
     KeyRound,
     RefreshCw,
     CheckCircle,
+    LayoutGrid,
+    List,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import MarketCard from "./MarketCard";
+import MarketStrip from "./MarketStrip";
 import { AddMarket } from "./AddMarket";
 import { CachedMarket } from "./CachedMarket";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { ErrorBanner } from "./ErrorBanner";
 import LoadingDots from "./Loading";
+
+const MARKET_LAYOUT_STORAGE_KEY = "markets.layout.v1";
+type MarketLayout = "card" | "strip";
+
+const readStoredMarketLayout = (): MarketLayout => {
+    if (typeof window === "undefined") return "card";
+
+    return window.localStorage.getItem(MARKET_LAYOUT_STORAGE_KEY) === "strip"
+        ? "strip"
+        : "card";
+};
 
 export default function MarketsPage() {
     const {
@@ -60,6 +74,9 @@ export default function MarketsPage() {
     >();
     const [showAdd, setShowAdd] = useState(false);
     const [syncingMargin, setSyncingMargin] = useState(false);
+    const [marketLayout, setMarketLayout] = useState<MarketLayout>(
+        readStoredMarketLayout
+    );
 
     const sessionPnl = markets.reduce((sum, market) => {
         return sum + (market.pnl ?? 0);
@@ -140,6 +157,11 @@ export default function MarketsPage() {
         requestSyncMargin()
             .catch(console.error)
             .finally(() => setTimeout(() => setSyncingMargin(false), 600));
+    };
+
+    const handleSetMarketLayout = (layout: MarketLayout) => {
+        setMarketLayout(layout);
+        window.localStorage.setItem(MARKET_LAYOUT_STORAGE_KEY, layout);
     };
 
     return (
@@ -292,31 +314,95 @@ export default function MarketsPage() {
                     )}
 
                     {markets.length > 0 && (
-                        <div className="grid grid-cols-1 gap-7 sm:grid-cols-2 xl:grid-cols-3">
-                            {markets.map((m) => (
-                                <motion.div
-                                    key={m.asset}
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                >
-                                    <MarketCard
-                                        market={m}
-                                        assetMeta={universe.find(
-                                            (u) => u.name === m.asset
+                        <div>
+                            <div className="mb-4 flex justify-end">
+                                <div className="border-line-subtle bg-surface-pane/50 inline-flex rounded-md border p-1">
+                                    <button
+                                        onClick={() =>
+                                            handleSetMarketLayout("card")
+                                        }
+                                        className={`flex items-center gap-2 rounded px-3 py-1.5 text-xs transition-colors ${
+                                            marketLayout === "card"
+                                                ? "bg-glow-10 text-app-text"
+                                                : "text-app-text/50 hover:text-app-text"
+                                        }`}
+                                        title="Card layout"
+                                    >
+                                        <LayoutGrid className="h-4 w-4" />
+                                        Cards
+                                    </button>
+                                    <button
+                                        onClick={() =>
+                                            handleSetMarketLayout("strip")
+                                        }
+                                        className={`flex items-center gap-2 rounded px-3 py-1.5 text-xs transition-colors ${
+                                            marketLayout === "strip"
+                                                ? "bg-glow-10 text-app-text"
+                                                : "text-app-text/50 hover:text-app-text"
+                                        }`}
+                                        title="Strip layout"
+                                    >
+                                        <List className="h-4 w-4" />
+                                        Strips
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div
+                                className={
+                                    marketLayout === "card"
+                                        ? "grid grid-cols-1 gap-7 sm:grid-cols-2 xl:grid-cols-3"
+                                        : "grid grid-cols-1 gap-3"
+                                }
+                            >
+                                {markets.map((m) => (
+                                    <motion.div
+                                        key={m.asset}
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                    >
+                                        {marketLayout === "card" ? (
+                                            <MarketCard
+                                                market={m}
+                                                assetMeta={universe.find(
+                                                    (u) => u.name === m.asset
+                                                )}
+                                                onTogglePause={() =>
+                                                    handleConfirmToggle(
+                                                        m.asset,
+                                                        m.isPaused
+                                                    )
+                                                }
+                                                onRemove={() =>
+                                                    setMarketToRemove(m.asset)
+                                                }
+                                                isToggling={togglingAssets.has(
+                                                    m.asset
+                                                )}
+                                            />
+                                        ) : (
+                                            <MarketStrip
+                                                market={m}
+                                                assetMeta={universe.find(
+                                                    (u) => u.name === m.asset
+                                                )}
+                                                onTogglePause={() =>
+                                                    handleConfirmToggle(
+                                                        m.asset,
+                                                        m.isPaused
+                                                    )
+                                                }
+                                                onRemove={() =>
+                                                    setMarketToRemove(m.asset)
+                                                }
+                                                isToggling={togglingAssets.has(
+                                                    m.asset
+                                                )}
+                                            />
                                         )}
-                                        onTogglePause={() =>
-                                            handleConfirmToggle(
-                                                m.asset,
-                                                m.isPaused
-                                            )
-                                        }
-                                        onRemove={() =>
-                                            setMarketToRemove(m.asset)
-                                        }
-                                        isToggling={togglingAssets.has(m.asset)}
-                                    />
-                                </motion.div>
-                            ))}
+                                    </motion.div>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </main>

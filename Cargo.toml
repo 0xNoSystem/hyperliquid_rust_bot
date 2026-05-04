@@ -38,7 +38,11 @@ hex = "0.4"
 futures-util = "0.3"
 tracing = "0.1"
 regex = "1.12.3"
+futures = "0.3.32"
 
 [profile.release]
 panic = "abort"
+
+[profile.dev]
+debug = 0
 
