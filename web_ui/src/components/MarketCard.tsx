@@ -11,6 +11,7 @@ import {
     get_value,
     get_params,
     fromTimeFrame,
+    engineDisplayLabel,
 } from "../types";
 import { MAX_DECIMALS } from "../consts";
 import LoadingDots from "./Loading";
@@ -247,7 +248,7 @@ const MarketCard = ({
                         <p className="text-app-text text-center font-semibold">
                             Engine:{" "}
                             <span className="text-orange-500">
-                                {engineState}
+                                {engineDisplayLabel(engineState, position)}
                             </span>
                         </p>
                         <div className="border-line-subtle bg-surface-pane my-2 rounded-xl border">

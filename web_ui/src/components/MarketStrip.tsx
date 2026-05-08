@@ -12,6 +12,7 @@ import {
     fromTimeFrame,
     computeUPnL,
     num,
+    engineDisplayLabel,
 } from "../types";
 import { MAX_DECIMALS } from "../consts";
 import LoadingDots from "./Loading";
@@ -218,12 +219,16 @@ const MarketStrip = ({
                 </div>
             </div>
 
-            <div className="max-w-20 min-w-0 shrink-0 truncate">
+            <div className="max-w-36 min-w-0 shrink-0 truncate">
                 <div className="text-app-text/40 hidden text-[9px] tracking-wide uppercase sm:block">
                     Engine
                 </div>
                 <div className="truncate text-[11px] font-semibold text-orange-500 sm:text-xs">
-                    {loading ? <LoadingDots /> : engineState}
+                    {loading ? (
+                        <LoadingDots />
+                    ) : (
+                        engineDisplayLabel(engineState, position)
+                    )}
                 </div>
             </div>
 

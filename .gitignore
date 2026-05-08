@@ -3,5 +3,6 @@
 testnet
 web_ui/.vite
 /data
+/src/bin/test.rs
 
 

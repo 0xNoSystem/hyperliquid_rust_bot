@@ -121,7 +121,27 @@ export const indicatorDefaults: Record<
     vwapDeviation: [20, 14, 9],
 };
 
-export type EngineView = "idle" | "armed" | "opening" | "closing" | "open";
+export type EngineView =
+    | "Idle"
+    | "Armed"
+    | "Opening"
+    | "Closing"
+    | "Open"
+    | "idle"
+    | "armed"
+    | "opening"
+    | "closing"
+    | "open";
+
+export const engineDisplayLabel = (
+    engineState: EngineView | null | undefined,
+    position: OpenPositionLocal | null | undefined
+) => {
+    const label = engineState ?? "Idle";
+    return label.trim().toLowerCase() === "idle" && position != null
+        ? "Idle (Manual trade)"
+        : label;
+};
 
 export interface BackendMarketInfo {
     asset: string;

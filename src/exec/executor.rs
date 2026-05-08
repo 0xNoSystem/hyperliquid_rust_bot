@@ -377,7 +377,9 @@ impl Executor {
                 }
                 Control(control) => match control {
                     ExecControl::Kill => {
-                        self.kill().await;
+                        if !(self.is_paused && self.with_position(|p| p.is_some())) {
+                            self.kill().await;
+                        }
                         return;
                     }
                     ExecControl::Pause => {
@@ -401,33 +403,33 @@ impl Executor {
                 }
 
                 Event(event) => {
-                    if self.is_paused && !self.closing {
-                        continue;
-                    }
                     match event {
                         ExecEvent::Fill(fill) => {
                             let is_open =
                                 matches!(fill.intent, PositionOp::OpenLong | PositionOp::OpenShort);
                             let is_known = self.resting_orders.contains_key(&fill.oid);
 
-                            // Manual open — ignore entirely, pause & warn
-                            if is_open && !is_known {
+                            if !is_known {
+                                let was_paused = self.is_paused;
                                 self.is_paused = true;
                                 let _ = self.cancel_all_resting().await;
-                                let _ = self
-                                    .market_tx
-                                    .send(MarketCommand::ManualTradeDetected)
-                                    .await;
-                                continue;
+                                if !was_paused {
+                                    let _ = self
+                                        .market_tx
+                                        .send(MarketCommand::ManualTradeDetected)
+                                        .await;
+                                }
                             }
 
-                            let (trade_info, _) = self.apply_fill(fill).await;
+                            let (trade_info, is_manual) = self.apply_fill(fill).await;
 
                             if let Some(trade_info) = trade_info {
                                 if !is_open {
                                     self.closing = false;
                                 }
-                                self.update_market(SendUpdate::Trade(trade_info)).await;
+                                if !is_manual {
+                                    self.update_market(SendUpdate::Trade(trade_info)).await;
+                                }
                             }
                         }
                         ExecEvent::Funding(funding) => {

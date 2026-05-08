@@ -6,7 +6,7 @@ use hyperliquid_rust_bot::{
         spawn_pending_agent_pruner,
     },
     backtest::CandleStore,
-    broadcast::{Broadcaster, CandleCache},
+    broadcast::{Broadcaster, CandleCache, UserEventRelay},
 };
 use log::info;
 use sqlx::postgres::PgPoolOptions;
@@ -36,10 +36,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let url = BaseUrl::Mainnet;
     let (mut candle_cache, cache_tx) = CandleCache::new(url).await?;
     let (mut broadcaster, broadcast_tx) = Broadcaster::new(url, cache_tx.clone()).await?;
+    let user_event_tx = match UserEventRelay::from_env(url).await? {
+        Some((mut relay, tx)) => {
+            tokio::spawn(async move { relay.start().await });
+            Some(tx)
+        }
+        None => None,
+    };
     tokio::spawn(async move { candle_cache.start().await });
     tokio::spawn(async move { broadcaster.start().await });
 
-    let bot_manager = BotManager::new(broadcast_tx, cache_tx);
+    let bot_manager = BotManager::new(broadcast_tx, cache_tx, user_event_tx);
     let rhai_engine = Arc::new(create_engine());
 
     let ws_connections: WsConnections = Arc::new(RwLock::new(HashMap::new()));

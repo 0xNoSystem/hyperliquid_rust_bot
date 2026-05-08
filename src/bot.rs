@@ -6,7 +6,9 @@ use crate::{
 use crate::backend::app_state::{StrategyCache, WsConnections, broadcast_to_user};
 use crate::broadcast::{
     BroadcastCmd, CacheCmdIn, PriceAsset, PriceData, SubReply, SubscribePayload,
+    UserEventRelayHandle,
 };
+use crate::stream::AccountEvent;
 use hyperliquid_rust_sdk::{
     AssetMeta, AssetPosition, BaseUrl, Error, InfoClient, Message, Subscription, UserData,
 };
@@ -41,6 +43,7 @@ pub struct Bot {
     asset_feeds: HashMap<Arc<str>, BotAssetFeed, BuildHasherDefault<FxHasher>>,
     broadcast_tx: UnboundedSender<BroadcastCmd>,
     candle_rx: Sender<CacheCmdIn>,
+    user_event_relay: Option<UserEventRelayHandle>,
     #[allow(unused)]
     fees: (f64, f64),
     _bot_tx: Sender<BotEvent>,
@@ -63,11 +66,17 @@ struct BotAssetFeed {
     handle: JoinHandle<()>,
 }
 
+enum UserEventMessage {
+    QuickNode(AccountEvent),
+    Sdk(Message),
+}
+
 impl Bot {
     pub async fn new(
         wallet: Wallet,
         broadcast_tx: UnboundedSender<BroadcastCmd>,
         candle_rx: Sender<CacheCmdIn>,
+        user_event_relay: Option<UserEventRelayHandle>,
     ) -> Result<(Self, Sender<BotEvent>), Error> {
         let info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
         let fees = wallet.get_user_fees().await?;
@@ -87,6 +96,7 @@ impl Bot {
                 asset_feeds: HashMap::default(),
                 broadcast_tx,
                 candle_rx,
+                user_event_relay,
                 fees,
                 _bot_tx: bot_tx.clone(),
                 bot_rv,
@@ -552,6 +562,101 @@ impl Bot {
         }
     }
 
+    async fn handle_user_event_message(&mut self, msg: UserEventMessage) {
+        match msg {
+            UserEventMessage::QuickNode(event) => self.handle_quicknode_account_event(event).await,
+            UserEventMessage::Sdk(msg) => self.handle_sdk_user_message(msg).await,
+        }
+    }
+
+    async fn handle_sdk_user_message(&mut self, msg: Message) {
+        if let Message::User(user_event) = msg {
+            match user_event.data {
+                UserData::Fills(fills_vec) => {
+                    self.handle_user_fills(fills_vec).await;
+                }
+                UserData::Funding(funding_update) => {
+                    self.handle_user_funding(funding_update.coin, funding_update.usdc)
+                        .await;
+                }
+                _ => {}
+            }
+        } else if let Message::NoData = msg {
+            self.send_to_frontend(UpdateFrontend::Status(BackendStatus::Offline))
+                .await;
+        }
+    }
+
+    async fn handle_quicknode_account_event(&mut self, event: AccountEvent) {
+        match event {
+            AccountEvent::Fill(fills) => {
+                self.handle_user_fills(fills.into_iter().map(|event| event.fill).collect())
+                    .await;
+            }
+            AccountEvent::Funding(fundings) => {
+                for event in fundings {
+                    self.handle_user_funding(event.funding.coin, event.funding.usdc)
+                        .await;
+                }
+            }
+            AccountEvent::Raw {
+                stream_type,
+                payload,
+            } => {
+                warn!("Unhandled QuickNode account event stream={stream_type:?} payload={payload}");
+            }
+            AccountEvent::Error(err) => {
+                warn!("QuickNode account event stream error: {err}");
+            }
+            AccountEvent::NoData => {
+                self.send_to_frontend(UpdateFrontend::Status(BackendStatus::Offline))
+                    .await;
+            }
+        }
+    }
+
+    async fn handle_user_fills(&mut self, fills_vec: Vec<HLTradeInfo>) {
+        let mut fills_map: FillsMap = HashMap::default();
+
+        for trade in fills_vec.into_iter() {
+            let coin = trade.coin.clone();
+            let oid = trade.oid;
+            fills_map
+                .entry(coin)
+                .or_default()
+                .entry(oid)
+                .or_default()
+                .push(trade);
+        }
+
+        for (coin, map) in fills_map.into_iter() {
+            for (_oid, fills) in map.into_iter() {
+                match TradeFillInfo::try_from(fills) {
+                    Ok(fill) => {
+                        let cmd = MarketCommand::UserEvent(ExecEvent::Fill(fill));
+                        tokio::task::yield_now().await;
+                        self.send_cmd(coin.clone(), cmd).await;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to aggregate TradeFillInfo for {} market: {}",
+                            coin, e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    async fn handle_user_funding(&mut self, coin: String, usdc: String) {
+        if let Ok(fd) = usdc.parse::<f64>() {
+            let cmd = MarketCommand::UserEvent(ExecEvent::Funding(fd));
+            self.send_cmd(coin, cmd).await;
+        } else {
+            warn!("Failed to parse user funding");
+        }
+    }
+
     pub async fn start(
         mut self,
         ws_connections: WsConnections,
@@ -748,68 +853,58 @@ impl Bot {
             }
         });
 
-        let (user_tx, mut user_rv) = unbounded_channel();
-        let _id = self
-            .info_client
-            .subscribe(
-                Subscription::UserEvents {
-                    user: self.wallet.pubkey,
-                },
-                user_tx,
-            )
-            .await?;
+        let (user_tx, mut user_rv) = unbounded_channel::<UserEventMessage>();
+        let mut relay_user_events = false;
+
+        if let Some(relay) = self.user_event_relay.clone() {
+            match relay.subscribe(self.wallet.pubkey).await {
+                Ok(mut quicknode_rx) => {
+                    log::info!("Subscribed to shared QuickNode account event relay");
+                    let user_tx = user_tx.clone();
+                    tokio::spawn(async move {
+                        while let Some(event) = quicknode_rx.recv().await {
+                            if user_tx.send(UserEventMessage::QuickNode(event)).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                    relay_user_events = true;
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to subscribe to shared QuickNode account event relay, falling back to SDK websocket: {err}"
+                    );
+                }
+            }
+        }
+
+        if !relay_user_events {
+            let (sdk_tx, mut sdk_rx) = unbounded_channel();
+            let _id = self
+                .info_client
+                .subscribe(
+                    Subscription::UserEvents {
+                        user: self.wallet.pubkey,
+                    },
+                    sdk_tx,
+                )
+                .await?;
+
+            tokio::spawn(async move {
+                while let Some(msg) = sdk_rx.recv().await {
+                    if user_tx.send(UserEventMessage::Sdk(msg)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
 
         loop {
             tokio::select!(
                 biased;
 
                 Some(msg) = user_rv.recv() => {
-                    if let Message::User(user_event) = msg {
-                        match user_event.data {
-                            UserData::Fills(fills_vec) => {
-                                let mut fills_map: FillsMap = HashMap::default();
-
-                                for trade in fills_vec.into_iter() {
-                                    let coin = trade.coin.clone();
-                                    let oid = trade.oid;
-                                    fills_map
-                                        .entry(coin)
-                                        .or_default()
-                                        .entry(oid)
-                                        .or_default()
-                                        .push(trade);
-                                }
-
-                                for (coin, map) in fills_map.into_iter() {
-                                    for (_oid, fills) in map.into_iter() {
-                                        match TradeFillInfo::try_from(fills) {
-                                            Ok(fill) => {
-                                                let cmd = MarketCommand::UserEvent(ExecEvent::Fill(fill));
-                                                tokio::task::yield_now().await;
-                                                self.send_cmd(coin.clone(), cmd).await;
-                                            }
-                                            Err(e) => {
-                                                warn!("Failed to aggregate TradeFillInfo for {} market: {}", coin, e);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            UserData::Funding(funding_update) => {
-                                if let Ok(fd) = funding_update.usdc.parse::<f64>() {
-                                    let cmd = MarketCommand::UserEvent(ExecEvent::Funding(fd));
-                                    self.send_cmd(funding_update.coin, cmd).await;
-                                } else {
-                                    warn!("Failed to parse user funding");
-                                }
-                            }
-
-                            _ => { }
-                        }
-                    } else if let Message::NoData = msg {
-                        self.send_to_frontend(Status(BackendStatus::Offline)).await;
-                    }
+                    self.handle_user_event_message(msg).await;
                 },
 
                 Some((asset, data)) = price_router_rv.recv() => {
@@ -1213,6 +1308,9 @@ impl Bot {
                         }
 
                         Kill => {
+                            if let Some(relay) = &self.user_event_relay {
+                                relay.unsubscribe(self.wallet.pubkey);
+                            }
                             self.close_all().await;
                             {
                                 let mut guard = session.lock().await;

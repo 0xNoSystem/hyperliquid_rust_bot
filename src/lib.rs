@@ -1,4 +1,5 @@
 pub mod backend;
+pub mod stream;
 
 mod assets;
 pub mod backtest;

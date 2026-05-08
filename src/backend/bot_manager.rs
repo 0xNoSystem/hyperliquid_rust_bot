@@ -9,7 +9,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::app_state::{StrategyCache, WsConnections};
-use crate::broadcast::{BroadcastCmd, CacheCmdIn};
+use crate::broadcast::{BroadcastCmd, CacheCmdIn, UserEventRelayHandle};
 use crate::{BaseUrl, Bot, BotEvent, Wallet};
 
 struct BotHandle {
@@ -20,14 +20,20 @@ pub struct BotManager {
     bots: HashMap<String, BotHandle>,
     broadcast_tx: UnboundedSender<BroadcastCmd>,
     cache_tx: Sender<CacheCmdIn>,
+    user_event_relay: Option<UserEventRelayHandle>,
 }
 
 impl BotManager {
-    pub fn new(broadcast_tx: UnboundedSender<BroadcastCmd>, cache_tx: Sender<CacheCmdIn>) -> Self {
+    pub fn new(
+        broadcast_tx: UnboundedSender<BroadcastCmd>,
+        cache_tx: Sender<CacheCmdIn>,
+        user_event_relay: Option<UserEventRelayHandle>,
+    ) -> Self {
         Self {
             bots: HashMap::new(),
             broadcast_tx,
             cache_tx,
+            user_event_relay,
         }
     }
 
@@ -80,8 +86,13 @@ impl BotManager {
         let wallet = Wallet::new(url, user_address, signer).await?;
 
         // 4. Create Bot
-        let (bot, cmd_tx) =
-            Bot::new(wallet, self.broadcast_tx.clone(), self.cache_tx.clone()).await?;
+        let (bot, cmd_tx) = Bot::new(
+            wallet,
+            self.broadcast_tx.clone(),
+            self.cache_tx.clone(),
+            self.user_event_relay.clone(),
+        )
+        .await?;
 
         // 5. Spawn bot with multi-device broadcast
         let bot_pubkey = pubkey.to_string();
