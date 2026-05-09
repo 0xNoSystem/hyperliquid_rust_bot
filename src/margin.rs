@@ -2,6 +2,7 @@ use hyperliquid_rust_sdk::{AssetPosition, Error};
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{Wallet, roundf};
 use std::collections::HashMap;
@@ -21,21 +22,30 @@ pub struct MarginBook {
     user: Arc<Wallet>,
     map: MarginMap,
     pub total_on_chain: f64,
+    sync_reset_tx: Option<UnboundedSender<()>>,
 }
 
 impl MarginBook {
-    pub fn new(user: Arc<Wallet>) -> Self {
+    pub fn new(user: Arc<Wallet>, sync_reset_tx: Option<UnboundedSender<()>>) -> Self {
         Self {
             user,
             map: HashMap::default(),
             total_on_chain: f64::from_bits(1),
+            sync_reset_tx,
         }
     }
 
     pub async fn sync(&mut self) -> Result<Vec<AssetPosition>, Error> {
         let res = self.user.get_user_margin(&mut self.map.keys()).await?;
         self.total_on_chain = res.0;
+        self.reset_sync_timer();
         Ok(res.1)
+    }
+
+    fn reset_sync_timer(&self) {
+        if let Some(tx) = &self.sync_reset_tx {
+            let _ = tx.send(());
+        }
     }
 
     pub async fn update_asset(&mut self, update: AssetMargin) -> Result<f64, Error> {

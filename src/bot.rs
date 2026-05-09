@@ -10,7 +10,8 @@ use crate::broadcast::{
 };
 use crate::stream::AccountEvent;
 use hyperliquid_rust_sdk::{
-    AssetMeta, AssetPosition, BaseUrl, Error, InfoClient, Message, Subscription, UserData,
+    AssetMeta, AssetPosition, BaseUrl, Error, InfoClient, LedgerUpdate, LedgerUpdateData, Message,
+    Subscription, UserData,
 };
 use log::warn;
 use rhai::Engine;
@@ -25,7 +26,7 @@ use tokio::sync::mpsc::{
 };
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, interval};
+use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
 
 use crate::helper::*;
@@ -521,6 +522,7 @@ impl Bot {
             if close {
                 let mut book = margin_book.lock().await;
                 book.remove(&asset);
+                let _ = book.sync().await;
             }
         }
         self.clear_market_feed_state(&asset).await;
@@ -562,14 +564,25 @@ impl Bot {
         }
     }
 
-    async fn handle_user_event_message(&mut self, msg: UserEventMessage) {
+    async fn handle_user_event_message(
+        &mut self,
+        msg: UserEventMessage,
+        margin_book: &Arc<Mutex<MarginBook>>,
+    ) {
         match msg {
-            UserEventMessage::QuickNode(event) => self.handle_quicknode_account_event(event).await,
-            UserEventMessage::Sdk(msg) => self.handle_sdk_user_message(msg).await,
+            UserEventMessage::QuickNode(event) => {
+                self.handle_quicknode_account_event(event, margin_book)
+                    .await;
+            }
+            UserEventMessage::Sdk(msg) => self.handle_sdk_user_message(msg, margin_book).await,
         }
     }
 
-    async fn handle_sdk_user_message(&mut self, msg: Message) {
+    async fn handle_sdk_user_message(
+        &mut self,
+        msg: Message,
+        margin_book: &Arc<Mutex<MarginBook>>,
+    ) {
         if let Message::User(user_event) = msg {
             match user_event.data {
                 UserData::Fills(fills_vec) => {
@@ -581,13 +594,23 @@ impl Bot {
                 }
                 _ => {}
             }
+        } else if let Message::UserNonFundingLedgerUpdates(updates) = msg {
+            self.handle_user_non_funding_ledger_updates(
+                updates.data.non_funding_ledger_updates,
+                margin_book,
+            )
+            .await;
         } else if let Message::NoData = msg {
             self.send_to_frontend(UpdateFrontend::Status(BackendStatus::Offline))
                 .await;
         }
     }
 
-    async fn handle_quicknode_account_event(&mut self, event: AccountEvent) {
+    async fn handle_quicknode_account_event(
+        &mut self,
+        event: AccountEvent,
+        margin_book: &Arc<Mutex<MarginBook>>,
+    ) {
         match event {
             AccountEvent::Fill(fills) => {
                 self.handle_user_fills(fills.into_iter().map(|event| event.fill).collect())
@@ -598,6 +621,13 @@ impl Bot {
                     self.handle_user_funding(event.funding.coin, event.funding.usdc)
                         .await;
                 }
+            }
+            AccountEvent::NonFundingLedgerUpdates(updates) => {
+                self.handle_user_non_funding_ledger_updates(
+                    updates.into_iter().map(|event| event.update).collect(),
+                    margin_book,
+                )
+                .await;
             }
             AccountEvent::Raw {
                 stream_type,
@@ -611,6 +641,34 @@ impl Bot {
             AccountEvent::NoData => {
                 self.send_to_frontend(UpdateFrontend::Status(BackendStatus::Offline))
                     .await;
+            }
+        }
+    }
+
+    async fn handle_user_non_funding_ledger_updates(
+        &self,
+        updates: Vec<LedgerUpdateData>,
+        margin_book: &Arc<Mutex<MarginBook>>,
+    ) {
+        if updates.iter().any(ledger_update_affects_margin) {
+            self.sync_margin_book(margin_book).await;
+        }
+    }
+
+    async fn sync_margin_book(&self, margin_book: &Arc<Mutex<MarginBook>>) {
+        let mut book = margin_book.lock().await;
+        match book.sync().await {
+            Ok(_) => {
+                let total = book.total_on_chain - book.used();
+                self.send_to_frontend(UpdateFrontend::UpdateTotalMargin(total))
+                    .await;
+            }
+            Err(e) => {
+                warn!("Failed to fetch User Margin");
+                self.send_to_frontend(UpdateFrontend::UserError(format!(
+                    "Failed to fetch user margin: {e}"
+                )))
+                .await;
             }
         }
     }
@@ -682,24 +740,33 @@ impl Bot {
 
         let session: Session = Arc::new(Mutex::new(HashMap::default()));
 
+        let (margin_sync_reset_tx, mut margin_sync_reset_rx) = unbounded_channel::<()>();
         let user = self.wallet.clone();
-        let margin_book = MarginBook::new(user);
+        let margin_book = MarginBook::new(user, Some(margin_sync_reset_tx));
         let margin_arc = Arc::new(Mutex::new(margin_book));
         let margin_user_edit = margin_arc.clone();
         let margin_market_edit = margin_arc.clone();
         let cancel_token = CancellationToken::new();
 
-        // Margin sync fallback — sends SyncMargin every 30s only if user has active WS
+        // Margin sync fallback — sends SyncMargin 30s after the last successful margin sync.
         let margin_token = cancel_token.clone();
         let margin_tx = self._bot_tx.clone();
         let margin_ws = ws_connections.clone();
         let margin_pk = pubkey.clone();
         let margin_book_handle = tokio::spawn(async move {
-            let mut ticker = interval(Duration::from_secs(30));
             loop {
+                let timer = sleep(Duration::from_secs(30));
+                tokio::pin!(timer);
+
                 tokio::select! {
                     _ = margin_token.cancelled() => { break; }
-                    _ = ticker.tick() => {
+                    reset = margin_sync_reset_rx.recv() => {
+                        if reset.is_none() {
+                            break;
+                        }
+                        while margin_sync_reset_rx.try_recv().is_ok() {}
+                    }
+                    _ = &mut timer => {
                         let has_conn = {
                             let conns = margin_ws.read().await;
                             conns.get(&margin_pk).is_some_and(|v| !v.is_empty())
@@ -886,7 +953,16 @@ impl Bot {
                     Subscription::UserEvents {
                         user: self.wallet.pubkey,
                     },
-                    sdk_tx,
+                    sdk_tx.clone(),
+                )
+                .await?;
+            let _ledger_id = self
+                .info_client
+                .subscribe(
+                    Subscription::UserNonFundingLedgerUpdates {
+                        user: self.wallet.pubkey,
+                    },
+                    sdk_tx.clone(),
                 )
                 .await?;
 
@@ -904,7 +980,7 @@ impl Bot {
                 biased;
 
                 Some(msg) = user_rv.recv() => {
-                    self.handle_user_event_message(msg).await;
+                    self.handle_user_event_message(msg, &margin_user_edit).await;
                 },
 
                 Some((asset, data)) = price_router_rv.recv() => {
@@ -1174,19 +1250,7 @@ impl Bot {
                         }
 
                         SyncMargin => {
-                            let mut book = margin_user_edit.lock().await;
-                            match book.sync().await {
-                                Ok(_) => {
-                                    let total = book.total_on_chain - book.used();
-                                    self.send_to_frontend(UpdateTotalMargin(total)).await;
-                                }
-                                Err(e) => {
-                                    warn!("Failed to fetch User Margin");
-                                    self.send_to_frontend(UserError(format!(
-                                        "Failed to fetch user margin: {e}"
-                                    ))).await;
-                                }
-                            }
+                            self.sync_margin_book(&margin_user_edit).await;
                         }
 
                         ReloadWallet(new_signer) => {
@@ -1335,6 +1399,23 @@ type FillsMap = HashMap<
     HashMap<u64, Vec<HLTradeInfo>, BuildHasherDefault<FxHasher>>,
     BuildHasherDefault<FxHasher>,
 >;
+
+fn ledger_update_affects_margin(update: &LedgerUpdateData) -> bool {
+    matches!(
+        &update.delta,
+        LedgerUpdate::Deposit(_)
+            | LedgerUpdate::Withdraw(_)
+            | LedgerUpdate::InternalTransfer(_)
+            | LedgerUpdate::SubAccountTransfer(_)
+            | LedgerUpdate::LedgerLiquidation(_)
+            | LedgerUpdate::VaultDeposit(_)
+            | LedgerUpdate::VaultCreate(_)
+            | LedgerUpdate::VaultDistribution(_)
+            | LedgerUpdate::VaultWithdraw(_)
+            | LedgerUpdate::VaultLeaderCommission(_)
+            | LedgerUpdate::AccountClassTransfer(_)
+    )
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

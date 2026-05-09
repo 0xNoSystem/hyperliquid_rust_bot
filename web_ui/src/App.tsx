@@ -9,6 +9,7 @@ import MarketDetail from "./components/MarketDetail";
 import StratEditor from "./components/StratEditor";
 import Login from "./components/Login";
 import RequireAuth from "./components/RequireAuth";
+import Docs from "./components/Docs";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { WebSocketProvider } from "./context/WebSocketContext";
 import ChartProvider from "./chart/ChartContext";
@@ -31,6 +32,7 @@ const App: React.FC = () => (
                 <Route path="asset/:asset" element={<MarketDetail />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="lab" element={<StratEditor />} />
+                <Route path="docs" element={<Docs />} />
                 <Route
                     path="backtest/:asset"
                     element={

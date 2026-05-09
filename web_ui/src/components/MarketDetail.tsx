@@ -1,5 +1,6 @@
 // src/components/MarketDetail.tsx
-// Alternative “Trading Terminal” layout — keyboard/terminal vibes, split panes, neon accents. Keeps the same backend interactions and batching behavior. import { KwantChart } from "kwant";
+// Alternative “Trading Terminal” layout — keyboard/terminal vibes, split panes, neon accents. Keeps the same backend interactions and batching behavior.
+import { KwantChart } from "kwant";
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";

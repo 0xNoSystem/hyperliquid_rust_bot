@@ -1,4 +1,5 @@
 use alloy::primitives::Address;
+
 use alloy::signers::local::PrivateKeySigner;
 use futures::future::join_all;
 use hyperliquid_rust_sdk::{
@@ -79,7 +80,28 @@ impl Wallet {
             .iter()
             .map(|d| self.info_client.user_state(self.pubkey, d.clone()));
 
-        let mut account_value = 0f64;
+        let is_unified = self
+            .info_client
+            .get_user_abstraction(self.pubkey)
+            .await?
+            .is_unified();
+
+        let mut account_value = if is_unified {
+            self.info_client
+                .user_token_balances(self.pubkey)
+                .await?
+                .balances[0]
+                .total
+                .parse::<f64>()
+                .map_err(|e| {
+                    Error::GenericParse(format!(
+                        "FATAL: failed to parse account balance to f64, {}",
+                        e
+                    ))
+                })?
+        } else {
+            0f64
+        };
         let mut parse_error: Option<Error> = None;
 
         let r = join_all(futures)
@@ -88,13 +110,15 @@ impl Wallet {
             .collect::<Result<Vec<_>, Error>>()?
             .into_iter()
             .flat_map(|state| {
-                match state.margin_summary.account_value.parse::<f64>() {
-                    Ok(v) => account_value += v,
-                    Err(e) => {
-                        parse_error = Some(Error::GenericParse(format!(
-                            "FATAL: failed to parse account balance to f64, {}",
-                            e
-                        )))
+                if !is_unified {
+                    match state.margin_summary.account_value.parse::<f64>() {
+                        Ok(v) => account_value += v,
+                        Err(e) => {
+                            parse_error = Some(Error::GenericParse(format!(
+                                "FATAL: failed to parse account balance to f64, {}",
+                                e
+                            )))
+                        }
                     }
                 }
                 state.asset_positions

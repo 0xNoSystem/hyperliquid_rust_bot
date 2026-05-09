@@ -451,7 +451,7 @@ impl SignalEngine {
                             } else if let Some(order) =
                                 self.force_as_taker_order(&timeout.intent, price)
                             {
-                                let _ = self.trade_tx.send(ExecCommand::Order(order));
+                                let _ = self.trade_tx.send(ExecCommand::ForceTaker(order));
                             }
                         }
                         OnTimeout::Cancel => {
@@ -478,7 +478,7 @@ impl SignalEngine {
                             } else if let Some(order) =
                                 self.force_as_taker_order(&timeout.intent, price)
                             {
-                                let _ = self.trade_tx.send(ExecCommand::Order(order));
+                                let _ = self.trade_tx.send(ExecCommand::ForceTaker(order));
                             }
                         }
                         OnTimeout::Cancel => {
@@ -853,7 +853,7 @@ impl SignalEngine {
                                 && let Some(bt_order) = self.bt_order_from_engine_order(order)
                                 && let Some(intent) = BtIntent::from_intent(&timeout.intent)
                             {
-                                actions.push(BtAction::Submit {
+                                actions.push(BtAction::ForceTaker {
                                     order: bt_order,
                                     intent,
                                 });
@@ -885,7 +885,7 @@ impl SignalEngine {
                                 && let Some(bt_order) = self.bt_order_from_engine_order(order)
                                 && let Some(intent) = BtIntent::from_intent(&timeout.intent)
                             {
-                                actions.push(BtAction::Submit {
+                                actions.push(BtAction::ForceTaker {
                                     order: bt_order,
                                     intent,
                                 });
@@ -1149,6 +1149,7 @@ pub enum BtOrder {
 #[derive(Clone, Copy, Debug)]
 pub enum BtAction {
     Submit { order: BtOrder, intent: BtIntent },
+    ForceTaker { order: BtOrder, intent: BtIntent },
     CancelAllResting,
     ForceCloseMarket,
 }

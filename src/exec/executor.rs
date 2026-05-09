@@ -116,10 +116,13 @@ impl Executor {
             )),
         }
     }
-    async fn cancel_all_resting(&mut self) -> Result<(), Error> {
+    async fn cancel_resting_oids(&mut self, oids: Vec<u64>) -> Result<(), Error> {
         let asset = self.asset.name.clone();
         let mut failed_cancels: HashSet<u64> = HashSet::new();
-        for (oid, _) in self.resting_orders.drain() {
+        for oid in oids {
+            if self.resting_orders.remove(&oid).is_none() {
+                continue;
+            }
             let cancel = ClientCancelRequest {
                 asset: asset.clone(),
                 oid,
@@ -153,6 +156,22 @@ impl Executor {
             sleep(Duration::from_millis(100)).await;
         }
         Ok(())
+    }
+
+    async fn cancel_all_resting(&mut self) -> Result<(), Error> {
+        let oids = self.resting_orders.keys().copied().collect();
+        self.cancel_resting_oids(oids).await
+    }
+
+    async fn cancel_force_target_resting(&mut self, order: &EngineOrder) -> Result<(), Error> {
+        let oids = self
+            .resting_orders
+            .iter()
+            .filter_map(|(&oid, resting)| {
+                (resting.tpsl.is_none() && resting.intent == order.action).then_some(oid)
+            })
+            .collect();
+        self.cancel_resting_oids(oids).await
     }
 
     fn into_hl_order(
@@ -282,11 +301,16 @@ impl Executor {
         let _ = self.market_tx.send(cmd).await;
     }
 
-    async fn kill(&mut self) {
+    async fn kill(&mut self, close_paused_position: bool) {
         let _ = self.cancel_all_resting().await;
 
+        let skip_paused_position = self.is_paused && !close_paused_position;
         let params = self
             .with_position(|pos| {
+                if skip_paused_position && pos.is_some() {
+                    return None;
+                }
+
                 if let Some(open_pos) = pos {
                     Some((!open_pos.side, open_pos.size))
                 } else {
@@ -325,6 +349,67 @@ impl Executor {
         }
     }
 
+    async fn submit_order(&mut self, order: EngineOrder) {
+        let order_params: Option<(Side, f64)> = match order.action {
+            PositionOp::OpenLong => Some((Side::Long, order.size)),
+            PositionOp::OpenShort => Some((Side::Short, order.size)),
+            PositionOp::Close => {
+                self.with_position(|pos| {
+                    if let Some(open_pos) = pos {
+                        let size = order.size.min(open_pos.size);
+                        let side = !open_pos.side;
+                        Some((side, size))
+                    } else {
+                        None
+                    }
+                })
+                .await
+            }
+        };
+
+        if let Some((side, size)) = order_params {
+            let asset = self.asset.name.clone();
+            let trade =
+                Self::into_hl_order(&asset, size, side, order.limit, order.action, self.decimals);
+            let trigger = order.is_tpsl();
+            match self.open_trade(trade, order.action, trigger).await {
+                Ok(order_response) => {
+                    self.resting_orders
+                        .insert(order_response.oid, order_response);
+                }
+                Err(Error::AuthError(msg)) => {
+                    warn!("[executor] auth error: {msg}");
+                    let _ = self.market_tx.send(MarketCommand::AuthError(msg)).await;
+                    self.is_paused = true;
+                }
+                Err(e) => warn!("{}", e),
+            }
+        }
+    }
+
+    async fn force_taker(&mut self, order: EngineOrder) {
+        if let Err(e) = self.cancel_force_target_resting(&order).await {
+            warn!(
+                "force taker failed while canceling target limit order: {}",
+                e
+            );
+            return;
+        }
+
+        if matches!(order.action, PositionOp::OpenLong | PositionOp::OpenShort)
+            && self.with_position(|pos| pos.is_some()).await
+        {
+            warn!("force taker open skipped because a position is already open");
+            return;
+        }
+
+        self.submit_order(EngineOrder {
+            limit: None,
+            ..order
+        })
+        .await;
+    }
+
     pub async fn start(&mut self) {
         use ExecCommand::*;
         while let Ok(cmd) = self.trade_rv.recv_async().await {
@@ -333,64 +418,28 @@ impl Executor {
                     if self.is_paused {
                         continue;
                     }
-                    let order_params: Option<(Side, f64)> = match order.action {
-                        PositionOp::OpenLong => Some((Side::Long, order.size)),
-                        PositionOp::OpenShort => Some((Side::Short, order.size)),
-                        PositionOp::Close => {
-                            self.with_position(|pos| {
-                                if let Some(open_pos) = pos {
-                                    let size = order.size.min(open_pos.size);
-                                    let side = !open_pos.side;
-                                    Some((side, size))
-                                } else {
-                                    None
-                                }
-                            })
-                            .await
-                        }
-                    };
-
-                    if let Some((side, size)) = order_params {
-                        let asset = self.asset.name.clone();
-                        let trade = Self::into_hl_order(
-                            &asset,
-                            size,
-                            side,
-                            order.limit,
-                            order.action,
-                            self.decimals,
-                        );
-                        let trigger = order.is_tpsl();
-                        match self.open_trade(trade, order.action, trigger).await {
-                            Ok(order_response) => {
-                                self.resting_orders
-                                    .insert(order_response.oid, order_response);
-                            }
-                            Err(Error::AuthError(msg)) => {
-                                warn!("[executor] auth error: {msg}");
-                                let _ = self.market_tx.send(MarketCommand::AuthError(msg)).await;
-                                self.is_paused = true;
-                            }
-                            Err(e) => warn!("{}", e),
-                        }
+                    self.submit_order(order).await;
+                }
+                ForceTaker(order) => {
+                    if self.is_paused {
+                        continue;
                     }
+                    self.force_taker(order).await;
                 }
                 Control(control) => match control {
                     ExecControl::Kill => {
-                        if !(self.is_paused && self.with_position(|p| p.is_some())) {
-                            self.kill().await;
-                        }
+                        self.kill(false).await;
                         return;
                     }
                     ExecControl::Pause => {
-                        self.kill().await;
+                        self.kill(false).await;
                         self.is_paused = true;
                     }
                     ExecControl::Resume => {
                         self.is_paused = false;
                     }
                     ExecControl::ForceClose => {
-                        self.kill().await;
+                        self.kill(true).await;
                     }
                 },
 

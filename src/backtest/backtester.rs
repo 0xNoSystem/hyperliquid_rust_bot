@@ -618,6 +618,23 @@ impl Backtester {
                 BtOrder::Open(open) => self.submit_open_order(open, intent, candle),
                 BtOrder::Close(close) => self.submit_close_order(close, intent, candle),
             },
+            BtAction::ForceTaker { order, intent } => {
+                let forced_action = match order {
+                    BtOrder::Open(open) => open.order.action,
+                    BtOrder::Close(close) => close.order.action,
+                };
+                self.resting_orders.retain(|_, resting| {
+                    resting.order.is_tpsl().is_some() || resting.order.action != forced_action
+                });
+                match order {
+                    BtOrder::Open(open) => {
+                        if self.position.is_none() {
+                            self.submit_open_order(open, intent, candle);
+                        }
+                    }
+                    BtOrder::Close(close) => self.submit_close_order(close, intent, candle),
+                }
+            }
             BtAction::CancelAllResting => {
                 self.resting_orders.clear();
             }
@@ -1943,11 +1960,13 @@ fn div_ceil_u64(value: u64, divisor: u64) -> u64 {
 
 fn snapshot_reason_from_action(action: BtAction) -> Option<SnapshotReason> {
     match action {
-        BtAction::Submit { intent, .. } => Some(match intent {
-            BtIntent::Open => SnapshotReason::Open,
-            BtIntent::Reduce => SnapshotReason::Reduce,
-            BtIntent::Flatten => SnapshotReason::Flatten,
-        }),
+        BtAction::Submit { intent, .. } | BtAction::ForceTaker { intent, .. } => {
+            Some(match intent {
+                BtIntent::Open => SnapshotReason::Open,
+                BtIntent::Reduce => SnapshotReason::Reduce,
+                BtIntent::Flatten => SnapshotReason::Flatten,
+            })
+        }
         BtAction::CancelAllResting => Some(SnapshotReason::CancelResting),
         BtAction::ForceCloseMarket => Some(SnapshotReason::ForceClose),
     }

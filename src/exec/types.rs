@@ -12,6 +12,7 @@ use crate::{OpenPosInfo, get_time_now, roundf};
 #[derive(Clone, Debug)]
 pub enum ExecCommand {
     Order(EngineOrder),
+    ForceTaker(EngineOrder),
     Control(ExecControl),
     Event(ExecEvent),
     ReloadWallet(Arc<ExchangeClient>),

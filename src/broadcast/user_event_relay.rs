@@ -11,7 +11,9 @@ use tokio::sync::{
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, interval};
 
-use crate::stream::{AccountEvent, AccountFill, AccountFunding, EventStream};
+use crate::stream::{
+    AccountEvent, AccountFill, AccountFunding, AccountNonFundingLedgerUpdate, EventStream,
+};
 use crate::{BaseUrl, Error};
 
 type FxMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
@@ -252,7 +254,8 @@ impl UserEventRelay {
         let users = self
             .users
             .iter()
-            .filter_map(|(key, feed)| (feed.tx.receiver_count() == 0).then(|| key.clone()))
+            .filter(|(_, feed)| feed.tx.receiver_count() == 0)
+            .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
 
         for key in users {
@@ -380,6 +383,11 @@ impl UserEventRelay {
                     self.send_to_user(&user, AccountEvent::Funding(fundings));
                 }
             }
+            AccountEvent::NonFundingLedgerUpdates(updates) => {
+                for (user, updates) in group_non_funding_ledger_updates_by_user(updates) {
+                    self.send_to_user(&user, AccountEvent::NonFundingLedgerUpdates(updates));
+                }
+            }
             event @ (AccountEvent::Raw { .. } | AccountEvent::Error(_) | AccountEvent::NoData) => {
                 self.send_to_chunk(relay_event.stream_index, relay_event.chunk_index, event);
             }
@@ -479,6 +487,22 @@ fn group_fundings_by_user(fundings: Vec<AccountFunding>) -> Vec<(Address, Vec<Ac
             .or_insert_with(|| (funding.user, Vec::new()))
             .1
             .push(funding);
+    }
+
+    grouped.into_values().collect()
+}
+
+fn group_non_funding_ledger_updates_by_user(
+    updates: Vec<AccountNonFundingLedgerUpdate>,
+) -> Vec<(Address, Vec<AccountNonFundingLedgerUpdate>)> {
+    let mut grouped = FxMap::<String, (Address, Vec<AccountNonFundingLedgerUpdate>)>::default();
+
+    for update in updates {
+        grouped
+            .entry(user_key(&update.user))
+            .or_insert_with(|| (update.user, Vec::new()))
+            .1
+            .push(update);
     }
 
     grouped.into_values().collect()

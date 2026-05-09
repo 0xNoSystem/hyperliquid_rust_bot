@@ -10,9 +10,10 @@ use std::{
 };
 
 use alloy::primitives::Address;
+use chrono::NaiveDateTime;
 use futures_util::{SinkExt, StreamExt, stream::SplitSink};
 use log::{error, info, warn};
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::{
     net::TcpStream,
@@ -23,17 +24,39 @@ use tokio::{
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol};
 
 use crate::{BaseUrl, Error, HLTradeInfo};
-use hyperliquid_rust_sdk::UserFunding;
+use hyperliquid_rust_sdk::{Deposit, LedgerUpdate, LedgerUpdateData, UserFunding, Withdraw};
 
 type Result<T> = std::result::Result<T, Error>;
 type WsWriter = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, protocol::Message>;
 
 const QUICKNODE_WS_PATH: &str = "/hypercore/ws";
+const QUICKNODE_ACCOUNT_EVENT_TYPES: &[&str] = &[
+    "funding",
+    "CDeposit",
+    "CWithdrawal",
+    "cDeposit",
+    "cWithdrawal",
+    "deposit",
+    "withdraw",
+    "internalTransfer",
+    "subAccountTransfer",
+    "ledgerLiquidation",
+    "liquidation",
+    "vaultDeposit",
+    "vaultCreate",
+    "vaultDistribution",
+    "vaultWithdraw",
+    "vaultLeaderCommission",
+    "accountClassTransfer",
+    "spotTransfer",
+    "spotGenesis",
+];
 
 #[derive(Clone, Debug)]
 pub(crate) enum AccountEvent {
     Fill(Vec<AccountFill>),
     Funding(Vec<AccountFunding>),
+    NonFundingLedgerUpdates(Vec<AccountNonFundingLedgerUpdate>),
     Raw {
         stream_type: QuickNodeStreamType,
         payload: Value,
@@ -53,6 +76,13 @@ pub(crate) struct AccountFill {
 pub(crate) struct AccountFunding {
     pub(crate) user: Address,
     pub(crate) funding: UserFunding,
+    pub(crate) block: QuickNodeBlockMeta,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AccountNonFundingLedgerUpdate {
+    pub(crate) user: Address,
+    pub(crate) update: LedgerUpdateData,
     pub(crate) block: QuickNodeBlockMeta,
 }
 
@@ -94,29 +124,6 @@ impl QuickNodeStreamType {
             "events" | "hl.events" => Some(Self::Events),
             "writer_actions" | "hl.writer_actions" => Some(Self::WriterActions),
             _ => None,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct QuickNodeEnvelope<T> {
-    block: QuickNodeBlock<T>,
-}
-
-#[derive(Deserialize)]
-struct QuickNodeBlock<T> {
-    block_number: u64,
-    block_time: String,
-    local_time: String,
-    events: Vec<(Address, T)>,
-}
-
-impl<T> QuickNodeBlock<T> {
-    fn meta(&self) -> QuickNodeBlockMeta {
-        QuickNodeBlockMeta {
-            block_number: self.block_number,
-            block_time: self.block_time.clone(),
-            local_time: self.local_time.clone(),
         }
     }
 }
@@ -416,7 +423,7 @@ impl EventStream {
             .collect::<Vec<_>>();
 
         let fills_route = format!("fills_{subscription_id}");
-        let fundings_route = format!("fundings_{subscription_id}");
+        let events_route = format!("account_events_{subscription_id}");
         let qn_subscriptions = vec![
             build_qn_subscription(
                 fills_route.clone(),
@@ -426,11 +433,11 @@ impl EventStream {
                 next_rpc_id(&self.jsonrpc_id),
             ),
             build_qn_subscription(
-                fundings_route.clone(),
+                events_route.clone(),
                 QuickNodeStreamType::Events,
                 json!({
                     "users": users,
-                    "type": ["funding"],
+                    "type": QUICKNODE_ACCOUNT_EVENT_TYPES,
                 }),
                 next_rpc_id(&self.jsonrpc_id),
                 next_rpc_id(&self.jsonrpc_id),
@@ -438,7 +445,7 @@ impl EventStream {
         ];
 
         self.subscription_routes
-            .insert(subscription_id, vec![fills_route, fundings_route]);
+            .insert(subscription_id, vec![fills_route, events_route]);
 
         for qn_subscription in qn_subscriptions {
             if let Err(err) = self
@@ -650,13 +657,13 @@ async fn route_account_event(
     };
 
     for delivery in deliveries {
-        if let Some(event) = account_event_for_stream(
+        for event in account_events_for_stream(
             delivery.stream_type,
             &delivery.user_filters,
             payload.clone(),
         ) {
-            for sender in delivery.senders {
-                send_account_event(&sender, event.clone());
+            for sender in &delivery.senders {
+                send_account_event(sender, event.clone());
             }
         }
     }
@@ -670,10 +677,8 @@ fn route_deliveries(route_subscribers: &[RouteSubscriber]) -> Vec<AccountDeliver
     let mut seen = HashSet::new();
     let senders = route_subscribers
         .iter()
-        .filter_map(|subscriber| {
-            seen.insert(subscriber.subscription_id)
-                .then(|| subscriber.sending_channel.clone())
-        })
+        .filter(|subscriber| seen.insert(subscriber.subscription_id))
+        .map(|subscriber| subscriber.sending_channel.clone())
         .collect::<Vec<_>>();
 
     vec![AccountDelivery {
@@ -714,10 +719,8 @@ async fn send_error_event(
                     let mut seen = HashSet::new();
                     route_subscribers
                         .iter()
-                        .filter_map(|subscriber| {
-                            seen.insert(subscriber.subscription_id)
-                                .then(|| subscriber.sending_channel.clone())
-                        })
+                        .filter(|subscriber| seen.insert(subscriber.subscription_id))
+                        .map(|subscriber| subscriber.sending_channel.clone())
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default()
@@ -848,38 +851,37 @@ fn payload_with_rpc_id(payload: &Value, id: u64) -> Value {
     payload
 }
 
-fn account_event_for_stream(
+fn account_events_for_stream(
     stream_type: QuickNodeStreamType,
     user_filters: &HashSet<String>,
     payload: Value,
-) -> Option<AccountEvent> {
+) -> Vec<AccountEvent> {
     match stream_type {
         QuickNodeStreamType::Trades => match parse_account_fills(&payload, user_filters) {
-            Ok(fills) if fills.is_empty() => None,
-            Ok(fills) => Some(AccountEvent::Fill(fills)),
+            Ok(fills) if fills.is_empty() => Vec::new(),
+            Ok(fills) => vec![AccountEvent::Fill(fills)],
             Err(err) => {
                 warn!("Falling back to raw QuickNode trades payload: {err}");
-                Some(AccountEvent::Raw {
+                vec![AccountEvent::Raw {
                     stream_type,
                     payload,
-                })
+                }]
             }
         },
-        QuickNodeStreamType::Events => match parse_account_fundings(&payload, user_filters) {
-            Ok(fundings) if fundings.is_empty() => None,
-            Ok(fundings) => Some(AccountEvent::Funding(fundings)),
+        QuickNodeStreamType::Events => match parse_account_events(&payload, user_filters) {
+            Ok(parsed) => parsed.into_account_events(),
             Err(err) => {
                 warn!("Falling back to raw QuickNode events payload: {err}");
-                Some(AccountEvent::Raw {
+                vec![AccountEvent::Raw {
                     stream_type,
                     payload,
-                })
+                }]
             }
         },
-        _ => Some(AccountEvent::Raw {
+        _ => vec![AccountEvent::Raw {
             stream_type,
             payload,
-        }),
+        }],
     }
 }
 
@@ -887,40 +889,219 @@ fn parse_account_fills(
     payload: &Value,
     user_filters: &HashSet<String>,
 ) -> std::result::Result<Vec<AccountFill>, serde_json::Error> {
-    Ok(parse_quicknode_account_events::<HLTradeInfo>(payload)?
+    Ok(parse_quicknode_account_events(payload)?
         .into_iter()
         .filter(|(user, _, _)| user_matches_filters(user, user_filters))
         .map(|(user, fill, block)| AccountFill { user, fill, block })
         .collect())
 }
 
-fn parse_account_fundings(
-    payload: &Value,
-    user_filters: &HashSet<String>,
-) -> std::result::Result<Vec<AccountFunding>, serde_json::Error> {
-    Ok(parse_quicknode_account_events::<UserFunding>(payload)?
-        .into_iter()
-        .filter(|(user, _, _)| user_matches_filters(user, user_filters))
-        .map(|(user, funding, block)| AccountFunding {
-            user,
-            funding,
-            block,
-        })
-        .collect())
+#[derive(Default)]
+struct ParsedAccountEvents {
+    fundings: Vec<AccountFunding>,
+    non_funding_ledger_updates: Vec<AccountNonFundingLedgerUpdate>,
 }
 
-fn parse_quicknode_account_events<T>(
-    payload: &Value,
-) -> std::result::Result<Vec<(Address, T, QuickNodeBlockMeta)>, serde_json::Error>
-where
-    T: DeserializeOwned,
-{
-    let envelope = serde_json::from_value::<QuickNodeEnvelope<T>>(payload.clone())?;
-    let meta = envelope.block.meta();
+impl ParsedAccountEvents {
+    fn into_account_events(self) -> Vec<AccountEvent> {
+        let mut events = Vec::new();
+        if !self.fundings.is_empty() {
+            events.push(AccountEvent::Funding(self.fundings));
+        }
+        if !self.non_funding_ledger_updates.is_empty() {
+            events.push(AccountEvent::NonFundingLedgerUpdates(
+                self.non_funding_ledger_updates,
+            ));
+        }
+        events
+    }
+}
 
-    Ok(envelope
-        .block
-        .events
+#[derive(Deserialize)]
+struct QuickNodeFundingDelta {
+    user: Address,
+    coin: String,
+    #[serde(rename = "funding_amount", alias = "usdc")]
+    funding_amount: String,
+    szi: String,
+    funding_rate: String,
+}
+
+#[derive(Deserialize)]
+struct QuickNodeCrossChainDeposit {
+    user: Address,
+    amount: String,
+}
+
+#[derive(Deserialize)]
+struct QuickNodeCrossChainWithdrawal {
+    user: Address,
+    amount: String,
+}
+
+fn parse_account_events(
+    payload: &Value,
+    user_filters: &HashSet<String>,
+) -> std::result::Result<ParsedAccountEvents, String> {
+    let block = quicknode_block_value(payload).ok_or_else(|| "missing block/data".to_string())?;
+    let meta = quicknode_block_meta(block);
+    let events = block
+        .get("events")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "missing events array".to_string())?;
+
+    let mut parsed = ParsedAccountEvents::default();
+
+    for event in events {
+        if let Some(tuple) = event.as_array()
+            && tuple.len() == 2
+        {
+            let user = serde_json::from_value::<Address>(tuple[0].clone())
+                .map_err(|err| err.to_string())?;
+            if user_matches_filters(&user, user_filters) {
+                let funding = serde_json::from_value::<UserFunding>(tuple[1].clone())
+                    .map_err(|err| err.to_string())?;
+                parsed.fundings.push(AccountFunding {
+                    user,
+                    funding,
+                    block: meta.clone(),
+                });
+            }
+            continue;
+        }
+
+        let time = event_time_ms(event.get("time"));
+        let hash = event
+            .get("hash")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let Some(inner) = event.get("inner") else {
+            continue;
+        };
+
+        if let Some(funding) = inner.get("Funding")
+            && let Some(deltas) = funding.get("deltas").and_then(Value::as_array)
+        {
+            for delta in deltas {
+                let delta = serde_json::from_value::<QuickNodeFundingDelta>(delta.clone())
+                    .map_err(|err| err.to_string())?;
+                if user_matches_filters(&delta.user, user_filters) {
+                    parsed.fundings.push(AccountFunding {
+                        user: delta.user,
+                        funding: UserFunding {
+                            time,
+                            coin: delta.coin,
+                            usdc: delta.funding_amount,
+                            szi: delta.szi,
+                            funding_rate: delta.funding_rate,
+                        },
+                        block: meta.clone(),
+                    });
+                }
+            }
+        }
+
+        if let Some(ledger) = inner.get("LedgerUpdate") {
+            let users = ledger
+                .get("users")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "missing LedgerUpdate.users".to_string())?
+                .iter()
+                .map(|user| serde_json::from_value::<Address>(user.clone()))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|err| err.to_string())?;
+            let delta = serde_json::from_value::<LedgerUpdate>(
+                ledger
+                    .get("delta")
+                    .cloned()
+                    .ok_or_else(|| "missing LedgerUpdate.delta".to_string())?,
+            )
+            .map_err(|err| err.to_string())?;
+
+            for user in users {
+                if user_matches_filters(&user, user_filters) {
+                    parsed
+                        .non_funding_ledger_updates
+                        .push(AccountNonFundingLedgerUpdate {
+                            user,
+                            update: LedgerUpdateData {
+                                time,
+                                hash: hash.clone(),
+                                delta: delta.clone(),
+                            },
+                            block: meta.clone(),
+                        });
+                }
+            }
+        }
+
+        if let Some(deposit) = inner.get("CDeposit") {
+            let deposit = serde_json::from_value::<QuickNodeCrossChainDeposit>(deposit.clone())
+                .map_err(|err| err.to_string())?;
+            if user_matches_filters(&deposit.user, user_filters) {
+                parsed
+                    .non_funding_ledger_updates
+                    .push(AccountNonFundingLedgerUpdate {
+                        user: deposit.user,
+                        update: LedgerUpdateData {
+                            time,
+                            hash: hash.clone(),
+                            delta: LedgerUpdate::Deposit(Deposit {
+                                usdc: deposit.amount,
+                            }),
+                        },
+                        block: meta.clone(),
+                    });
+            }
+        }
+
+        if let Some(withdrawal) = inner.get("CWithdrawal") {
+            let withdrawal =
+                serde_json::from_value::<QuickNodeCrossChainWithdrawal>(withdrawal.clone())
+                    .map_err(|err| err.to_string())?;
+            if user_matches_filters(&withdrawal.user, user_filters) {
+                parsed
+                    .non_funding_ledger_updates
+                    .push(AccountNonFundingLedgerUpdate {
+                        user: withdrawal.user,
+                        update: LedgerUpdateData {
+                            time,
+                            hash: hash.clone(),
+                            delta: LedgerUpdate::Withdraw(Withdraw {
+                                usdc: withdrawal.amount,
+                                nonce: 0,
+                                fee: "0".to_string(),
+                            }),
+                        },
+                        block: meta.clone(),
+                    });
+            }
+        }
+    }
+
+    Ok(parsed)
+}
+
+fn parse_quicknode_account_events(
+    payload: &Value,
+) -> std::result::Result<Vec<(Address, HLTradeInfo, QuickNodeBlockMeta)>, serde_json::Error> {
+    let block = quicknode_block_value(payload).ok_or_else(|| {
+        serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "missing block/data",
+        ))
+    })?;
+    let meta = quicknode_block_meta(block);
+    let events = block.get("events").cloned().ok_or_else(|| {
+        serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "missing events array",
+        ))
+    })?;
+    let events = serde_json::from_value::<Vec<(Address, HLTradeInfo)>>(events)?;
+
+    Ok(events
         .into_iter()
         .map(|(user, event)| (user, event, meta.clone()))
         .collect())
@@ -931,17 +1112,95 @@ fn user_matches_filters(user: &Address, user_filters: &HashSet<String>) -> bool 
 }
 
 fn quicknode_event_users(payload: &Value) -> HashSet<String> {
-    payload
-        .get("block")
+    let mut users = HashSet::new();
+    if let Some(events) = quicknode_block_value(payload)
         .and_then(|block| block.get("events"))
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|event| event.as_array())
-        .filter_map(|event| event.first())
-        .filter_map(Value::as_str)
-        .map(normalize_user)
-        .collect()
+    {
+        for event in events {
+            if let Some(tuple_user) = event
+                .as_array()
+                .and_then(|tuple| tuple.first())
+                .and_then(Value::as_str)
+            {
+                users.insert(normalize_user(tuple_user));
+            }
+            collect_recursive_user_fields(event, &mut users);
+        }
+    }
+    users
+}
+
+fn quicknode_block_value(payload: &Value) -> Option<&Value> {
+    payload
+        .get("block")
+        .or_else(|| payload.get("data"))
+        .or_else(|| payload.get("events").is_some().then_some(payload))
+}
+
+fn quicknode_block_meta(block: &Value) -> QuickNodeBlockMeta {
+    QuickNodeBlockMeta {
+        block_number: block
+            .get("block_number")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        block_time: block
+            .get("block_time")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        local_time: block
+            .get("local_time")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    }
+}
+
+fn event_time_ms(value: Option<&Value>) -> u64 {
+    if let Some(time) = value.and_then(Value::as_u64) {
+        return time;
+    }
+
+    value
+        .and_then(Value::as_str)
+        .and_then(parse_iso_time_ms)
+        .unwrap_or_default()
+}
+
+fn parse_iso_time_ms(value: &str) -> Option<u64> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|time| time.timestamp_millis() as u64)
+        .ok()
+        .or_else(|| {
+            NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f")
+                .map(|time| time.and_utc().timestamp_millis() as u64)
+                .ok()
+        })
+}
+
+fn collect_recursive_user_fields(value: &Value, users: &mut HashSet<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map {
+                match (key.as_str(), value) {
+                    ("user", Value::String(user)) => {
+                        users.insert(normalize_user(user));
+                    }
+                    ("users", Value::Array(values)) => {
+                        users.extend(values.iter().filter_map(Value::as_str).map(normalize_user));
+                    }
+                    _ => collect_recursive_user_fields(value, users),
+                }
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_recursive_user_fields(value, users);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn subscription_user_filters(subscription: &QnSubscription) -> HashSet<String> {
@@ -1023,5 +1282,100 @@ fn build_ws_url(endpoint: &str) -> String {
         base
     } else {
         format!("{base}{QUICKNODE_WS_PATH}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_mixed_quicknode_events_into_funding_and_ledger_updates() {
+        let user = "0x0000000000000000000000000000000000000001";
+        let payload = json!({
+            "stream": "events",
+            "data": {
+                "block_number": 42,
+                "block_time": "2026-04-30T19:00:00.030459967",
+                "local_time": "2026-04-30T19:00:00.130459967",
+                "events": [
+                    {
+                        "time": "2026-04-30T19:00:00.030459967",
+                        "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                        "inner": {
+                            "Funding": {
+                                "deltas": [{
+                                    "user": user,
+                                    "coin": "ETH",
+                                    "funding_amount": "0.12",
+                                    "szi": "1.0",
+                                    "funding_rate": "0.0001"
+                                }]
+                            }
+                        }
+                    },
+                    {
+                        "time": "2026-04-30T19:01:00.030459967",
+                        "hash": "0xabc",
+                        "inner": {
+                            "LedgerUpdate": {
+                                "users": [user],
+                                "delta": {
+                                    "type": "deposit",
+                                    "usdc": "100.0"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "time": "2026-04-30T19:02:00.030459967",
+                        "hash": "0xdef",
+                        "inner": {
+                            "CDeposit": {
+                                "user": user,
+                                "amount": "25.0"
+                            }
+                        }
+                    }
+                ]
+            }
+        });
+        let user_filters = HashSet::from([normalize_user(user)]);
+
+        let events = account_events_for_stream(QuickNodeStreamType::Events, &user_filters, payload);
+
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], AccountEvent::Funding(fundings) if fundings.len() == 1));
+        assert!(
+            matches!(&events[1], AccountEvent::NonFundingLedgerUpdates(updates)
+                if updates.len() == 2
+                    && matches!(&updates[0].update.delta, LedgerUpdate::Deposit(deposit) if deposit.usdc == "100.0"))
+        );
+    }
+
+    #[test]
+    fn quicknode_event_users_extracts_object_event_users() {
+        let payload = json!({
+            "stream": "events",
+            "data": {
+                "events": [{
+                    "inner": {
+                        "LedgerUpdate": {
+                            "users": ["0x0000000000000000000000000000000000000001"],
+                            "delta": {
+                                "type": "withdraw",
+                                "usdc": "10.0",
+                                "nonce": 1,
+                                "fee": "1.0"
+                            }
+                        }
+                    }
+                }]
+            }
+        });
+
+        assert!(
+            quicknode_event_users(&payload).contains("0x0000000000000000000000000000000000000001")
+        );
     }
 }
