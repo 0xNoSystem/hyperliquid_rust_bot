@@ -437,6 +437,14 @@ impl OpenPositionLocal {
     }
 }
 
+fn parse_finite_fill_value(label: &str, raw: &str) -> Result<f64, Error> {
+    let value = raw.parse::<f64>().map_err(|_| Error::FloatStringParse)?;
+    if !value.is_finite() {
+        return Err(Error::GenericParse(format!("{label} was not finite")));
+    }
+    Ok(value)
+}
+
 impl TryFrom<Vec<HLTradeInfo>> for TradeFillInfo {
     type Error = Error;
 
@@ -521,20 +529,24 @@ impl TryFrom<Vec<HLTradeInfo>> for TradeFillInfo {
         let mut total_fee = 0.0;
 
         for f in &fills {
-            let sz: f64 = f.sz.parse().map_err(|_| Error::FloatStringParse)?;
-
-            let px: f64 = f.px.parse().map_err(|_| Error::FloatStringParse)?;
-
-            let fee: f64 = f.fee.parse().map_err(|_| Error::FloatStringParse)?;
+            let sz = parse_finite_fill_value("fill size", &f.sz)?;
+            let px = parse_finite_fill_value("fill price", &f.px)?;
+            let fee = parse_finite_fill_value("fill fee", &f.fee)?;
 
             total_sz += sz;
             weighted_px += px * sz;
             total_fee += fee;
         }
 
-        if total_sz <= 0.0 {
+        if !total_sz.is_finite() || total_sz <= 0.0 {
             return Err(Error::GenericParse(
-                "Aggregated fill size is zero".to_string(),
+                "Aggregated fill size must be finite and positive".to_string(),
+            ));
+        }
+
+        if !weighted_px.is_finite() || !total_fee.is_finite() {
+            return Err(Error::GenericParse(
+                "Aggregated fill values were not finite".to_string(),
             ));
         }
 
@@ -547,5 +559,18 @@ impl TryFrom<Vec<HLTradeInfo>> for TradeFillInfo {
             fee: total_fee,
             fill_type,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_finite_fill_value_rejects_nan_and_infinity() {
+        assert_eq!(parse_finite_fill_value("fill", "1.25").unwrap(), 1.25);
+        assert!(parse_finite_fill_value("fill", "NaN").is_err());
+        assert!(parse_finite_fill_value("fill", "inf").is_err());
+        assert!(parse_finite_fill_value("fill", "-inf").is_err());
     }
 }

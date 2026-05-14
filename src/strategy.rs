@@ -1,6 +1,3 @@
-#![allow(unused_variables)]
-#![allow(unused_assignments)]
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -9,6 +6,7 @@ use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 
 use crate::backend::scripting::CompiledStrategy;
+use crate::metrics;
 use crate::signal::ValuesMap;
 use crate::{IndexId, IndicatorKind, OpenPosInfo, Price, Side, TimeDelta, TimeFrame, timedelta};
 
@@ -205,8 +203,10 @@ fn eval_ast(
             }
         }
         Err(e) => {
-            if let Some(logger) = log_tx {
-                let _ = logger.try_send(e.to_string());
+            if let Some(logger) = log_tx
+                && logger.try_send(e.to_string()).is_err()
+            {
+                metrics::inc_strategy_log_dropped();
             }
             None
         }

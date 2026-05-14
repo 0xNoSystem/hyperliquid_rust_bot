@@ -1,4 +1,3 @@
-#![allow(unused_variables)]
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -9,6 +8,8 @@ use hyperliquid_rust_sdk::{AssetMeta, BaseUrl, Error, ExchangeClient, ExchangeRe
 use crate::backend::scripting::{CompiledStrategy, create_engine};
 use crate::bot::SyncMarketFeeds;
 use crate::broadcast::{CacheCmdIn, CandleCount, CandleSnapshotRequest, PriceAsset, PriceData};
+use crate::helper::exchange_client_with_timeout;
+use crate::metrics;
 use crate::signal::{
     AssetTimeFrameData, EditType, EngineCommand, EngineView, Entry, ExecParam, ExecParams, IndexId,
     SignalEngine, TimeFrameData,
@@ -21,13 +22,21 @@ use crate::{ExecCommand, ExecControl, ExecEvent, Executor};
 use crate::{MarketInfo, Wallet};
 use crate::{OpenPositionLocal, TimeFrame, TradeHistory, TradeInfo};
 
-use tokio::sync::mpsc::{
-    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
-};
+use tokio::sync::mpsc::{Receiver, Sender, channel, error::TrySendError};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio::time::{Duration, timeout};
 
 use flume::{Sender as FlumeSender, bounded};
+
+const ENGINE_COMMAND_CHANNEL_SIZE: usize = 512;
+const BOT_FEED_SYNC_TIMEOUT_SECS: u64 = 5;
+const CANDLE_CACHE_SEND_TIMEOUT_SECS: u64 = 5;
+const CANDLE_SNAPSHOT_REPLY_TIMEOUT_SECS: u64 = 60;
+const EXEC_COMMAND_SEND_TIMEOUT_SECS: u64 = 5;
+const ENGINE_COMMAND_SEND_TIMEOUT_SECS: u64 = 5;
+const MARKET_UPDATE_SEND_TIMEOUT_SECS: u64 = 5;
+const MARKET_TASK_JOIN_TIMEOUT_SECS: u64 = 5;
 
 pub struct Market {
     exchange_client: ExchangeClient,
@@ -150,28 +159,160 @@ async fn sync_required_assets_via_bot(
     required_assets: HashSet<Arc<str>>,
 ) -> Result<(), Error> {
     let (reply_tx, reply_rx) = oneshot::channel();
-    bot_cmd_tx
-        .send(BotEvent::SyncMarketFeeds(SyncMarketFeeds {
-            market: market.to_string(),
-            required_assets: required_assets.into_iter().collect(),
-            reply: reply_tx,
-        }))
-        .await
-        .map_err(|_| Error::Custom("bot channel closed".into()))?;
+    let cmd = BotEvent::SyncMarketFeeds(SyncMarketFeeds {
+        market: market.to_string(),
+        required_assets: required_assets.into_iter().collect(),
+        reply: reply_tx,
+    });
 
-    reply_rx
+    match bot_cmd_tx.try_send(cmd) {
+        Ok(()) => {}
+        Err(TrySendError::Full(cmd)) => {
+            timeout(
+                Duration::from_secs(BOT_FEED_SYNC_TIMEOUT_SECS),
+                bot_cmd_tx.send(cmd),
+            )
+            .await
+            .map_err(|_| Error::Custom("timed out queuing bot feed sync".into()))?
+            .map_err(|_| Error::Custom("bot channel closed".into()))?;
+        }
+        Err(TrySendError::Closed(_)) => return Err(Error::Custom("bot channel closed".into())),
+    }
+
+    timeout(Duration::from_secs(BOT_FEED_SYNC_TIMEOUT_SECS), reply_rx)
         .await
+        .map_err(|_| Error::Custom("timed out waiting for bot feed sync".into()))?
         .map_err(|_| Error::Custom("bot feed sync reply dropped".into()))?
+}
+
+async fn send_engine_command(
+    tx: &Sender<EngineCommand>,
+    asset: &str,
+    label: &'static str,
+    cmd: EngineCommand,
+) -> bool {
+    match tx.try_send(cmd) {
+        Ok(()) => true,
+        Err(TrySendError::Full(cmd)) => match timeout(
+            Duration::from_secs(ENGINE_COMMAND_SEND_TIMEOUT_SECS),
+            tx.send(cmd),
+        )
+        .await
+        {
+            Ok(Ok(())) => true,
+            Ok(Err(_)) => {
+                log::warn!("[market:{asset}] signal engine channel closed while sending {label}");
+                false
+            }
+            Err(_) => {
+                log::warn!("[market:{asset}] timed out sending {label} to signal engine");
+                false
+            }
+        },
+        Err(TrySendError::Closed(_)) => {
+            log::warn!("[market:{asset}] signal engine channel closed while sending {label}");
+            false
+        }
+    }
+}
+
+async fn send_market_update(
+    tx: &Sender<MarketUpdate>,
+    asset: &str,
+    label: &'static str,
+    update: MarketUpdate,
+) -> bool {
+    match tx.try_send(update) {
+        Ok(()) => true,
+        Err(TrySendError::Full(update)) => match timeout(
+            Duration::from_secs(MARKET_UPDATE_SEND_TIMEOUT_SECS),
+            tx.send(update),
+        )
+        .await
+        {
+            Ok(Ok(())) => true,
+            Ok(Err(_)) => {
+                log::warn!("[market:{asset}] bot update channel closed while sending {label}");
+                false
+            }
+            Err(_) => {
+                log::warn!("[market:{asset}] timed out sending {label} to bot update queue");
+                false
+            }
+        },
+        Err(TrySendError::Closed(_)) => {
+            log::warn!("[market:{asset}] bot update channel closed while sending {label}");
+            false
+        }
+    }
+}
+
+async fn send_exec_command(
+    tx: &FlumeSender<ExecCommand>,
+    asset: &str,
+    label: &'static str,
+    cmd: ExecCommand,
+) -> bool {
+    match timeout(
+        Duration::from_secs(EXEC_COMMAND_SEND_TIMEOUT_SECS),
+        tx.send_async(cmd),
+    )
+    .await
+    {
+        Ok(Ok(())) => true,
+        Ok(Err(_)) => {
+            log::warn!("[market:{asset}] executor channel closed while sending {label}");
+            false
+        }
+        Err(_) => {
+            log::warn!("[market:{asset}] timed out sending {label} to executor");
+            false
+        }
+    }
+}
+
+async fn join_market_task<T>(
+    handle: &mut JoinHandle<T>,
+    asset: &str,
+    label: &'static str,
+) -> Option<T> {
+    match timeout(
+        Duration::from_secs(MARKET_TASK_JOIN_TIMEOUT_SECS),
+        &mut *handle,
+    )
+    .await
+    {
+        Ok(Ok(output)) => Some(output),
+        Ok(Err(err)) => {
+            if !err.is_cancelled() {
+                log::warn!("[market:{asset}] {label} task failed: {err}");
+            }
+            None
+        }
+        Err(_) => {
+            log::warn!("[market:{asset}] timed out stopping {label} task; aborting");
+            handle.abort();
+            match handle.await {
+                Ok(output) => Some(output),
+                Err(err) => {
+                    if !err.is_cancelled() {
+                        log::warn!("[market:{asset}] {label} task failed after abort: {err}");
+                    }
+                    None
+                }
+            }
+        }
+    }
 }
 
 impl Market {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         wallet: Arc<Wallet>,
-        bot_tx: UnboundedSender<MarketUpdate>,
+        bot_tx: Sender<MarketUpdate>,
         bot_cmd_tx: Sender<BotEvent>,
         cache_tx: Sender<CacheCmdIn>,
-        px_receiver: UnboundedReceiver<PriceAsset>,
+        px_receiver: Receiver<PriceAsset>,
         asset: AssetMeta,
         margin: f64,
         lev: usize,
@@ -180,21 +321,29 @@ impl Market {
         strategy_name: String,
         config: Option<Vec<IndexId>>,
     ) -> Result<(Self, Sender<MarketCommand>), Error> {
+        if lev == 0 {
+            return Err(Error::Custom(
+                "leverage must be greater than zero".to_string(),
+            ));
+        }
+
         let exchange_client =
-            ExchangeClient::new(None, wallet.wallet.clone(), Some(wallet.url), None, None).await?;
+            exchange_client_with_timeout("market", wallet.wallet.clone(), wallet.url).await?;
         let manual_indicators: HashSet<IndexId> =
             config.clone().unwrap_or_default().into_iter().collect();
 
         let (market_tx, market_rv) = channel::<MarketCommand>(7);
         let (exec_tx, exec_rv) = bounded::<ExecCommand>(3);
-        let (engine_tx, engine_rv) = unbounded_channel::<EngineCommand>();
+        let (engine_tx, engine_rv) = channel::<EngineCommand>(ENGINE_COMMAND_CHANNEL_SIZE);
         let (log_tx, log_rv) = channel::<String>(30);
 
         let mut rhai_engine = create_engine();
 
         let tx = log_tx.clone();
         rhai_engine.on_print(move |text| {
-            let _ = tx.try_send(text.to_string());
+            if tx.try_send(text.to_string()).is_err() {
+                metrics::inc_strategy_log_dropped();
+            }
         });
 
         let senders = MarketSenders {
@@ -254,8 +403,16 @@ impl Market {
         Self::update_lev(&self.exchange_client, self.asset.name.as_str(), lev).await?;
         self.lev = lev;
 
-        let engine_tx = self.senders.engine_tx.clone();
-        let _ = engine_tx.send(EngineCommand::UpdateExecParams(ExecParam::Lev(self.lev)));
+        if !send_engine_command(
+            &self.senders.engine_tx,
+            self.asset.name.as_str(),
+            "initial leverage",
+            EngineCommand::UpdateExecParams(ExecParam::Lev(self.lev)),
+        )
+        .await
+        {
+            return Err(Error::Custom("signal engine channel closed".into()));
+        }
 
         sync_required_assets_via_bot(
             &self.senders.bot_cmd_tx,
@@ -327,18 +484,35 @@ impl Market {
         request: HashMap<TimeFrame, CandleCount>,
     ) -> Result<TimeFrameData, Error> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        cache_tx
-            .send(CacheCmdIn::Snapshot(CandleSnapshotRequest {
-                asset,
-                request,
-                reply: reply_tx,
-            }))
-            .await
-            .map_err(|_| Error::Custom("CandleCache channel closed".into()))?;
+        let cmd = CacheCmdIn::Snapshot(CandleSnapshotRequest {
+            asset,
+            request,
+            reply: reply_tx,
+        });
 
-        reply_rx
-            .await
-            .map_err(|_| Error::Custom("CandleCache reply dropped".into()))?
+        match cache_tx.try_send(cmd) {
+            Ok(()) => {}
+            Err(TrySendError::Full(cmd)) => {
+                timeout(
+                    Duration::from_secs(CANDLE_CACHE_SEND_TIMEOUT_SECS),
+                    cache_tx.send(cmd),
+                )
+                .await
+                .map_err(|_| Error::Custom("timed out queuing CandleCache snapshot".into()))?
+                .map_err(|_| Error::Custom("CandleCache channel closed".into()))?;
+            }
+            Err(TrySendError::Closed(_)) => {
+                return Err(Error::Custom("CandleCache channel closed".into()));
+            }
+        }
+
+        timeout(
+            Duration::from_secs(CANDLE_SNAPSHOT_REPLY_TIMEOUT_SECS),
+            reply_rx,
+        )
+        .await
+        .map_err(|_| Error::Custom("timed out waiting for CandleCache snapshot".into()))?
+        .map_err(|_| Error::Custom("CandleCache reply dropped".into()))?
     }
 
     async fn fetch_snapshot_map(
@@ -378,6 +552,71 @@ impl Market {
         }
         assets
     }
+
+    async fn forward_close_update(
+        bot_update_tx: &Sender<MarketUpdate>,
+        asset: &str,
+        cmd: MarketCommand,
+    ) {
+        match cmd {
+            MarketCommand::ReceiveTrade(trade_info) => {
+                let _ = send_market_update(
+                    bot_update_tx,
+                    asset,
+                    "close trade update",
+                    MarketUpdate::MarketInfoUpdate((
+                        asset.to_string(),
+                        EditMarketInfo::Trade(trade_info),
+                    )),
+                )
+                .await;
+            }
+            MarketCommand::UpdateOpenPosition(pos) => {
+                let _ = send_market_update(
+                    bot_update_tx,
+                    asset,
+                    "close position update",
+                    MarketUpdate::MarketInfoUpdate((
+                        asset.to_string(),
+                        EditMarketInfo::OpenPosition(pos),
+                    )),
+                )
+                .await;
+            }
+            MarketCommand::EngineStateChange(new_state) => {
+                let _ = send_market_update(
+                    bot_update_tx,
+                    asset,
+                    "close engine-state update",
+                    MarketUpdate::MarketInfoUpdate((
+                        asset.to_string(),
+                        EditMarketInfo::EngineState(new_state),
+                    )),
+                )
+                .await;
+            }
+            MarketCommand::AuthError(msg) => {
+                let _ = send_market_update(
+                    bot_update_tx,
+                    asset,
+                    "auth failure",
+                    MarketUpdate::AuthFailed(msg),
+                )
+                .await;
+            }
+            _ => {}
+        }
+    }
+
+    async fn drain_close_updates(
+        market_rv: &mut Receiver<MarketCommand>,
+        bot_update_tx: &Sender<MarketUpdate>,
+        asset: &str,
+    ) {
+        while let Ok(cmd) = market_rv.try_recv() {
+            Self::forward_close_update(bot_update_tx, asset, cmd).await;
+        }
+    }
 }
 
 impl Market {
@@ -397,26 +636,35 @@ impl Market {
             position: None,
             engine_state: EngineView::Idle,
         };
-        let _ = self.senders.bot_tx.send(MarketUpdate::InitMarket(info));
+        let _ = send_market_update(
+            &self.senders.bot_tx,
+            self.asset.name.as_str(),
+            "market init",
+            MarketUpdate::InitMarket(info),
+        )
+        .await;
 
         let mut signal_engine = self.signal_engine;
         let mut executor = self.executor;
 
         //Start engine
-        let engine_handle = tokio::spawn(async move {
+        let mut engine_handle = tokio::spawn(async move {
             signal_engine.start().await;
         });
         //Start exucutor
-        let executor_handle = tokio::spawn(async move {
+        let mut executor_handle = tokio::spawn(async move {
             executor.start().await;
         });
+        let mut executor_joined = false;
         //Candle Stream
         let engine_price_tx = self.senders.engine_tx.clone();
         let bot_price_update = self.senders.bot_tx.clone();
         let asset_name: Arc<str> = Arc::from(self.asset.name.clone());
         let mut px_receiver = self.receivers.price_rv;
 
-        let candle_stream_handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+        let mut candle_stream_handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+            let mut engine_backpressure_warned = false;
+            let mut frontend_price_backpressure_warned = false;
             while let Some((tick_asset, data)) = px_receiver.recv().await {
                 if tick_asset == asset_name {
                     let last_price = match &data {
@@ -424,15 +672,50 @@ impl Market {
                         PriceData::Bulk(ps) => ps.last().map(|p| p.close),
                     };
                     if let Some(px) = last_price {
-                        let _ = bot_price_update.send(MarketUpdate::RelayToFrontend(
-                            UpdateFrontend::MarketStream(MarketStream::Price {
+                        let update = MarketUpdate::RelayToFrontend(UpdateFrontend::MarketStream(
+                            MarketStream::Price {
                                 asset: Arc::clone(&asset_name),
                                 price: px,
-                            }),
+                            },
                         ));
+                        match bot_price_update.try_send(update) {
+                            Ok(()) => frontend_price_backpressure_warned = false,
+                            Err(TrySendError::Full(_)) => {
+                                metrics::inc_market_frontend_price_dropped();
+                                if !frontend_price_backpressure_warned {
+                                    log::warn!(
+                                        "bot update queue full for {}; dropping frontend price updates",
+                                        &asset_name
+                                    );
+                                    frontend_price_backpressure_warned = true;
+                                }
+                            }
+                            Err(TrySendError::Closed(_)) => {
+                                log::warn!(
+                                    "bot update queue closed for {}; stopping market price bridge",
+                                    &asset_name
+                                );
+                                break;
+                            }
+                        }
                     }
                 }
-                let _ = engine_price_tx.send(EngineCommand::UpdatePrice((tick_asset, data)));
+                match engine_price_tx.try_send(EngineCommand::UpdatePrice((tick_asset, data))) {
+                    Ok(()) => engine_backpressure_warned = false,
+                    Err(TrySendError::Full(_)) => {
+                        metrics::inc_signal_engine_price_dropped();
+                        if !engine_backpressure_warned {
+                            log::warn!(
+                                "signal engine price queue full; dropping live price updates"
+                            );
+                            engine_backpressure_warned = true;
+                        }
+                    }
+                    Err(TrySendError::Closed(_)) => {
+                        log::warn!("signal engine price channel closed; stopping price bridge");
+                        break;
+                    }
+                }
             }
             //let _ = bot_price_update.send(MarketUpdate::FeedDied((*asset_name).to_string()));
             Ok(())
@@ -443,13 +726,36 @@ impl Market {
         let mut log_rv = self.receivers.log_rv;
         let asset: Arc<str> = Arc::from(self.asset.name.clone());
         tokio::spawn(async move {
+            let mut queue_full = false;
+            let mut dropped = 0_u64;
             while let Some(msg) = log_rv.recv().await {
-                let _ = log_sender.send(MarketUpdate::RelayToFrontend(
-                    UpdateFrontend::StrategyLog(ScriptLog {
+                let update =
+                    MarketUpdate::RelayToFrontend(UpdateFrontend::StrategyLog(ScriptLog {
                         asset: asset.clone(),
                         msg,
-                    }),
-                ));
+                    }));
+                match log_sender.try_send(update) {
+                    Ok(()) => {
+                        if queue_full {
+                            log::info!(
+                                "strategy log queue recovered for {} after dropping {} logs",
+                                &asset,
+                                dropped
+                            );
+                            queue_full = false;
+                            dropped = 0;
+                        }
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        metrics::inc_strategy_log_dropped();
+                        dropped = dropped.saturating_add(1);
+                        if !queue_full {
+                            log::warn!("strategy log queue full for {}; dropping logs", &asset);
+                            queue_full = true;
+                        }
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+                }
             }
         });
         //listen to changes and trade results
@@ -460,6 +766,19 @@ impl Market {
         while let Some(cmd) = self.receivers.market_rv.recv().await {
             match cmd {
                 MarketCommand::UpdateLeverage(lev) => {
+                    if lev == 0 {
+                        let _ = send_market_update(
+                            &bot_update_tx,
+                            asset.name.as_str(),
+                            "leverage error",
+                            MarketUpdate::RelayToFrontend(UpdateFrontend::UserError(
+                                "Leverage must be greater than zero".to_string(),
+                            )),
+                        )
+                        .await;
+                        continue;
+                    }
+
                     let lev = lev.min(asset.max_leverage);
                     if lev == self.lev {
                         continue;
@@ -469,18 +788,35 @@ impl Market {
                     match upd {
                         Ok(lev) => {
                             self.lev = lev;
-                            let _ = engine_update_tx
-                                .send(EngineCommand::UpdateExecParams(ExecParam::Lev(lev)));
+                            let _ = send_engine_command(
+                                &engine_update_tx,
+                                asset.name.as_str(),
+                                "leverage update",
+                                EngineCommand::UpdateExecParams(ExecParam::Lev(lev)),
+                            )
+                            .await;
 
-                            let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
-                                asset.name.clone(),
-                                EditMarketInfo::Lev(lev),
-                            )));
+                            let _ = send_market_update(
+                                &bot_update_tx,
+                                asset.name.as_str(),
+                                "leverage update",
+                                MarketUpdate::MarketInfoUpdate((
+                                    asset.name.clone(),
+                                    EditMarketInfo::Lev(lev),
+                                )),
+                            )
+                            .await;
                         }
                         Err(e) => {
-                            let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                UpdateFrontend::UserError(e.to_string()),
-                            ));
+                            let _ = send_market_update(
+                                &bot_update_tx,
+                                asset.name.as_str(),
+                                "leverage error",
+                                MarketUpdate::RelayToFrontend(UpdateFrontend::UserError(
+                                    e.to_string(),
+                                )),
+                            )
+                            .await;
                         }
                     }
                 }
@@ -521,25 +857,37 @@ impl Market {
 
                                 if !failed_keys.is_empty() {
                                     failed = true;
-                                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                        UpdateFrontend::UserError(format!(
-                                            "Strategy '{}' requires candle data for: {}\nFailed to load — strategy not applied.",
-                                            name,
-                                            format_asset_timeframes(&failed_keys)
-                                        )),
-                                    ));
+                                    let _ = send_market_update(
+                                        &bot_update_tx,
+                                        asset.name.as_str(),
+                                        "strategy candle error",
+                                        MarketUpdate::RelayToFrontend(
+                                            UpdateFrontend::UserError(format!(
+                                                "Strategy '{}' requires candle data for: {}\nFailed to load — strategy not applied.",
+                                                name,
+                                                format_asset_timeframes(&failed_keys)
+                                            )),
+                                        ),
+                                    )
+                                    .await;
                                 } else {
                                     map = data;
                                 }
                             }
                             Err(e) => {
                                 failed = true;
-                                let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                    UpdateFrontend::UserError(format!(
-                                        "Failed to load candle data for strategy '{}': {}\nStrategy not applied.",
-                                        name, e
-                                    )),
-                                ));
+                                let _ = send_market_update(
+                                    &bot_update_tx,
+                                    asset.name.as_str(),
+                                    "strategy candle error",
+                                    MarketUpdate::RelayToFrontend(
+                                        UpdateFrontend::UserError(format!(
+                                            "Failed to load candle data for strategy '{}': {}\nStrategy not applied.",
+                                            name, e
+                                        )),
+                                    ),
+                                )
+                                .await;
                             }
                         }
                     }
@@ -559,51 +907,70 @@ impl Market {
                     )
                     .await
                     {
-                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                            UpdateFrontend::UserError(format!(
+                        let _ = send_market_update(
+                            &bot_update_tx,
+                            asset.name.as_str(),
+                            "strategy feed-sync error",
+                            MarketUpdate::RelayToFrontend(UpdateFrontend::UserError(format!(
                                 "Failed to sync live feeds for strategy '{}': {}",
                                 name, e
-                            )),
-                        ));
+                            ))),
+                        )
+                        .await;
                         continue;
                     }
 
                     self.strategy = (name, strat_indicators.clone());
 
-                    let _ = engine_update_tx.send(EngineCommand::UpdateStrategy(
-                        compiled,
-                        strat_indicators.clone(),
-                    ));
+                    let _ = send_engine_command(
+                        &engine_update_tx,
+                        asset.name.as_str(),
+                        "strategy update",
+                        EngineCommand::UpdateStrategy(compiled, strat_indicators.clone()),
+                    )
+                    .await;
 
                     if !strategy_entries.is_empty() || !map.is_empty() {
                         let price_data = if map.is_empty() { None } else { Some(map) };
-                        let _ = engine_update_tx.send(EngineCommand::EditIndicators {
-                            indicators: strategy_entries,
-                            price_data,
-                        });
+                        let _ = send_engine_command(
+                            &engine_update_tx,
+                            asset.name.as_str(),
+                            "strategy indicator edit",
+                            EngineCommand::EditIndicators {
+                                indicators: strategy_entries,
+                                price_data,
+                            },
+                        )
+                        .await;
                     }
 
                     //close any ongoing trade
-                    let _ = self
-                        .senders
-                        .exec_tx
-                        .send_async(Control(ExecControl::ForceClose))
-                        .await;
+                    send_exec_command(
+                        &self.senders.exec_tx,
+                        asset.name.as_str(),
+                        "force-close after strategy update",
+                        Control(ExecControl::ForceClose),
+                    )
+                    .await;
                 }
 
                 MarketCommand::EditIndicators(mut entry_vec) => {
                     let blocked = filter_edits(&self.strategy.1, &mut entry_vec);
                     if !blocked.is_empty() {
-                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                            UpdateFrontend::UserError(format!(
+                        let _ = send_market_update(
+                            &bot_update_tx,
+                            asset.name.as_str(),
+                            "indicator edit blocked",
+                            MarketUpdate::RelayToFrontend(UpdateFrontend::UserError(format!(
                                 "Current strategy requires the following indicator(s):\n{}",
                                 blocked
                                     .iter()
                                     .map(|id| format!("• {:?}", id))
                                     .collect::<Vec<_>>()
                                     .join("\n")
-                            )),
-                        ));
+                            ))),
+                        )
+                        .await;
                     }
 
                     let requests = collect_snapshot_requests(
@@ -643,12 +1010,18 @@ impl Market {
                                             format!("{tf_a:?}").cmp(&format!("{tf_b:?}"))
                                         })
                                     });
-                                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                        UpdateFrontend::UserError(format!(
-                                            "Failed to load candle data for: {}\nIndicators on these asset/timeframes were skipped.",
-                                            format_asset_timeframes(&failed_list)
-                                        )),
-                                    ));
+                                    let _ = send_market_update(
+                                        &bot_update_tx,
+                                        asset.name.as_str(),
+                                        "indicator candle error",
+                                        MarketUpdate::RelayToFrontend(
+                                            UpdateFrontend::UserError(format!(
+                                                "Failed to load candle data for: {}\nIndicators on these asset/timeframes were skipped.",
+                                                format_asset_timeframes(&failed_list)
+                                            )),
+                                        ),
+                                    )
+                                    .await;
                                 }
 
                                 map = data
@@ -660,12 +1033,18 @@ impl Market {
                                     .collect();
                             }
                             Err(e) => {
-                                let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                                    UpdateFrontend::UserError(format!(
-                                        "Failed to load candle data: {}\nIndicator changes were not applied.",
-                                        e
-                                    )),
-                                ));
+                                let _ = send_market_update(
+                                    &bot_update_tx,
+                                    asset.name.as_str(),
+                                    "indicator candle error",
+                                    MarketUpdate::RelayToFrontend(
+                                        UpdateFrontend::UserError(format!(
+                                            "Failed to load candle data: {}\nIndicator changes were not applied.",
+                                            e
+                                        )),
+                                    ),
+                                )
+                                .await;
                                 continue;
                             }
                         }
@@ -684,172 +1063,290 @@ impl Market {
                     )
                     .await
                     {
-                        let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                            UpdateFrontend::UserError(format!(
+                        let _ = send_market_update(
+                            &bot_update_tx,
+                            asset.name.as_str(),
+                            "indicator feed-sync error",
+                            MarketUpdate::RelayToFrontend(UpdateFrontend::UserError(format!(
                                 "Failed to sync live feeds for indicator update: {}",
                                 e
-                            )),
-                        ));
+                            ))),
+                        )
+                        .await;
                         continue;
                     }
 
                     let price_data = if map.is_empty() { None } else { Some(map) };
-                    let _ = engine_update_tx.send(EngineCommand::EditIndicators {
-                        indicators: entry_vec.clone(),
-                        price_data,
-                    });
+                    let _ = send_engine_command(
+                        &engine_update_tx,
+                        asset.name.as_str(),
+                        "indicator edit",
+                        EngineCommand::EditIndicators {
+                            indicators: entry_vec.clone(),
+                            price_data,
+                        },
+                    )
+                    .await;
                     self.manual_indicators = next_manual_indicators;
                 }
 
                 MarketCommand::UpdateOpenPosition(pos) => {
-                    let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
-                        asset.name.clone(),
-                        EditMarketInfo::OpenPosition(pos),
-                    )));
-                    let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(
-                        ExecParam::OpenPosition(pos.map(|p| p.sse())),
-                    ));
+                    let _ = send_market_update(
+                        &bot_update_tx,
+                        asset.name.as_str(),
+                        "open-position update",
+                        MarketUpdate::MarketInfoUpdate((
+                            asset.name.clone(),
+                            EditMarketInfo::OpenPosition(pos),
+                        )),
+                    )
+                    .await;
+                    let _ = send_engine_command(
+                        &engine_update_tx,
+                        asset.name.as_str(),
+                        "open-position update",
+                        EngineCommand::UpdateExecParams(ExecParam::OpenPosition(
+                            pos.map(|p| p.sse()),
+                        )),
+                    )
+                    .await;
                 }
 
                 MarketCommand::ReceiveTrade(trade_info) => {
-                    let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
-                        asset.name.clone(),
-                        EditMarketInfo::Trade(trade_info),
-                    )));
+                    let _ = send_market_update(
+                        &bot_update_tx,
+                        asset.name.as_str(),
+                        "trade update",
+                        MarketUpdate::MarketInfoUpdate((
+                            asset.name.clone(),
+                            EditMarketInfo::Trade(trade_info),
+                        )),
+                    )
+                    .await;
                 }
 
                 MarketCommand::UserEvent(event) => {
-                    let _ = self.senders.exec_tx.send_async(Event(event)).await;
+                    send_exec_command(
+                        &self.senders.exec_tx,
+                        asset.name.as_str(),
+                        "user event",
+                        Event(event),
+                    )
+                    .await;
                 }
 
                 MarketCommand::UpdateMargin(marge) => {
                     self.margin = marge;
-                    let _ = engine_update_tx.send(EngineCommand::UpdateExecParams(
-                        ExecParam::Margin(self.margin),
-                    ));
-                    let _ = bot_update_tx.send(MarketUpdate::MarginUpdate((
-                        asset.name.clone(),
-                        self.margin,
-                    )));
+                    let _ = send_engine_command(
+                        &engine_update_tx,
+                        asset.name.as_str(),
+                        "margin update",
+                        EngineCommand::UpdateExecParams(ExecParam::Margin(self.margin)),
+                    )
+                    .await;
+                    let _ = send_market_update(
+                        &bot_update_tx,
+                        asset.name.as_str(),
+                        "margin update",
+                        MarketUpdate::MarginUpdate((asset.name.clone(), self.margin)),
+                    )
+                    .await;
                 }
 
                 MarketCommand::UpdateIndicatorData(data) => {
-                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                        UpdateFrontend::MarketStream(MarketStream::Indicators {
-                            asset: Arc::from(asset.name.as_str()),
-                            data,
-                        }),
-                    ));
+                    let _ = send_market_update(
+                        &bot_update_tx,
+                        asset.name.as_str(),
+                        "indicator stream update",
+                        MarketUpdate::RelayToFrontend(UpdateFrontend::MarketStream(
+                            MarketStream::Indicators {
+                                asset: Arc::from(asset.name.as_str()),
+                                data,
+                            },
+                        )),
+                    )
+                    .await;
                 }
 
                 MarketCommand::EngineStateChange(new_state) => {
-                    let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
-                        asset.name.clone(),
-                        EditMarketInfo::EngineState(new_state),
-                    )));
+                    let _ = send_market_update(
+                        &bot_update_tx,
+                        asset.name.as_str(),
+                        "engine-state update",
+                        MarketUpdate::MarketInfoUpdate((
+                            asset.name.clone(),
+                            EditMarketInfo::EngineState(new_state),
+                        )),
+                    )
+                    .await;
                 }
 
                 MarketCommand::ManualTradeDetected => {
-                    let _ = self.senders.engine_tx.send(EngineCommand::ExecPause);
-                    let _ = bot_update_tx.send(MarketUpdate::RelayToFrontend(
-                        UpdateFrontend::UserError(format!(
+                    let _ = send_engine_command(
+                        &self.senders.engine_tx,
+                        asset.name.as_str(),
+                        "manual-trade pause",
+                        EngineCommand::ExecPause,
+                    )
+                    .await;
+                    let _ = send_market_update(
+                        &bot_update_tx,
+                        asset.name.as_str(),
+                        "manual-trade notice",
+                        MarketUpdate::RelayToFrontend(UpdateFrontend::UserError(format!(
                             "Manual trade detected on {}. Market paused — resume when ready.",
                             asset.name
+                        ))),
+                    )
+                    .await;
+                    let _ = send_market_update(
+                        &bot_update_tx,
+                        asset.name.as_str(),
+                        "manual-trade paused state",
+                        MarketUpdate::MarketInfoUpdate((
+                            asset.name.clone(),
+                            EditMarketInfo::Paused(true),
                         )),
-                    ));
-                    let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate((
-                        asset.name.clone(),
-                        EditMarketInfo::Paused(true),
-                    )));
+                    )
+                    .await;
                 }
 
                 MarketCommand::AuthError(msg) => {
                     log::warn!("[market:{}] auth error from executor: {msg}", asset.name);
-                    let _ = bot_update_tx.send(MarketUpdate::AuthFailed(msg));
+                    let _ = send_market_update(
+                        &bot_update_tx,
+                        asset.name.as_str(),
+                        "auth failure",
+                        MarketUpdate::AuthFailed(msg),
+                    )
+                    .await;
                 }
 
                 MarketCommand::ReloadWallet(signer) => {
-                    match ExchangeClient::new(
-                        None,
+                    let market_client = exchange_client_with_timeout(
+                        "market wallet reload",
                         signer.clone(),
-                        Some(BaseUrl::Mainnet),
-                        None,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(new_client) => {
+                        BaseUrl::Mainnet,
+                    );
+                    let exec_client = exchange_client_with_timeout(
+                        "executor wallet reload",
+                        signer,
+                        BaseUrl::Mainnet,
+                    );
+                    let (market_client, exec_client) = tokio::join!(market_client, exec_client);
+
+                    match (market_client, exec_client) {
+                        (Ok(new_client), Ok(exec_client)) => {
                             self.exchange_client = new_client;
-                            let exec_client = Arc::new(
-                                ExchangeClient::new(
-                                    None,
-                                    signer,
-                                    Some(BaseUrl::Mainnet),
-                                    None,
-                                    None,
-                                )
-                                .await
-                                .expect("ExchangeClient creation failed after first succeeded"),
-                            );
-                            let _ = self
-                                .senders
-                                .exec_tx
-                                .send_async(ExecCommand::ReloadWallet(exec_client))
-                                .await;
+                            send_exec_command(
+                                &self.senders.exec_tx,
+                                asset.name.as_str(),
+                                "wallet reload",
+                                ExecCommand::ReloadWallet(Arc::new(exec_client)),
+                            )
+                            .await;
                             log::info!("[market:{}] hot-reloaded wallet", asset.name);
                         }
-                        Err(e) => {
-                            log::error!("[market:{}] failed to reload wallet: {e}", asset.name);
+                        (Err(e), _) | (_, Err(e)) => {
+                            log::error!(
+                                "[market:{}] failed to reload exchange client: {e}",
+                                asset.name
+                            );
                         }
                     }
                 }
 
                 MarketCommand::Pause => {
-                    let _ = self
-                        .senders
-                        .exec_tx
-                        .send_async(Control(ExecControl::Pause))
-                        .await;
-                    let _ = self.senders.engine_tx.send(EngineCommand::ExecPause);
+                    send_exec_command(
+                        &self.senders.exec_tx,
+                        asset.name.as_str(),
+                        "pause",
+                        Control(ExecControl::Pause),
+                    )
+                    .await;
+                    let _ = send_engine_command(
+                        &self.senders.engine_tx,
+                        asset.name.as_str(),
+                        "pause",
+                        EngineCommand::ExecPause,
+                    )
+                    .await;
                 }
 
                 MarketCommand::Resume => {
-                    let _ = self
-                        .senders
-                        .exec_tx
-                        .send_async(Control(ExecControl::Resume))
-                        .await;
-                    let _ = self.senders.engine_tx.send(EngineCommand::ExecResume);
+                    send_exec_command(
+                        &self.senders.exec_tx,
+                        asset.name.as_str(),
+                        "resume",
+                        Control(ExecControl::Resume),
+                    )
+                    .await;
+                    let _ = send_engine_command(
+                        &self.senders.engine_tx,
+                        asset.name.as_str(),
+                        "resume",
+                        EngineCommand::ExecResume,
+                    )
+                    .await;
                 }
 
                 MarketCommand::ForceClosePosition => {
-                    let _ = self
-                        .senders
-                        .exec_tx
-                        .send_async(Control(ExecControl::ForceClose))
-                        .await;
+                    send_exec_command(
+                        &self.senders.exec_tx,
+                        asset.name.as_str(),
+                        "force close",
+                        Control(ExecControl::ForceClose),
+                    )
+                    .await;
                 }
 
                 MarketCommand::Close => {
-                    let _ = engine_update_tx.send(EngineCommand::Stop);
-                    match self.senders.exec_tx.send(Control(ExecControl::Kill)) {
-                        Ok(_) => {
-                            if let Some(cmd) = self.receivers.market_rv.recv().await {
-                                match cmd {
-                                    MarketCommand::ReceiveTrade(trade_info) => {
-                                        let _ = bot_update_tx.send(MarketUpdate::MarketInfoUpdate(
-                                            (asset.name.clone(), EditMarketInfo::Trade(trade_info)),
-                                        ));
+                    let _ = send_engine_command(
+                        &engine_update_tx,
+                        asset.name.as_str(),
+                        "stop",
+                        EngineCommand::Stop,
+                    )
+                    .await;
+                    if send_exec_command(
+                        &self.senders.exec_tx,
+                        asset.name.as_str(),
+                        "kill",
+                        Control(ExecControl::Kill),
+                    )
+                    .await
+                    {
+                        loop {
+                            tokio::select! {
+                                maybe_cmd = self.receivers.market_rv.recv() => {
+                                    let Some(cmd) = maybe_cmd else {
                                         break;
-                                    }
+                                    };
 
-                                    _ => break,
+                                    Self::forward_close_update(
+                                        &bot_update_tx,
+                                        asset.name.as_str(),
+                                        cmd,
+                                    )
+                                    .await;
+                                }
+                                result = &mut executor_handle => {
+                                    if let Err(err) = result {
+                                        log::warn!(
+                                            "[market:{}] executor task failed during close: {err}",
+                                            asset.name
+                                        );
+                                    }
+                                    executor_joined = true;
+                                    Self::drain_close_updates(
+                                        &mut self.receivers.market_rv,
+                                        &bot_update_tx,
+                                        asset.name.as_str(),
+                                    )
+                                    .await;
+                                    break;
                                 }
                             }
-                        }
-
-                        _ => {
-                            log::warn!("Cancel message not sent");
                         }
                     }
                     break;
@@ -857,9 +1354,35 @@ impl Market {
             };
         }
 
-        let _ = engine_handle.await;
-        let _ = executor_handle.await;
-        let _ = candle_stream_handle.await;
+        candle_stream_handle.abort();
+        let _ = join_market_task(
+            &mut candle_stream_handle,
+            asset.name.as_str(),
+            "price bridge",
+        )
+        .await;
+
+        let _ = send_engine_command(
+            &engine_update_tx,
+            asset.name.as_str(),
+            "shutdown",
+            EngineCommand::Stop,
+        )
+        .await;
+        if !executor_joined {
+            let _ = send_exec_command(
+                &self.senders.exec_tx,
+                asset.name.as_str(),
+                "shutdown",
+                Control(ExecControl::Kill),
+            )
+            .await;
+        }
+
+        let _ = join_market_task(&mut engine_handle, asset.name.as_str(), "signal engine").await;
+        if !executor_joined {
+            let _ = join_market_task(&mut executor_handle, asset.name.as_str(), "executor").await;
+        }
         Ok(())
     }
 }
@@ -889,14 +1412,14 @@ pub enum MarketCommand {
 }
 
 struct MarketSenders {
-    bot_tx: UnboundedSender<MarketUpdate>,
+    bot_tx: Sender<MarketUpdate>,
     bot_cmd_tx: Sender<BotEvent>,
-    engine_tx: UnboundedSender<EngineCommand>,
+    engine_tx: Sender<EngineCommand>,
     exec_tx: FlumeSender<ExecCommand>,
 }
 
 struct MarketReceivers {
-    pub price_rv: UnboundedReceiver<PriceAsset>,
+    pub price_rv: Receiver<PriceAsset>,
     pub market_rv: Receiver<MarketCommand>,
     pub log_rv: Receiver<String>,
 }
@@ -939,5 +1462,86 @@ impl From<&MarketInfo> for MarketState {
             engine_state: info.engine_state,
             trades: TradeHistory::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sync_required_assets_via_bot_sends_request_and_returns_reply() {
+        let (tx, mut rx) = channel(1);
+        let market = "BTC".to_string();
+        let asset = Arc::<str>::from("ETH");
+
+        let worker = tokio::spawn(async move {
+            let Some(BotEvent::SyncMarketFeeds(payload)) = rx.recv().await else {
+                panic!("expected SyncMarketFeeds command");
+            };
+
+            assert_eq!(payload.market, market);
+            assert_eq!(payload.required_assets, vec![asset]);
+            let _ = payload.reply.send(Ok(()));
+        });
+
+        let mut required_assets = HashSet::new();
+        required_assets.insert(Arc::<str>::from("ETH"));
+
+        sync_required_assets_via_bot(&tx, "BTC", required_assets)
+            .await
+            .expect("feed sync should complete");
+
+        worker.await.expect("worker should finish");
+    }
+
+    #[tokio::test]
+    async fn sync_required_assets_via_bot_errors_when_bot_channel_closed() {
+        let (tx, rx) = channel(1);
+        drop(rx);
+
+        let err = sync_required_assets_via_bot(&tx, "BTC", HashSet::new())
+            .await
+            .expect_err("closed bot channel should fail");
+
+        assert!(err.to_string().contains("bot channel closed"));
+    }
+
+    #[tokio::test]
+    async fn fetch_snapshot_sends_request_and_returns_reply() {
+        let (tx, mut rx) = channel(1);
+        let asset = Arc::<str>::from("BTC");
+
+        let worker = tokio::spawn(async move {
+            let Some(CacheCmdIn::Snapshot(snapshot)) = rx.recv().await else {
+                panic!("expected CandleCache snapshot command");
+            };
+
+            assert_eq!(snapshot.asset, asset);
+            assert_eq!(snapshot.request.get(&TimeFrame::Min1), Some(&10));
+            let _ = snapshot.reply.send(Ok(TimeFrameData::default()));
+        });
+
+        let mut request = HashMap::new();
+        request.insert(TimeFrame::Min1, 10);
+
+        let data = Market::fetch_snapshot(&tx, Arc::<str>::from("BTC"), request)
+            .await
+            .expect("snapshot request should complete");
+
+        assert!(data.is_empty());
+        worker.await.expect("worker should finish");
+    }
+
+    #[tokio::test]
+    async fn fetch_snapshot_errors_when_cache_channel_closed() {
+        let (tx, rx) = channel(1);
+        drop(rx);
+
+        let err = Market::fetch_snapshot(&tx, Arc::<str>::from("BTC"), HashMap::new())
+            .await
+            .expect_err("closed cache channel should fail");
+
+        assert!(err.to_string().contains("CandleCache channel closed"));
     }
 }

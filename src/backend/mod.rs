@@ -8,7 +8,8 @@ pub(crate) mod scripting;
 
 // Re-exports for the binary crate
 pub use app_state::{
-    AppState, CachedStrategy, NonceStore, StrategyCache, WsConnections, broadcast_to_user,
+    AppState, BotStartupStore, CachedStrategy, NonceStore, StrategyCache, WsConnections,
+    broadcast_to_user,
 };
 pub use auth::{AuthUser, spawn_nonce_pruner, spawn_pending_agent_pruner};
 pub use bot_manager::BotManager;

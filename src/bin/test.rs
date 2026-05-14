@@ -1,23 +1,32 @@
 use futures::future::join_all;
 use hyperliquid_rust_bot::{Error, address};
 use hyperliquid_rust_sdk::{BaseUrl, FrontendOpenOrdersResponse, InfoClient};
-const WALLET1: &str = "0x8b56d7FBC8ad2a90E1C1366CA428efb4b5Bed18F";
+
+const TEST_USER_ADDRESS_ENV: &str = "TEST_USER_ADDRESS";
 
 #[tokio::main]
-async fn main() {
-    let user = address(WALLET1).unwrap();
+async fn main() -> Result<(), Error> {
+    dotenv::dotenv().ok();
 
-    let info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    let Ok(user_address) = std::env::var(TEST_USER_ADDRESS_ENV) else {
+        println!("{TEST_USER_ADDRESS_ENV} is not set; nothing to test");
+        return Ok(());
+    };
+    let user = address(&user_address)?;
+
+    let info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await?;
     let abstraction = info_client.get_user_abstraction(user).await;
-    let _ = dbg!(abstraction);
+    println!("user abstraction fetched: {}", abstraction.is_ok());
 
-    let _ = dbg!(info_client.user_token_balances(user).await);
-    let _ = dbg!(info_client.user_state(user, Some("xyz".to_string())).await);
+    let balances = info_client.user_token_balances(user).await?;
+    println!("token balances: {}", balances.balances.len());
+
+    let state = info_client.user_state(user, None).await?;
+    println!("asset positions: {}", state.asset_positions.len());
 
     let dexs: Vec<Option<String>> = info_client
         .perp_dexs()
-        .await
-        .unwrap()
+        .await?
         .into_iter()
         .map(|d| d.map(|d| d.name))
         .collect();
@@ -29,11 +38,12 @@ async fn main() {
     let r: Vec<FrontendOpenOrdersResponse> = join_all(futures)
         .await
         .into_iter()
-        .collect::<Result<Vec<_>, Error>>()
-        .unwrap()
+        .collect::<Result<Vec<_>, Error>>()?
         .into_iter()
         .flatten()
         .collect();
 
-    dbg!(r);
+    println!("frontend open orders: {}", r.len());
+
+    Ok(())
 }

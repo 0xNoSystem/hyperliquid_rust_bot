@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use regex::Regex;
 use rhai::{AST, Dynamic, Engine, Scope};
@@ -11,6 +12,7 @@ use crate::{OpenPosInfo, Price, Side, TimeDelta, TimeFrame, TimedValue, Value};
 
 /// State variable declarations: variable name → default value as Rhai literal.
 pub type StateDeclarations = HashMap<String, serde_json::Value>;
+const MAX_STATE_DECLARATIONS: usize = 256;
 
 // ── Compiled strategy (validated ASTs) ──────────────────────────────────────
 
@@ -25,8 +27,8 @@ pub struct CompiledStrategy {
 
 impl CompiledStrategy {
     /// A no-op strategy that never emits any trading signals.
-    pub fn noop(engine: &Engine) -> Self {
-        let ast = engine.compile("()").expect("noop script must compile");
+    pub fn noop(_engine: &Engine) -> Self {
+        let ast = AST::empty();
         Self {
             ast_on_idle: ast.clone(),
             ast_on_open: ast.clone(),
@@ -116,6 +118,10 @@ pub fn compile_strategy(
     on_busy: &str,
     state_declarations: Option<&StateDeclarations>,
 ) -> Result<CompiledStrategy, String> {
+    if let Some(declarations) = state_declarations {
+        validate_state_declarations(declarations)?;
+    }
+
     let state_preamble = state_declarations
         .map(generate_state_preamble)
         .unwrap_or_default();
@@ -159,6 +165,63 @@ pub fn compile_strategy(
     })
 }
 
+fn validate_state_declarations(declarations: &StateDeclarations) -> Result<(), String> {
+    if declarations.len() > MAX_STATE_DECLARATIONS {
+        return Err(format!(
+            "state declarations may define at most {MAX_STATE_DECLARATIONS} variables"
+        ));
+    }
+
+    for name in declarations.keys() {
+        if !is_valid_state_identifier(name) {
+            return Err(format!("invalid state variable name: {name:?}"));
+        }
+        if is_reserved_strategy_identifier(name) {
+            return Err(format!("state variable name is reserved: {name}"));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_valid_state_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn is_reserved_strategy_identifier(name: &str) -> bool {
+    matches!(
+        name,
+        "LONG"
+            | "SHORT"
+            | "MIN1"
+            | "MIN3"
+            | "MIN5"
+            | "MIN15"
+            | "MIN30"
+            | "HOUR1"
+            | "HOUR2"
+            | "HOUR4"
+            | "HOUR12"
+            | "DAY1"
+            | "TAKER"
+            | "FORCE"
+            | "CANCEL"
+            | "free_margin"
+            | "lev"
+            | "last_price"
+            | "indicators"
+            | "state"
+            | "is_armed"
+            | "open_position"
+            | "busy_reason"
+    )
+}
+
 // ── Script expansion (transpilation) ───────────────────────────────────────
 
 /// Expand a raw user script: apply extract() macro expansion, then prepend
@@ -180,13 +243,20 @@ fn key_matches_indicator_prefix(key: &str, prefix: &str) -> bool {
 /// value unpacking. The unpacking depends on the indicator type detected
 /// from the key, with or without an asset prefix.
 fn expand_extract(src: &str) -> String {
-    let re = Regex::new(r#"let\s+(\w+)\s*=\s*extract\(\s*"([^"]+)"\s*\)\s*;"#).unwrap();
+    static EXTRACT_RE: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
+    let Ok(re) = EXTRACT_RE
+        .get_or_init(|| Regex::new(r#"let\s+(\w+)\s*=\s*extract\(\s*"([^"]+)"\s*\)\s*;"#))
+    else {
+        return src.to_string();
+    };
 
     re.replace_all(src, |caps: &regex::Captures| {
         let var = &caps[1];
         let key = check_asset_fix(&caps[2]);
+        let key_literal = rhai_string_literal(&key);
 
-        let mut out = format!("let {var} = indicators[\"{key}\"];\nif {var} == () {{ return; }}\n");
+        let mut out =
+            format!("let {var} = indicators[{key_literal}];\nif {var} == () {{ return; }}\n");
 
         if key_matches_indicator_prefix(&key, "stochRsi_") {
             out.push_str(&format!(
@@ -242,6 +312,10 @@ fn expand_extract(src: &str) -> String {
     .into_owned()
 }
 
+fn rhai_string_literal(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 /// Generate the state initialization preamble from state declarations.
 /// Each declaration becomes: `let <name> = if state["<name>"] == () { <default> } else { state["<name>"] };`
 fn generate_state_preamble(decls: &StateDeclarations) -> String {
@@ -270,9 +344,7 @@ fn json_to_rhai_literal(val: &serde_json::Value) -> String {
             }
         }
         serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::String(s) => {
-            format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
-        }
+        serde_json::Value::String(s) => rhai_string_literal(s),
         _ => "()".to_string(),
     }
 }
@@ -574,7 +646,11 @@ fn register_timeframe(engine: &mut Engine) {
 
 #[cfg(test)]
 mod tests {
-    use super::expand_extract;
+    use super::{
+        StateDeclarations, expand_extract, is_valid_state_identifier, json_to_rhai_literal,
+        rhai_string_literal, validate_state_declarations,
+    };
+    use std::collections::HashMap;
 
     #[test]
     fn expand_extract_uses_ema_cross_unpacking_with_asset_prefix() {
@@ -641,5 +717,47 @@ mod tests {
         assert!(expanded.contains("let b_lower = bollinger_lower(b.value);"));
         assert!(expanded.contains("let b_width = bollinger_width(b.value);"));
         assert!(!expanded.contains("let b_value ="));
+    }
+
+    #[test]
+    fn rhai_string_literals_escape_quotes_and_backslashes() {
+        assert_eq!(rhai_string_literal(r#"a\b"c"#), r#""a\\b\"c""#);
+        assert_eq!(
+            json_to_rhai_literal(&serde_json::json!(r#"a\b"c"#)),
+            r#""a\\b\"c""#
+        );
+    }
+
+    #[test]
+    fn state_declaration_names_must_be_safe_identifiers() {
+        assert!(is_valid_state_identifier("last_seen_ts"));
+        assert!(is_valid_state_identifier("_private"));
+        assert!(!is_valid_state_identifier(""));
+        assert!(!is_valid_state_identifier("1bad"));
+        assert!(!is_valid_state_identifier("bad-name"));
+        assert!(!is_valid_state_identifier(
+            "x; return open_market(LONG, margin_pct(1.0));"
+        ));
+    }
+
+    #[test]
+    fn state_declaration_validation_rejects_reserved_or_invalid_names() {
+        let valid = StateDeclarations::from([("last_seen_ts".to_string(), serde_json::json!(0))]);
+        assert!(validate_state_declarations(&valid).is_ok());
+
+        let invalid = StateDeclarations::from([("free_margin".to_string(), serde_json::json!(0))]);
+        assert!(validate_state_declarations(&invalid).is_err());
+
+        let invalid = StateDeclarations::from([("bad-name".to_string(), serde_json::json!(0))]);
+        assert!(validate_state_declarations(&invalid).is_err());
+    }
+
+    #[test]
+    fn state_declaration_validation_rejects_too_many_names() {
+        let declarations = (0..=super::MAX_STATE_DECLARATIONS)
+            .map(|index| (format!("state_{index}"), serde_json::json!(0)))
+            .collect::<HashMap<_, _>>();
+
+        assert!(validate_state_declarations(&declarations).is_err());
     }
 }

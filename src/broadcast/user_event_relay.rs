@@ -1,16 +1,18 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 
 use alloy::primitives::Address;
 use rustc_hash::FxHasher;
 use tokio::sync::{
     broadcast,
-    mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    mpsc::{Receiver, Sender, channel, error::TrySendError},
     oneshot,
 };
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, interval};
+use tokio::time::{Duration, interval, timeout};
+use tokio_util::sync::CancellationToken;
 
+use crate::metrics;
 use crate::stream::{
     AccountEvent, AccountFill, AccountFunding, AccountNonFundingLedgerUpdate, EventStream,
 };
@@ -32,9 +34,14 @@ pub const USERS_PER_BUILD_ACCOUNT_FOR_FILLS_AND_FUNDINGS: usize =
     QN_BUILD_ENDPOINTS_PER_ACCOUNT * USERS_PER_WS_FOR_FILLS_AND_FUNDINGS;
 
 const USER_EVENT_CHANNEL_CAPACITY: usize = 256;
+const USER_EVENT_RELAY_EVENT_CAPACITY: usize = USER_EVENT_CHANNEL_CAPACITY * 4;
+const USER_EVENT_CMD_CHANNEL_CAPACITY: usize = 2048;
 const USER_EVENT_CLEANUP_SECS: u64 = 60;
+const USER_EVENT_CMD_BATCH_MAX: usize = 512;
+const USER_EVENT_SUBSCRIBE_TIMEOUT_SECS: u64 = 5;
+const USER_EVENT_UNSUBSCRIBE_TIMEOUT_SECS: u64 = 5;
 
-type UserEventSubReply = Result<UnboundedReceiver<AccountEvent>, Error>;
+type UserEventSubReply = Result<Receiver<AccountEvent>, Error>;
 
 struct UserEventSubscribePayload {
     user: Address,
@@ -48,25 +55,59 @@ enum UserEventCmd {
 
 #[derive(Clone)]
 pub struct UserEventRelayHandle {
-    tx: UnboundedSender<UserEventCmd>,
+    tx: Sender<UserEventCmd>,
 }
 
 impl UserEventRelayHandle {
     pub(crate) async fn subscribe(&self, user: Address) -> UserEventSubReply {
         let (reply, rx) = oneshot::channel();
-        self.tx
-            .send(UserEventCmd::Subscribe(UserEventSubscribePayload {
-                user,
-                reply,
-            }))
-            .map_err(|err| Error::Custom(format!("UserEventRelay channel closed: {err}")))?;
+        timeout(
+            Duration::from_secs(USER_EVENT_SUBSCRIBE_TIMEOUT_SECS),
+            self.tx
+                .send(UserEventCmd::Subscribe(UserEventSubscribePayload {
+                    user,
+                    reply,
+                })),
+        )
+        .await
+        .map_err(|_| Error::Custom("UserEventRelay subscribe timed out".to_string()))?
+        .map_err(|err| Error::Custom(format!("UserEventRelay channel closed: {err}")))?;
 
-        rx.await
+        timeout(Duration::from_secs(USER_EVENT_SUBSCRIBE_TIMEOUT_SECS), rx)
+            .await
+            .map_err(|_| Error::Custom("UserEventRelay subscribe reply timed out".to_string()))?
             .map_err(|_| Error::Custom("UserEventRelay subscribe reply dropped".to_string()))?
     }
 
     pub(crate) fn unsubscribe(&self, user: Address) {
-        let _ = self.tx.send(UserEventCmd::Unsubscribe(user));
+        match self.tx.try_send(UserEventCmd::Unsubscribe(user)) {
+            Ok(()) => {}
+            Err(TrySendError::Full(cmd)) => {
+                let tx = self.tx.clone();
+                tokio::spawn(async move {
+                    match timeout(
+                        Duration::from_secs(USER_EVENT_UNSUBSCRIBE_TIMEOUT_SECS),
+                        tx.send(cmd),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => {
+                            log::warn!(
+                                "UserEventRelay channel closed before delayed unsubscribe: {err}"
+                            );
+                        }
+                        Err(_) => {
+                            log::warn!("timed out queuing delayed UserEventRelay unsubscribe");
+                        }
+                    }
+                });
+                log::warn!("UserEventRelay command queue full while unsubscribing user");
+            }
+            Err(TrySendError::Closed(_)) => {
+                log::warn!("failed to queue UserEventRelay unsubscribe: channel closed");
+            }
+        }
     }
 }
 
@@ -96,11 +137,19 @@ struct RelayEvent {
     event: AccountEvent,
 }
 
+struct PendingSubscribe {
+    user_key: String,
+    user: Address,
+    stream_index: usize,
+    chunk_index: usize,
+    reply: oneshot::Sender<UserEventSubReply>,
+}
+
 pub struct UserEventRelay {
     url: BaseUrl,
-    cmd_rx: UnboundedReceiver<UserEventCmd>,
-    event_tx: UnboundedSender<RelayEvent>,
-    event_rx: UnboundedReceiver<RelayEvent>,
+    cmd_rx: Receiver<UserEventCmd>,
+    event_tx: Sender<RelayEvent>,
+    event_rx: Receiver<RelayEvent>,
     endpoints: Vec<RelayEndpoint>,
     users: FxMap<String, UserFeed>,
 }
@@ -141,8 +190,8 @@ impl UserEventRelay {
                 chunks: Vec::new(),
             })
             .collect::<Vec<_>>();
-        let (cmd_tx, cmd_rx) = unbounded_channel();
-        let (event_tx, event_rx) = unbounded_channel();
+        let (cmd_tx, cmd_rx) = channel(USER_EVENT_CMD_CHANNEL_CAPACITY);
+        let (event_tx, event_rx) = channel(USER_EVENT_RELAY_EVENT_CAPACITY);
 
         Ok((
             Self {
@@ -157,12 +206,15 @@ impl UserEventRelay {
         ))
     }
 
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self, shutdown: CancellationToken) {
         let mut cleanup = interval(Duration::from_secs(USER_EVENT_CLEANUP_SECS));
         cleanup.tick().await;
 
         loop {
             tokio::select! {
+                _ = shutdown.cancelled() => {
+                    break;
+                }
                 _ = cleanup.tick() => {
                     self.cleanup_idle_users().await;
                 }
@@ -170,10 +222,7 @@ impl UserEventRelay {
                     let Some(cmd) = maybe_cmd else {
                         break;
                     };
-                    match cmd {
-                        UserEventCmd::Subscribe(payload) => self.subscribe(payload).await,
-                        UserEventCmd::Unsubscribe(user) => self.unsubscribe(user).await,
-                    }
+                    self.handle_cmd_batch(cmd).await;
                 }
                 maybe_event = self.event_rx.recv() => {
                     let Some(event) = maybe_event else {
@@ -185,68 +234,133 @@ impl UserEventRelay {
         }
     }
 
-    async fn subscribe(&mut self, payload: UserEventSubscribePayload) {
-        let user_key = user_key(&payload.user);
-
-        if let Some(feed) = self.users.get(&user_key) {
-            let rx = unbounded_from_broadcast(feed.tx.subscribe());
-            let _ = payload.reply.send(Ok(rx));
-            return;
+    async fn handle_cmd_batch(&mut self, first: UserEventCmd) {
+        let mut cmds = vec![first];
+        while cmds.len() < USER_EVENT_CMD_BATCH_MAX {
+            match self.cmd_rx.try_recv() {
+                Ok(cmd) => cmds.push(cmd),
+                Err(_) => break,
+            }
         }
 
-        let Ok((stream_index, chunk_index)) = self.reserve_slot(payload.user) else {
-            let _ = payload.reply.send(Err(Error::Custom(format!(
-                "UserEventRelay capacity exceeded: max {} users across {} QuickNode endpoints",
-                USERS_PER_BUILD_ACCOUNT_FOR_FILLS_AND_FUNDINGS, QN_BUILD_ENDPOINTS_PER_ACCOUNT
-            ))));
-            return;
-        };
+        let mut touched_chunks = HashSet::new();
+        let mut pending_subscribes = Vec::new();
 
-        let (tx, rx) = broadcast::channel(USER_EVENT_CHANNEL_CAPACITY);
-        self.users.insert(
-            user_key.clone(),
-            UserFeed {
-                user: payload.user,
-                tx,
-                stream_index,
-                chunk_index,
-            },
-        );
+        for cmd in cmds {
+            match cmd {
+                UserEventCmd::Subscribe(payload) => {
+                    let user_key = user_key(&payload.user);
 
-        match self.resubscribe_chunk(stream_index, chunk_index).await {
-            Ok(()) => {
-                if let Some(feed) = self.users.get(&user_key) {
-                    let _ = payload
-                        .reply
-                        .send(Ok(unbounded_from_broadcast(feed.tx.subscribe())));
-                } else {
-                    let _ = payload.reply.send(Err(Error::Custom(
-                        "UserEventRelay feed missing after subscribe".to_string(),
+                    if let Some(feed) = self.users.get(&user_key) {
+                        let rx = bounded_from_broadcast(feed.tx.subscribe());
+                        let _ = payload.reply.send(Ok(rx));
+                        continue;
+                    }
+
+                    let Ok((stream_index, chunk_index)) = self.reserve_slot(payload.user) else {
+                        let _ = payload.reply.send(Err(Error::Custom(format!(
+                            "UserEventRelay capacity exceeded: max {} users across {} QuickNode endpoints",
+                            USERS_PER_BUILD_ACCOUNT_FOR_FILLS_AND_FUNDINGS, QN_BUILD_ENDPOINTS_PER_ACCOUNT
+                        ))));
+                        continue;
+                    };
+
+                    let (tx, rx) = broadcast::channel(USER_EVENT_CHANNEL_CAPACITY);
+                    self.users.insert(
+                        user_key.clone(),
+                        UserFeed {
+                            user: payload.user,
+                            tx,
+                            stream_index,
+                            chunk_index,
+                        },
+                    );
+                    drop(rx);
+
+                    touched_chunks.insert((stream_index, chunk_index));
+                    pending_subscribes.push(PendingSubscribe {
+                        user_key,
+                        user: payload.user,
+                        stream_index,
+                        chunk_index,
+                        reply: payload.reply,
+                    });
+                }
+
+                UserEventCmd::Unsubscribe(user) => {
+                    let key = user_key(&user);
+                    let Some(feed) = self.users.remove(&key) else {
+                        continue;
+                    };
+
+                    self.remove_user_from_chunk(feed.stream_index, feed.chunk_index, user);
+                    touched_chunks.insert((feed.stream_index, feed.chunk_index));
+                }
+            }
+        }
+
+        let mut results = HashMap::new();
+        for (stream_index, chunk_index) in touched_chunks {
+            let result = self
+                .resubscribe_chunk(stream_index, chunk_index)
+                .await
+                .map_err(|err| err.to_string());
+            if let Err(err) = &result {
+                log::warn!(
+                    "failed to resubscribe QuickNode user-event chunk {stream_index}/{chunk_index}: {err}"
+                );
+            }
+            results.insert((stream_index, chunk_index), result);
+        }
+
+        let mut failed_reply_chunks = HashSet::new();
+
+        for pending in pending_subscribes {
+            match results.get(&(pending.stream_index, pending.chunk_index)) {
+                Some(Ok(())) => {
+                    if let Some(feed) = self.users.get(&pending.user_key) {
+                        if pending
+                            .reply
+                            .send(Ok(bounded_from_broadcast(feed.tx.subscribe())))
+                            .is_err()
+                        {
+                            self.users.remove(&pending.user_key);
+                            self.remove_user_from_chunk(
+                                pending.stream_index,
+                                pending.chunk_index,
+                                pending.user,
+                            );
+                            failed_reply_chunks.insert((pending.stream_index, pending.chunk_index));
+                        }
+                    } else {
+                        let _ = pending.reply.send(Err(Error::Custom(
+                            "UserEventRelay feed removed before subscribe completed".to_string(),
+                        )));
+                    }
+                }
+                Some(Err(err)) => {
+                    self.users.remove(&pending.user_key);
+                    self.remove_user_from_chunk(
+                        pending.stream_index,
+                        pending.chunk_index,
+                        pending.user,
+                    );
+                    let _ = pending.reply.send(Err(Error::Custom(err.clone())));
+                }
+                None => {
+                    let _ = pending.reply.send(Err(Error::Custom(
+                        "UserEventRelay chunk was not resubscribed".to_string(),
                     )));
                 }
             }
-            Err(err) => {
-                self.users.remove(&user_key);
-                self.remove_user_from_chunk(stream_index, chunk_index, payload.user);
-                let _ = payload.reply.send(Err(err));
-            }
         }
 
-        drop(rx);
-    }
-
-    async fn unsubscribe(&mut self, user: Address) {
-        let key = user_key(&user);
-        let Some(feed) = self.users.remove(&key) else {
-            return;
-        };
-
-        self.remove_user_from_chunk(feed.stream_index, feed.chunk_index, user);
-        if let Err(err) = self
-            .resubscribe_chunk(feed.stream_index, feed.chunk_index)
-            .await
-        {
-            log::warn!("failed to resubscribe QuickNode user-event chunk after unsubscribe: {err}");
+        for (stream_index, chunk_index) in failed_reply_chunks {
+            if let Err(err) = self.resubscribe_chunk(stream_index, chunk_index).await {
+                log::warn!(
+                    "failed to resubscribe QuickNode user-event chunk after dropped subscribe reply: {err}"
+                );
+            }
         }
     }
 
@@ -258,17 +372,26 @@ impl UserEventRelay {
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
 
+        let mut touched_chunks = HashSet::new();
+
         for key in users {
             if let Some(feed) = self.users.remove(&key) {
                 self.remove_user_from_chunk(feed.stream_index, feed.chunk_index, feed.user);
-                if let Err(err) = self
-                    .resubscribe_chunk(feed.stream_index, feed.chunk_index)
-                    .await
-                {
-                    log::warn!(
-                        "failed to resubscribe QuickNode user-event chunk after cleanup: {err}"
-                    );
+                touched_chunks.insert((feed.stream_index, feed.chunk_index));
+            }
+        }
+
+        for (stream_index, endpoint) in self.endpoints.iter().enumerate() {
+            for (chunk_index, chunk) in endpoint.chunks.iter().enumerate() {
+                if !chunk.users.is_empty() && chunk.subscription_id.is_none() {
+                    touched_chunks.insert((stream_index, chunk_index));
                 }
+            }
+        }
+
+        for (stream_index, chunk_index) in touched_chunks {
+            if let Err(err) = self.resubscribe_chunk(stream_index, chunk_index).await {
+                log::warn!("failed to resubscribe QuickNode user-event chunk after cleanup: {err}");
             }
         }
     }
@@ -318,30 +441,60 @@ impl UserEventRelay {
             self.endpoints[stream_index].stream = Some(stream);
         }
 
-        let (old_subscription_id, old_task, users) = {
-            let chunk = &mut self.endpoints[stream_index].chunks[chunk_index];
-            (
-                chunk.subscription_id.take(),
-                chunk.task.take(),
-                chunk.users.clone(),
-            )
-        };
-
-        if let Some(task) = old_task {
-            task.abort();
-        }
-
-        if let Some(subscription_id) = old_subscription_id
-            && let Some(stream) = self.endpoints[stream_index].stream.as_mut()
-        {
-            stream.remove_subscription(subscription_id).await?;
-        }
+        let users = self.endpoints[stream_index].chunks[chunk_index]
+            .users
+            .clone();
 
         if users.is_empty() {
+            let (old_subscription_id, old_task) = {
+                let chunk = &mut self.endpoints[stream_index].chunks[chunk_index];
+                (chunk.subscription_id.take(), chunk.task.take())
+            };
+
+            if let Some(task) = old_task {
+                task.abort();
+            }
+
+            if let Some(subscription_id) = old_subscription_id
+                && let Some(stream) = self.endpoints[stream_index].stream.as_mut()
+            {
+                stream.remove_subscription(subscription_id).await?;
+            }
+
             return Ok(());
         }
 
-        let (tx, mut rx) = unbounded_channel();
+        let active_chunks = self.endpoints[stream_index]
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.subscription_id.is_some())
+            .count();
+        let should_remove_old_first = active_chunks >= SUBSCRIBE_USER_EVENTS_CALLS_PER_WS
+            && self.endpoints[stream_index].chunks[chunk_index]
+                .subscription_id
+                .is_some();
+
+        if should_remove_old_first {
+            let (old_subscription_id, old_task) = {
+                let chunk = &mut self.endpoints[stream_index].chunks[chunk_index];
+                (chunk.subscription_id.take(), chunk.task.take())
+            };
+
+            if let Some(task) = old_task {
+                task.abort();
+            }
+
+            if let Some(subscription_id) = old_subscription_id
+                && let Some(stream) = self.endpoints[stream_index].stream.as_mut()
+                && let Err(err) = stream.remove_subscription(subscription_id).await
+            {
+                log::warn!(
+                    "failed to remove old QuickNode user-event subscription {subscription_id}: {err}"
+                );
+            }
+        }
+
+        let (tx, mut rx) = channel(USER_EVENT_RELAY_EVENT_CAPACITY);
         let subscription_id = self.endpoints[stream_index]
             .stream
             .as_mut()
@@ -350,23 +503,55 @@ impl UserEventRelay {
             .await?;
         let event_tx = self.event_tx.clone();
         let task = tokio::spawn(async move {
+            let mut queue_full = false;
+            let mut dropped = 0_u64;
             while let Some(event) = rx.recv().await {
-                if event_tx
-                    .send(RelayEvent {
-                        stream_index,
-                        chunk_index,
-                        event,
-                    })
-                    .is_err()
-                {
-                    break;
+                match event_tx.try_send(RelayEvent {
+                    stream_index,
+                    chunk_index,
+                    event,
+                }) {
+                    Ok(()) => {
+                        if queue_full {
+                            log::info!(
+                                "UserEventRelay event queue recovered after dropping {dropped} events"
+                            );
+                            queue_full = false;
+                            dropped = 0;
+                        }
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        metrics::inc_user_event_relay_event_dropped();
+                        dropped = dropped.saturating_add(1);
+                        if !queue_full {
+                            log::warn!("UserEventRelay event queue full; dropping account events");
+                            queue_full = true;
+                        }
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
                 }
             }
         });
 
-        let chunk = &mut self.endpoints[stream_index].chunks[chunk_index];
-        chunk.subscription_id = Some(subscription_id);
-        chunk.task = Some(task);
+        let (old_subscription_id, old_task) = {
+            let chunk = &mut self.endpoints[stream_index].chunks[chunk_index];
+            let old_subscription_id = chunk.subscription_id.replace(subscription_id);
+            let old_task = chunk.task.replace(task);
+            (old_subscription_id, old_task)
+        };
+
+        if let Some(task) = old_task {
+            task.abort();
+        }
+
+        if let Some(subscription_id) = old_subscription_id
+            && let Some(stream) = self.endpoints[stream_index].stream.as_mut()
+            && let Err(err) = stream.remove_subscription(subscription_id).await
+        {
+            log::warn!(
+                "failed to remove old QuickNode user-event subscription {subscription_id}: {err}"
+            );
+        }
 
         Ok(())
     }
@@ -416,44 +601,95 @@ impl UserEventRelay {
 }
 
 fn quicknode_endpoints_from_env() -> Vec<String> {
-    [
-        "QUICKNODE_HYPERCORE_ENDPOINTS",
-        "QUICKNODE_HYPERCORE_ENDPOINT",
-        "QUICKNODE_ENDPOINT",
-    ]
-    .into_iter()
-    .find_map(|key| std::env::var(key).ok())
-    .map(|raw| {
-        raw.split(',')
-            .map(str::trim)
-            .filter(|endpoint| !endpoint.is_empty())
-            .map(ToOwned::to_owned)
-            .collect()
-    })
-    .unwrap_or_default()
+    let mut raw_values = Vec::with_capacity(QN_BUILD_ENDPOINTS_PER_ACCOUNT + 3);
+
+    if let Ok(raw) = std::env::var("QUICKNODE_HYPERCORE_ENDPOINTS") {
+        raw_values.push(raw);
+    }
+
+    for index in 1..=QN_BUILD_ENDPOINTS_PER_ACCOUNT {
+        if let Ok(raw) = std::env::var(format!("QUICKNODE_HYPERCORE_ENDPOINT{index}")) {
+            raw_values.push(raw);
+        }
+    }
+
+    for key in ["QUICKNODE_HYPERCORE_ENDPOINT", "QUICKNODE_ENDPOINT"] {
+        if let Ok(raw) = std::env::var(key) {
+            raw_values.push(raw);
+        }
+    }
+
+    split_quicknode_endpoint_values(raw_values)
 }
 
-fn unbounded_from_broadcast(
-    mut rx: broadcast::Receiver<AccountEvent>,
-) -> UnboundedReceiver<AccountEvent> {
-    let (tx, out_rx) = unbounded_channel();
+fn split_quicknode_endpoint_values(raw_values: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut endpoints = Vec::new();
+
+    for endpoint in raw_values
+        .into_iter()
+        .flat_map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|endpoint| !endpoint.is_empty())
+    {
+        if seen.insert(endpoint.clone()) {
+            endpoints.push(endpoint);
+        }
+    }
+
+    endpoints
+}
+
+fn bounded_from_broadcast(mut rx: broadcast::Receiver<AccountEvent>) -> Receiver<AccountEvent> {
+    let (tx, out_rx) = channel(USER_EVENT_CHANNEL_CAPACITY);
 
     tokio::spawn(async move {
+        let mut queue_full = false;
+        let mut dropped = 0_u64;
         loop {
             match rx.recv().await {
-                Ok(event) => {
-                    if tx.send(event).is_err() {
-                        break;
+                Ok(event) => match tx.try_send(event) {
+                    Ok(()) => {
+                        if queue_full {
+                            log::info!(
+                                "UserEventRelay subscriber queue recovered after dropping {dropped} events"
+                            );
+                            queue_full = false;
+                            dropped = 0;
+                        }
                     }
-                }
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        metrics::inc_user_event_relay_subscriber_dropped();
+                        dropped = dropped.saturating_add(1);
+                        if !queue_full {
+                            log::warn!(
+                                "UserEventRelay subscriber queue full; dropping account events"
+                            );
+                            queue_full = true;
+                        }
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+                },
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    if tx
-                        .send(AccountEvent::Error(format!(
-                            "UserEventRelay receiver lagged by {n} events"
-                        )))
-                        .is_err()
-                    {
-                        break;
+                    metrics::add_user_event_relay_lagged(n);
+                    match tx.try_send(AccountEvent::Error(format!(
+                        "UserEventRelay receiver lagged by {n} events"
+                    ))) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            metrics::inc_user_event_relay_subscriber_dropped();
+                            if !queue_full {
+                                log::warn!(
+                                    "UserEventRelay subscriber queue full; dropping lag warning"
+                                );
+                                queue_full = true;
+                            }
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
                     }
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
@@ -608,5 +844,62 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_quicknode_endpoint_values_keeps_numbered_and_comma_sources() {
+        let endpoints = split_quicknode_endpoint_values([
+            "https://endpoint-1.quicknode.example, https://endpoint-2.quicknode.example"
+                .to_string(),
+            "https://endpoint-3.quicknode.example".to_string(),
+            "https://endpoint-2.quicknode.example".to_string(),
+            "  ".to_string(),
+        ]);
+
+        assert_eq!(
+            endpoints,
+            vec![
+                "https://endpoint-1.quicknode.example",
+                "https://endpoint-2.quicknode.example",
+                "https://endpoint-3.quicknode.example",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn bounded_broadcast_bridge_drops_overflow_and_accepts_new_events() {
+        let (tx, _) = broadcast::channel(USER_EVENT_CHANNEL_CAPACITY * 4);
+        let mut rx = bounded_from_broadcast(tx.subscribe());
+
+        for _ in 0..(USER_EVENT_CHANNEL_CAPACITY * 2) {
+            tx.send(AccountEvent::NoData)
+                .expect("broadcast receiver should be open");
+        }
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while rx.len() < USER_EVENT_CHANNEL_CAPACITY {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("bounded bridge should fill subscriber queue");
+
+        while rx.try_recv().is_ok() {}
+
+        tx.send(AccountEvent::Error("marker".to_string()))
+            .expect("broadcast receiver should still be open");
+
+        let marker_seen = tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(event) = rx.recv().await {
+                if matches!(event, AccountEvent::Error(message) if message == "marker") {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("marker event should arrive");
+
+        assert!(marker_seen);
     }
 }

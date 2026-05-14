@@ -26,6 +26,59 @@ Browser (React)                     Server (Rust)
 
 ---
 
+## Production Operations
+
+Required backend env:
+
+```bash
+DATABASE_URL=postgres://...
+JWT_SECRET=at_least_32_random_bytes
+ENCRYPTION_KEY=64_hex_chars
+```
+
+Recommended production env:
+
+```bash
+SERVER_BIND_ADDR=0.0.0.0:8090
+DATABASE_MAX_CONNECTIONS=10
+DATABASE_CONNECT_TIMEOUT_SECONDS=10
+DATABASE_ACQUIRE_TIMEOUT_SECONDS=5
+CORS_ORIGINS=https://your-ui.example
+QUICKNODE_HYPERCORE_ENDPOINTS=https://endpoint-1...,https://endpoint-2...
+# Or configure one build-account endpoint per variable:
+QUICKNODE_HYPERCORE_ENDPOINT1=https://endpoint-1...
+QUICKNODE_HYPERCORE_ENDPOINT2=https://endpoint-2...
+# ...
+QUICKNODE_HYPERCORE_ENDPOINT10=https://endpoint-10...
+```
+
+QuickNode account-event streaming is used when a QuickNode HyperCore endpoint is configured. Before promoting a deployment, run the gated soak against the same provider account and at least two representative user addresses:
+
+```bash
+QN_SOAK_USERS='0xabc...,0xdef...' \
+QN_SOAK_SECONDS=900 \
+QN_SOAK_RECONNECT_EVERY_SECONDS=120 \
+QN_SOAK_CHURN_EVERY_SECONDS=60 \
+cargo run --release --bin qn_soak
+```
+
+The soak exits non-zero if QuickNode returns JSON-RPC errors, subscription acknowledgements are missing, or configured reconnect/churn cycles do not execute. For the final live gate, run it against a wallet that will intentionally produce an account event during the window, then set `QN_SOAK_REQUIRE_EVENTS=true` or `QN_SOAK_REQUIRE_ACCOUNT_EVENTS=true` to require at least one routed payload before passing.
+
+Health checks before deploy:
+
+```bash
+curl -fsS http://127.0.0.1:8090/healthz
+curl -fsS http://127.0.0.1:8090/readyz
+./ci.sh
+cargo run --release --bin load -- --bots 100 --markets-per-bot 3 --ticks 2000 --account-events 1000 --queue 128 --slow-every 25 --slow-delay-us 250
+```
+
+Runtime overload counters are exposed from the authenticated `GET /metrics` endpoint. Watch the `*Dropped` and `*Lagged` counters during load, reconnects, and frontend fanout.
+
+`CORS_ORIGINS` is fail-closed when unset or invalid. Use a comma-separated list of browser origins in production, or set `CORS_ORIGINS=*` only for local development.
+
+---
+
 ## LLM Strategy Generation Prompt
 
 Copy this prompt into an LLM chat before asking it to generate a KWANT strategy. For best results, paste this prompt first, then paste this README or the `/docs` page content after it as the reference material.

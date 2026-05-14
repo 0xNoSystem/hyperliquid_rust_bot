@@ -1,4 +1,3 @@
-#![allow(unused_variables)]
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
@@ -11,6 +10,7 @@ use kwant::indicators::Price;
 
 use crate::backend::scripting::CompiledStrategy;
 use crate::broadcast::{PriceAsset, PriceData};
+use crate::metrics;
 use crate::strategy::{Strat, StratContext, Strategy, replace_self_with_asset};
 use crate::trade_setup::TimeFrame;
 use crate::{
@@ -19,14 +19,19 @@ use crate::{
     TriggerKind, Triggers,
 };
 
-use flume::{Sender, bounded};
-use tokio::sync::mpsc::{Sender as tokioSender, UnboundedReceiver, unbounded_channel};
+use flume::{Sender, TrySendError as FlumeTrySendError, bounded};
+use tokio::sync::mpsc::{
+    Receiver, Sender as tokioSender, channel, error::TrySendError as TokioTrySendError,
+};
+use tokio::time::{Duration, timeout};
 
 use super::helpers::*;
 use super::types::*;
 
 type TrackerKey = (Arc<str>, TimeFrame);
 type TrackersMap = HashMap<TrackerKey, Box<Tracker>, BuildHasherDefault<FxHasher>>;
+const MARKET_COMMAND_SEND_TIMEOUT_SECS: u64 = 5;
+const LIVE_STRATEGY_INTERVAL_MS: u64 = 60_000;
 
 fn insert_indicators(trackers: &mut TrackersMap, indicators: impl IntoIterator<Item = IndexId>) {
     for (asset, kind, tf) in indicators {
@@ -43,7 +48,7 @@ fn insert_indicators(trackers: &mut TrackersMap, indicators: impl IntoIterator<I
 
 pub struct SignalEngine {
     asset: Arc<str>,
-    engine_rv: UnboundedReceiver<EngineCommand>,
+    engine_rv: Receiver<EngineCommand>,
     trade_tx: Sender<ExecCommand>,
     data_tx: Option<tokioSender<MarketCommand>>,
     trackers: TrackersMap,
@@ -52,6 +57,7 @@ pub struct SignalEngine {
     exec_params: ExecParams,
     state: EngineState,
     pending_orders: Option<PendingOpen>,
+    pending_strategy_candle: Option<Price>,
     log_tx: Option<tokioSender<String>>,
     paused: bool,
 }
@@ -64,7 +70,7 @@ impl SignalEngine {
         rhai_engine: Arc<Engine>,
         compiled: CompiledStrategy,
         mut strat_indicators: Vec<IndexId>,
-        engine_rv: UnboundedReceiver<EngineCommand>,
+        engine_rv: Receiver<EngineCommand>,
         data_tx: Option<tokioSender<MarketCommand>>,
         log_tx: tokioSender<String>,
         trade_tx: Sender<ExecCommand>,
@@ -102,6 +108,7 @@ impl SignalEngine {
             log_tx: Some(log_tx),
             state: EngineState::Idle,
             pending_orders: None,
+            pending_strategy_candle: None,
             paused: false,
         }
     }
@@ -110,6 +117,7 @@ impl SignalEngine {
         for tracker in self.trackers.values_mut() {
             tracker.reset();
         }
+        self.pending_strategy_candle = None;
     }
 
     pub fn reset_for_backtest(&mut self) {
@@ -191,7 +199,28 @@ impl SignalEngine {
         match param {
             Margin(m) => self.exec_params.margin = m,
             Lev(l) => self.exec_params.lev = l,
-            OpenPosition(pos) => self.exec_params.open_pos = pos,
+            OpenPosition(pos) => self.apply_open_position_update(pos),
+        }
+    }
+
+    fn apply_open_position_update(&mut self, pos: Option<OpenPosInfo>) {
+        self.exec_params.open_pos = pos;
+
+        if self.paused {
+            return;
+        }
+
+        match pos {
+            Some(open_pos) => {
+                self.state = EngineState::Open(open_pos);
+                self.queue_pending_tpsl(open_pos);
+            }
+            None => {
+                if matches!(self.state, EngineState::Open(_) | EngineState::Closing(_)) {
+                    self.state = EngineState::Idle;
+                    let _ = self.pending_orders.take();
+                }
+            }
         }
     }
 
@@ -225,14 +254,6 @@ impl SignalEngine {
         }
     }
 
-    #[allow(dead_code)]
-    fn digest(&mut self, (asset, data): PriceAsset) {
-        match data {
-            PriceData::Single(price) => self.digest_single(&asset, price),
-            PriceData::Bulk(prices) => self.digest_bulk(&asset, &prices),
-        }
-    }
-
     fn digest_single(&mut self, asset: &Arc<str>, price: Price) {
         for ((a, _), tracker) in self.trackers.iter_mut() {
             if Arc::ptr_eq(a, asset) || a == asset {
@@ -249,12 +270,63 @@ impl SignalEngine {
         }
     }
 
+    fn is_traded_asset(&self, asset: &Arc<str>) -> bool {
+        Arc::ptr_eq(&self.asset, asset) || self.asset == *asset
+    }
+
+    fn stage_live_strategy_candle(&mut self, asset: &Arc<str>, price: Price) -> Option<Price> {
+        if !self.is_traded_asset(asset) {
+            return None;
+        }
+
+        let Some(previous) = self.pending_strategy_candle else {
+            self.pending_strategy_candle = Some(price);
+            return None;
+        };
+
+        if price.close_time == previous.close_time {
+            self.pending_strategy_candle = Some(price);
+            return None;
+        }
+
+        if price.close_time > previous.close_time {
+            self.pending_strategy_candle = Some(price);
+            let elapsed = price.close_time.saturating_sub(previous.close_time);
+            if elapsed <= LIVE_STRATEGY_INTERVAL_MS {
+                return Some(previous);
+            }
+
+            log::warn!(
+                "[engine:{}] skipped stale strategy candle after live gap of {}ms",
+                self.asset,
+                elapsed
+            );
+            return None;
+        }
+
+        log::warn!(
+            "[engine:{}] ignored out-of-order strategy candle close_time={} last_close_time={}",
+            self.asset,
+            price.close_time,
+            previous.close_time
+        );
+        None
+    }
+
+    fn stage_live_strategy_bulk(&mut self, asset: &Arc<str>, prices: &[Price]) {
+        if self.is_traded_asset(asset)
+            && let Some(last) = prices.last().copied()
+        {
+            self.pending_strategy_candle = Some(last);
+        }
+    }
+
     fn translate_intent(&mut self, intent: &Intent, last_price: &Price) -> Option<PendingOrder> {
         use Intent as I;
 
         match intent {
             I::Open(order) => {
-                let (size, open) = match &order.liq_side {
+                let (_size, open) = match &order.liq_side {
                     LiqSide::Taker => {
                         let size = order.size.get_size(
                             self.exec_params.lev as f64,
@@ -331,19 +403,19 @@ impl SignalEngine {
             PendingOrder::Open(open_order) => open_order.open.action,
         };
 
-        let side = match (action, self.exec_params.open_pos) {
+        match (action, self.exec_params.open_pos) {
             (PositionOp::Close, None) => {
                 return Err("INVALID STATE: Close with no open position".into());
             }
-            (PositionOp::Close, Some(pos)) => !pos.side,
+            (PositionOp::Close, Some(_)) => {}
             (PositionOp::OpenLong, Some(pos)) if pos.side == Side::Short => {
                 return Err("INVALID STATE: OpenLong while Short is open".into());
             }
-            (PositionOp::OpenLong, _) => Side::Long,
+            (PositionOp::OpenLong, _) => {}
             (PositionOp::OpenShort, Some(pos)) if pos.side == Side::Long => {
                 return Err("INVALID STATE: OpenShort while Long is open".into());
             }
-            (PositionOp::OpenShort, _) => Side::Short,
+            (PositionOp::OpenShort, _) => {}
         };
 
         match trade {
@@ -357,8 +429,12 @@ impl SignalEngine {
                     );
                 }
                 self.validate_engine_order(&order.open, last_price)?;
-                if order.has_trigger() {
-                    validate_tpsl(&order.tpsl.unwrap())?;
+                if let Some(tpsl) = order
+                    .tpsl
+                    .as_ref()
+                    .filter(|tpsl| tpsl.tp.is_some() || tpsl.sl.is_some())
+                {
+                    validate_tpsl(tpsl)?;
                 }
             }
         }
@@ -367,9 +443,16 @@ impl SignalEngine {
     }
 
     fn validate_engine_order(&self, order: &EngineOrder, ref_px: f64) -> Result<(), String> {
+        validate_finite_positive("reference price", ref_px)?;
+        validate_finite_positive("order size", order.size)?;
+
         if let Some(limit) = order.limit {
             validate_limit(&limit, ref_px)?;
-            if order.size * limit.limit_px < MIN_ORDER_VALUE {
+            let notional = order.size * limit.limit_px;
+            if !notional.is_finite() {
+                return Err("INVALID ORDER: notional value was not finite".to_string());
+            }
+            if notional < MIN_ORDER_VALUE {
                 return Err(format!(
                     "INVALID ORDER: notional value is below the minimum order value of {}$",
                     MIN_ORDER_VALUE
@@ -378,7 +461,11 @@ impl SignalEngine {
         } else {
             match order.action {
                 PositionOp::OpenLong | PositionOp::OpenShort => {
-                    if order.size * ref_px < MIN_ORDER_VALUE {
+                    let notional = order.size * ref_px;
+                    if !notional.is_finite() {
+                        return Err("INVALID ORDER: notional value was not finite".to_string());
+                    }
+                    if notional < MIN_ORDER_VALUE {
                         return Err(format!(
                             "INVALID ORDER: notional value is below the minimum order value of {}$",
                             MIN_ORDER_VALUE
@@ -387,7 +474,11 @@ impl SignalEngine {
                 }
                 PositionOp::Close => {
                     if let Some(pos) = self.exec_params.open_pos {
-                        if order.size < pos.size && order.size * ref_px < MIN_ORDER_VALUE {
+                        let notional = order.size * ref_px;
+                        if !notional.is_finite() {
+                            return Err("INVALID ORDER: notional value was not finite".to_string());
+                        }
+                        if order.size < pos.size && notional < MIN_ORDER_VALUE {
                             return Err(format!(
                                 "INVALID ORDER: notional value is below the minimum order value of {}$",
                                 MIN_ORDER_VALUE
@@ -428,10 +519,208 @@ impl SignalEngine {
     }
 
     #[inline]
+    fn queue_exec_command(&self, label: &'static str, cmd: ExecCommand) -> bool {
+        match self.trade_tx.try_send(cmd) {
+            Ok(()) => true,
+            Err(FlumeTrySendError::Full(_)) => {
+                metrics::inc_engine_exec_command_dropped();
+                log::warn!(
+                    "[engine:{}] executor queue full; dropping {label}",
+                    self.asset
+                );
+                false
+            }
+            Err(FlumeTrySendError::Disconnected(_)) => {
+                log::warn!(
+                    "[engine:{}] executor queue closed; dropping {label}",
+                    self.asset
+                );
+                false
+            }
+        }
+    }
+
+    async fn queue_market_command(
+        &self,
+        sender: &tokioSender<MarketCommand>,
+        label: &'static str,
+        cmd: MarketCommand,
+    ) -> bool {
+        match sender.try_send(cmd) {
+            Ok(()) => true,
+            Err(TokioTrySendError::Full(cmd)) => {
+                match timeout(
+                    Duration::from_secs(MARKET_COMMAND_SEND_TIMEOUT_SECS),
+                    sender.send(cmd),
+                )
+                .await
+                {
+                    Ok(Ok(())) => true,
+                    Ok(Err(_)) => {
+                        log::warn!(
+                            "[engine:{}] market command channel closed while sending {label}",
+                            self.asset
+                        );
+                        false
+                    }
+                    Err(_) => {
+                        log::warn!(
+                            "[engine:{}] timed out sending {label} to market command queue",
+                            self.asset
+                        );
+                        false
+                    }
+                }
+            }
+            Err(TokioTrySendError::Closed(_)) => {
+                log::warn!(
+                    "[engine:{}] market command channel closed while sending {label}",
+                    self.asset
+                );
+                false
+            }
+        }
+    }
+
+    #[inline]
     pub fn force_close_exec(&self) {
-        let _ = self
-            .trade_tx
-            .send(ExecCommand::Control(ExecControl::ForceClose));
+        let _ =
+            self.queue_exec_command("force close", ExecCommand::Control(ExecControl::ForceClose));
+    }
+
+    fn queue_pending_tpsl(&mut self, open_pos: OpenPosInfo) {
+        if let Some(pending) = self.pending_orders.take()
+            && let Some(Triggers { tp, sl }) = pending.tpsl
+        {
+            let size = pending.open.size;
+            let side = open_pos.side;
+            let ref_px = open_pos.entry_px;
+
+            if let Some(tp_delta) = tp {
+                let trigger = TriggerKind::Tp;
+                let trigger_px =
+                    calc_trigger_px(side, trigger, tp_delta, ref_px, self.exec_params.lev);
+                if let Err(err) = validate_trigger_price(trigger, trigger_px) {
+                    log::warn!("[engine:{}] {err}", self.asset);
+                } else {
+                    let _ = self.queue_exec_command(
+                        "take-profit order",
+                        ExecCommand::Order(EngineOrder::new_tp(size, trigger_px)),
+                    );
+                }
+            }
+
+            if let Some(sl_delta) = sl {
+                let trigger = TriggerKind::Sl;
+                let trigger_px =
+                    calc_trigger_px(side, trigger, sl_delta, ref_px, self.exec_params.lev);
+                if let Err(err) = validate_trigger_price(trigger, trigger_px) {
+                    log::warn!("[engine:{}] {err}", self.asset);
+                } else {
+                    let _ = self.queue_exec_command(
+                        "stop-loss order",
+                        ExecCommand::Order(EngineOrder::new_sl(size, trigger_px)),
+                    );
+                }
+            }
+        }
+    }
+
+    fn process_strategy_tick(&mut self, price: Price) {
+        let values = self.get_active_values();
+
+        self.refresh_state(&price);
+
+        let Some(intent) = self.strat_tick(price, values) else {
+            return;
+        };
+
+        let busy = matches!(
+            self.state,
+            EngineState::Opening(_) | EngineState::Closing(_)
+        );
+
+        if busy && intent != Intent::Abort {
+            log::warn!("Intent ignored while busy: {:?}", intent);
+            return;
+        }
+
+        if intent == Intent::Abort {
+            self.force_close_exec();
+            let _ = self.pending_orders.take();
+            self.state = EngineState::Idle;
+        } else if let Intent::Arm(duration) = intent {
+            if self.state == EngineState::Idle {
+                self.state = EngineState::Armed(price.open_time + duration.as_ms());
+            } else {
+                log::warn!(
+                    "Intent::Arm failed, Engine is not in Idle state: {:?}",
+                    self.state
+                );
+            }
+        } else if intent == Intent::Disarm {
+            if let EngineState::Armed(_exp) = self.state {
+                self.state = EngineState::Idle;
+            } else {
+                log::warn!(
+                    "Intent::Disarm failed, Engine is not Armed: {:?}",
+                    self.state
+                );
+            }
+        } else if let Some(pending) = self.translate_intent(&intent, &price) {
+            if let Err(e) = self.validate_trade(pending, price.close) {
+                log::warn!("Trade rejected: {}", e);
+                return;
+            }
+
+            let (main_order, pending_open) = match pending {
+                PendingOrder::Open(p) => (p.open, p.has_trigger().then_some(p)),
+                PendingOrder::Close(p) => (p, None),
+            };
+            let queued = self.queue_exec_command("strategy order", ExecCommand::Order(main_order));
+            if !queued {
+                return;
+            }
+
+            self.pending_orders = pending_open;
+
+            if let Some(ttl) = intent.get_ttl() {
+                let timeout = LiveTimeoutInfo {
+                    expire_at: price.open_time + ttl.duration.as_ms(),
+                    timeout_info: ttl,
+                    intent,
+                };
+                match intent {
+                    Intent::Reduce(_) | Intent::Flatten(_) => {
+                        self.state = EngineState::Closing(Some(timeout))
+                    }
+                    Intent::Open(_) => self.state = EngineState::Opening(Some(timeout)),
+                    _ => {}
+                }
+            } else if intent.is_market_order() {
+                let ttl = TimeoutInfo::default();
+                let timeout = LiveTimeoutInfo {
+                    expire_at: price.open_time + ttl.duration.as_ms(),
+                    timeout_info: ttl,
+                    intent,
+                };
+                match intent {
+                    Intent::Reduce(_) | Intent::Flatten(_) => {
+                        self.state = EngineState::Closing(Some(timeout))
+                    }
+                    Intent::Open(_) => self.state = EngineState::Opening(Some(timeout)),
+                    _ => {}
+                }
+            } else {
+                match intent {
+                    Intent::Reduce(_) | Intent::Flatten(_) => {
+                        self.state = EngineState::Closing(None)
+                    }
+                    Intent::Open(_) => self.state = EngineState::Opening(None),
+                    _ => {}
+                }
+            }
+        }
     }
 
     pub fn refresh_state(&mut self, price: &Price) {
@@ -439,6 +728,7 @@ impl SignalEngine {
             EngineState::Opening(ttl_option) => {
                 if let Some(open_pos) = self.exec_params.open_pos {
                     self.state = EngineState::Open(open_pos);
+                    self.queue_pending_tpsl(open_pos);
                     return;
                 }
                 if let Some(timeout) = ttl_option
@@ -451,7 +741,10 @@ impl SignalEngine {
                             } else if let Some(order) =
                                 self.force_as_taker_order(&timeout.intent, price)
                             {
-                                let _ = self.trade_tx.send(ExecCommand::ForceTaker(order));
+                                self.queue_exec_command(
+                                    "opening timeout force-taker",
+                                    ExecCommand::ForceTaker(order),
+                                );
                             }
                         }
                         OnTimeout::Cancel => {
@@ -478,7 +771,10 @@ impl SignalEngine {
                             } else if let Some(order) =
                                 self.force_as_taker_order(&timeout.intent, price)
                             {
-                                let _ = self.trade_tx.send(ExecCommand::ForceTaker(order));
+                                self.queue_exec_command(
+                                    "closing timeout force-taker",
+                                    ExecCommand::ForceTaker(order),
+                                );
                             }
                         }
                         OnTimeout::Cancel => {
@@ -499,46 +795,14 @@ impl SignalEngine {
             EngineState::Idle => {
                 if let Some(open_pos) = self.exec_params.open_pos {
                     self.state = EngineState::Open(open_pos);
+                    self.queue_pending_tpsl(open_pos);
                 }
             }
 
             EngineState::Open(_) => {
                 if let Some(open_pos) = self.exec_params.open_pos {
                     self.state = EngineState::Open(open_pos);
-
-                    if let Some(pending) = self.pending_orders.take()
-                        && let Some(Triggers { tp, sl }) = pending.tpsl
-                    {
-                        let size = pending.open.size;
-                        let side = open_pos.side;
-                        let ref_px = open_pos.entry_px;
-
-                        if let Some(tp_delta) = tp {
-                            let trigger_px = calc_trigger_px(
-                                side,
-                                TriggerKind::Tp,
-                                tp_delta,
-                                ref_px,
-                                self.exec_params.lev,
-                            );
-                            let _ = self
-                                .trade_tx
-                                .send(ExecCommand::Order(EngineOrder::new_tp(size, trigger_px)));
-                        }
-
-                        if let Some(sl_delta) = sl {
-                            let trigger_px = calc_trigger_px(
-                                side,
-                                TriggerKind::Sl,
-                                sl_delta,
-                                ref_px,
-                                self.exec_params.lev,
-                            );
-                            let _ = self
-                                .trade_tx
-                                .send(ExecCommand::Order(EngineOrder::new_sl(size, trigger_px)));
-                        }
-                    }
+                    self.queue_pending_tpsl(open_pos);
                 } else {
                     self.state = EngineState::Idle;
                 }
@@ -557,138 +821,44 @@ impl SignalEngine {
 
                     match data {
                         PriceData::Single(price) => {
-                            self.digest_single(&asset, price);
+                            let strategy_price = self.stage_live_strategy_candle(&asset, price);
 
+                            if !self.paused
+                                && let Some(strategy_price) = strategy_price
+                            {
+                                self.process_strategy_tick(strategy_price);
+                            }
+
+                            self.digest_single(&asset, price);
                             let ind = self.get_indicators_data();
-                            let values = self.get_active_values();
 
                             if !ind.is_empty()
                                 && let Some(sender) = &self.data_tx
                             {
-                                let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
-
-                                if self.paused {
-                                    continue;
-                                }
-
-                                self.refresh_state(&price);
-
-                                if let Some(intent) = self.strat_tick(price, values) {
-                                    let busy = matches!(
-                                        self.state,
-                                        EngineState::Opening(_) | EngineState::Closing(_)
-                                    );
-
-                                    if busy && intent != Intent::Abort {
-                                        log::warn!("Intent ignored while busy: {:?}", intent);
-                                        continue;
-                                    }
-
-                                    if intent == Intent::Abort {
-                                        self.force_close_exec();
-                                        let _ = self.pending_orders.take();
-                                        self.state = EngineState::Idle;
-                                    } else if let Intent::Arm(duration) = intent {
-                                        if self.state == EngineState::Idle {
-                                            self.state = EngineState::Armed(
-                                                price.open_time + duration.as_ms(),
-                                            );
-                                        } else {
-                                            log::warn!(
-                                                "Intent::Arm failed, Engine is not in Idle state: {:?}",
-                                                self.state
-                                            );
-                                        }
-                                    } else if intent == Intent::Disarm {
-                                        if let EngineState::Armed(_exp) = self.state {
-                                            self.state = EngineState::Idle;
-                                        } else {
-                                            log::warn!(
-                                                "Intent::Disarm failed, Engine is not Armed: {:?}",
-                                                self.state
-                                            );
-                                        }
-                                    } else if let Some(pending) =
-                                        self.translate_intent(&intent, &price)
-                                    {
-                                        if let Err(e) = self.validate_trade(pending, price.close) {
-                                            log::warn!("Trade rejected: {}", e);
-                                        } else {
-                                            let main_order = match pending {
-                                                PendingOrder::Open(p) => {
-                                                    if p.has_trigger() {
-                                                        self.pending_orders = Some(p);
-                                                    }
-                                                    p.open
-                                                }
-                                                PendingOrder::Close(p) => p,
-                                            };
-                                            let _ =
-                                                self.trade_tx.send(ExecCommand::Order(main_order));
-
-                                            if let Some(ttl) = intent.get_ttl() {
-                                                let timeout = LiveTimeoutInfo {
-                                                    expire_at: price.open_time
-                                                        + ttl.duration.as_ms(),
-                                                    timeout_info: ttl,
-                                                    intent,
-                                                };
-                                                match intent {
-                                                    Intent::Reduce(_) | Intent::Flatten(_) => {
-                                                        self.state =
-                                                            EngineState::Closing(Some(timeout))
-                                                    }
-                                                    Intent::Open(_) => {
-                                                        self.state =
-                                                            EngineState::Opening(Some(timeout))
-                                                    }
-                                                    _ => {}
-                                                }
-                                            } else if intent.is_market_order() {
-                                                let ttl = TimeoutInfo::default();
-                                                let timeout = LiveTimeoutInfo {
-                                                    expire_at: price.open_time
-                                                        + ttl.duration.as_ms(),
-                                                    timeout_info: ttl,
-                                                    intent,
-                                                };
-                                                match intent {
-                                                    Intent::Reduce(_) | Intent::Flatten(_) => {
-                                                        self.state =
-                                                            EngineState::Closing(Some(timeout))
-                                                    }
-                                                    Intent::Open(_) => {
-                                                        self.state =
-                                                            EngineState::Opening(Some(timeout))
-                                                    }
-                                                    _ => {}
-                                                }
-                                            } else {
-                                                match intent {
-                                                    Intent::Reduce(_) | Intent::Flatten(_) => {
-                                                        self.state = EngineState::Closing(None)
-                                                    }
-                                                    Intent::Open(_) => {
-                                                        self.state = EngineState::Opening(None)
-                                                    }
-                                                    _ => {}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                let _ = self
+                                    .queue_market_command(
+                                        sender,
+                                        "indicator data",
+                                        MarketCommand::UpdateIndicatorData(ind),
+                                    )
+                                    .await;
                             }
 
                             if init_state != self.state
                                 && let Some(sender) = &self.data_tx
                             {
-                                let _ = sender
-                                    .send(MarketCommand::EngineStateChange(self.state.into()))
+                                let _ = self
+                                    .queue_market_command(
+                                        sender,
+                                        "engine state change",
+                                        MarketCommand::EngineStateChange(self.state.into()),
+                                    )
                                     .await;
                             }
                         }
 
                         PriceData::Bulk(prices) => {
+                            self.stage_live_strategy_bulk(&asset, &prices);
                             self.digest_bulk(&asset, &prices);
                         }
                     }
@@ -704,6 +874,7 @@ impl SignalEngine {
                         self.asset.clone(),
                     );
                     self.state = EngineState::Idle;
+                    self.pending_strategy_candle = None;
                 }
 
                 EngineCommand::EditIndicators {
@@ -727,12 +898,30 @@ impl SignalEngine {
 
                     let ind = self.get_indicators_data();
                     if let Some(sender) = &self.data_tx {
-                        let _ = sender.send(MarketCommand::UpdateIndicatorData(ind)).await;
+                        let _ = self
+                            .queue_market_command(
+                                sender,
+                                "indicator edit data",
+                                MarketCommand::UpdateIndicatorData(ind),
+                            )
+                            .await;
                     }
                 }
 
                 EngineCommand::UpdateExecParams(param) => {
+                    let init_state = self.state;
                     self.apply_exec_param(param);
+                    if init_state != self.state
+                        && let Some(sender) = &self.data_tx
+                    {
+                        let _ = self
+                            .queue_market_command(
+                                sender,
+                                "exec param state change",
+                                MarketCommand::EngineStateChange(self.state.into()),
+                            )
+                            .await;
+                    }
                 }
 
                 EngineCommand::ExecPause => {
@@ -741,8 +930,12 @@ impl SignalEngine {
                     self.pending_orders = None;
 
                     if let Some(sender) = &self.data_tx {
-                        let _ = sender
-                            .send(MarketCommand::EngineStateChange(self.state.into()))
+                        let _ = self
+                            .queue_market_command(
+                                sender,
+                                "engine pause state",
+                                MarketCommand::EngineStateChange(self.state.into()),
+                            )
                             .await;
                     }
                 }
@@ -785,7 +978,7 @@ impl SignalEngine {
         let mut trackers: TrackersMap = HashMap::default();
         insert_indicators(&mut trackers, strat_indicators);
 
-        let (_tx, dummy_rv) = unbounded_channel::<EngineCommand>();
+        let (_tx, dummy_rv) = channel::<EngineCommand>(1);
         let (trade_tx, _rx) = bounded::<ExecCommand>(0);
 
         let exec_params = ExecParams::new(margin, lev);
@@ -801,6 +994,7 @@ impl SignalEngine {
             log_tx: None,
             state: EngineState::Idle,
             pending_orders: None,
+            pending_strategy_candle: None,
             paused: false,
             asset,
         }
@@ -1179,9 +1373,13 @@ impl PendingOpen {
 mod tests {
     use std::sync::Arc;
 
-    use super::SignalEngine;
+    use super::{EngineCommand, ExecParam, SignalEngine};
     use crate::backend::scripting::{CompiledStrategy, compile_strategy, create_engine};
-    use crate::{BtAction, BtOrder, IndicatorKind, TimeFrame};
+    use crate::broadcast::PriceData;
+    use crate::{
+        BtAction, BtOrder, EngineOrder, EngineView, ExecCommand, ExecParams, IndicatorKind,
+        MarketCommand, OpenPosInfo, PositionOp, Side, TimeFrame,
+    };
 
     #[test]
     fn new_backtest_replaces_self_indicators_with_market_asset() {
@@ -1268,5 +1466,247 @@ mod tests {
             panic!("expected open order");
         };
         assert!((open.order.size - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn validate_engine_order_rejects_non_finite_size_and_price() {
+        let rhai_engine = Arc::new(create_engine());
+        let compiled = CompiledStrategy::noop(rhai_engine.as_ref());
+        let engine = SignalEngine::new_backtest(
+            100.0,
+            2,
+            rhai_engine,
+            compiled,
+            Vec::new(),
+            Arc::<str>::from("BTC"),
+        );
+
+        assert!(
+            engine
+                .validate_engine_order(&EngineOrder::new_market_open(Side::Long, f64::NAN), 100.0,)
+                .is_err()
+        );
+        assert!(
+            engine
+                .validate_engine_order(
+                    &EngineOrder::new_market_open(Side::Long, 1.0),
+                    f64::INFINITY,
+                )
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn live_strategy_runs_once_when_traded_one_min_candle_rolls() {
+        let rhai_engine = Arc::new(create_engine());
+        let compiled = compile_strategy(
+            rhai_engine.as_ref(),
+            "open_market(LONG, margin_amount(100.0))",
+            "()",
+            "()",
+            None,
+        )
+        .expect("strategy compiles");
+        let asset = Arc::<str>::from("BTC");
+        let (engine_tx, engine_rx) = tokio::sync::mpsc::channel(4);
+        let (market_tx, _market_rx) = tokio::sync::mpsc::channel(4);
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let (trade_tx, trade_rx) = flume::bounded(4);
+
+        let mut engine = SignalEngine::new(
+            Arc::clone(&asset),
+            None,
+            rhai_engine,
+            compiled,
+            Vec::new(),
+            engine_rx,
+            Some(market_tx),
+            log_tx,
+            trade_tx,
+            ExecParams::new(100.0, 2),
+        )
+        .await;
+
+        let handle = tokio::spawn(async move { engine.start().await });
+
+        fn price(open_time: u64, close: f64) -> crate::Price {
+            crate::Price {
+                open_time,
+                close_time: open_time + 60_000,
+                open: close,
+                high: close,
+                low: close,
+                close,
+                vlm: 10.0,
+            }
+        }
+
+        engine_tx
+            .send(EngineCommand::UpdatePrice((
+                Arc::clone(&asset),
+                PriceData::Single(price(0, 100.0)),
+            )))
+            .await
+            .expect("engine command accepted");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), trade_rx.recv_async())
+                .await
+                .is_err()
+        );
+
+        engine_tx
+            .send(EngineCommand::UpdatePrice((
+                Arc::clone(&asset),
+                PriceData::Single(price(0, 101.0)),
+            )))
+            .await
+            .expect("engine command accepted");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), trade_rx.recv_async())
+                .await
+                .is_err()
+        );
+
+        engine_tx
+            .send(EngineCommand::UpdatePrice((
+                Arc::clone(&asset),
+                PriceData::Single(price(60_000, 102.0)),
+            )))
+            .await
+            .expect("engine command accepted");
+
+        let cmd = tokio::time::timeout(std::time::Duration::from_secs(1), trade_rx.recv_async())
+            .await
+            .expect("strategy order should be queued")
+            .expect("trade receiver should be open");
+
+        let ExecCommand::Order(order) = cmd else {
+            panic!("expected strategy order");
+        };
+        assert!(matches!(order.action, PositionOp::OpenLong));
+        assert!((order.size - (200.0 / 101.0)).abs() < 1e-9);
+
+        engine_tx
+            .send(EngineCommand::Stop)
+            .await
+            .expect("stop command accepted");
+        handle.await.expect("engine task should finish");
+    }
+
+    #[tokio::test]
+    async fn open_position_update_moves_live_engine_state_without_price_tick() {
+        let rhai_engine = Arc::new(create_engine());
+        let compiled = CompiledStrategy::noop(rhai_engine.as_ref());
+        let asset = Arc::<str>::from("BTC");
+        let (engine_tx, engine_rx) = tokio::sync::mpsc::channel(4);
+        let (market_tx, mut market_rx) = tokio::sync::mpsc::channel(4);
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let (trade_tx, _trade_rx) = flume::bounded(4);
+
+        let mut engine = SignalEngine::new(
+            Arc::clone(&asset),
+            None,
+            rhai_engine,
+            compiled,
+            Vec::new(),
+            engine_rx,
+            Some(market_tx),
+            log_tx,
+            trade_tx,
+            ExecParams::new(100.0, 2),
+        )
+        .await;
+
+        let handle = tokio::spawn(async move { engine.start().await });
+        engine_tx
+            .send(EngineCommand::UpdateExecParams(ExecParam::OpenPosition(
+                Some(OpenPosInfo {
+                    side: Side::Long,
+                    size: 1.0,
+                    entry_px: 100.0,
+                    open_time: 1_000,
+                }),
+            )))
+            .await
+            .expect("engine command accepted");
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(1), market_rx.recv())
+            .await
+            .expect("engine state update should be sent")
+            .expect("market receiver should be open");
+        assert!(matches!(
+            msg,
+            MarketCommand::EngineStateChange(EngineView::Open)
+        ));
+
+        engine_tx
+            .send(EngineCommand::Stop)
+            .await
+            .expect("stop command accepted");
+        handle.await.expect("engine task should finish");
+    }
+
+    #[tokio::test]
+    async fn paused_open_position_update_keeps_live_engine_idle_for_manual_trade() {
+        let rhai_engine = Arc::new(create_engine());
+        let compiled = CompiledStrategy::noop(rhai_engine.as_ref());
+        let asset = Arc::<str>::from("BTC");
+        let (engine_tx, engine_rx) = tokio::sync::mpsc::channel(4);
+        let (market_tx, mut market_rx) = tokio::sync::mpsc::channel(4);
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let (trade_tx, _trade_rx) = flume::bounded(4);
+
+        let mut engine = SignalEngine::new(
+            Arc::clone(&asset),
+            None,
+            rhai_engine,
+            compiled,
+            Vec::new(),
+            engine_rx,
+            Some(market_tx),
+            log_tx,
+            trade_tx,
+            ExecParams::new(100.0, 2),
+        )
+        .await;
+
+        let handle = tokio::spawn(async move { engine.start().await });
+        engine_tx
+            .send(EngineCommand::ExecPause)
+            .await
+            .expect("pause command accepted");
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(1), market_rx.recv())
+            .await
+            .expect("pause state update should be sent")
+            .expect("market receiver should be open");
+        assert!(matches!(
+            msg,
+            MarketCommand::EngineStateChange(EngineView::Idle)
+        ));
+
+        engine_tx
+            .send(EngineCommand::UpdateExecParams(ExecParam::OpenPosition(
+                Some(OpenPosInfo {
+                    side: Side::Long,
+                    size: 1.0,
+                    entry_px: 100.0,
+                    open_time: 1_000,
+                }),
+            )))
+            .await
+            .expect("engine command accepted");
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), market_rx.recv())
+                .await
+                .is_err()
+        );
+
+        engine_tx
+            .send(EngineCommand::Stop)
+            .await
+            .expect("stop command accepted");
+        handle.await.expect("engine task should finish");
     }
 }

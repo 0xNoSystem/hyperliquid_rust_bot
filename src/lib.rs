@@ -8,6 +8,7 @@ mod consts;
 mod frontend;
 mod helper;
 mod market;
+mod metrics;
 mod strategy;
 mod trade_setup;
 mod wallet;

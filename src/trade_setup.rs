@@ -50,11 +50,6 @@ impl TimeFrame {
     }
 }
 
-impl From<TimeFrame> for u8 {
-    fn from(tf: TimeFrame) -> Self {
-        tf.to_secs() as u8
-    }
-}
 impl TimeFrame {
     pub fn as_str(&self) -> &'static str {
         match self {

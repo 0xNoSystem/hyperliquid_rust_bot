@@ -7,6 +7,8 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use super::app_state::{AppState, PendingAgentStore};
 
@@ -30,7 +32,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        // Try Authorization header first, then query param `token` (for WebSocket)
+        // Try Authorization header first, then query param `token` for WebSocket only.
         let token = extract_token(parts).ok_or(StatusCode::UNAUTHORIZED)?;
 
         let claims = verify_jwt(&token, &state.jwt_secret).map_err(|_| StatusCode::UNAUTHORIZED)?;
@@ -43,13 +45,15 @@ fn extract_token(parts: &Parts) -> Option<String> {
     // 1. Authorization: Bearer <token>
     if let Some(auth_header) = parts.headers.get("authorization")
         && let Ok(value) = auth_header.to_str()
-        && let Some(token) = value.strip_prefix("Bearer ")
+        && let Some(token) = bearer_token(value)
     {
         return Some(token.to_string());
     }
 
-    // 2. Query param ?token=...
-    if let Some(query) = parts.uri.query() {
+    // 2. Query param ?token=... only for WebSocket upgrades.
+    if parts.uri.path() == "/ws"
+        && let Some(query) = parts.uri.query()
+    {
         for pair in query.split('&') {
             if let Some(token) = pair.strip_prefix("token=") {
                 return Some(token.to_string());
@@ -60,12 +64,20 @@ fn extract_token(parts: &Parts) -> Option<String> {
     None
 }
 
+fn bearer_token(value: &str) -> Option<&str> {
+    let mut parts = value.trim().splitn(2, char::is_whitespace);
+    let scheme = parts.next()?;
+    let token = parts.next()?.trim();
+
+    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some(token)
+}
+
 /// Issue a JWT for a verified user.
 pub fn issue_jwt(pubkey: &str, secret: &str) -> Result<String, jsonwebtoken::errors::Error> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as usize;
+        .map(|duration| duration.as_secs() as usize)
+        .unwrap_or_default();
 
     let claims = Claims {
         sub: pubkey.to_string(),
@@ -125,13 +137,11 @@ pub fn verify_signature(address: &str, signature_hex: &str, nonce: &str) -> Resu
         return Err("signature must be 65 bytes".to_string());
     }
 
-    let v = sig_bytes[64];
-    // Normalize v: 27/28 → 0/1
-    let v_normalized = if v >= 27 { v - 27 } else { v };
+    let parity = recovery_parity(sig_bytes[64])?;
 
     let r = alloy::primitives::B256::from_slice(&sig_bytes[..32]);
     let s = alloy::primitives::B256::from_slice(&sig_bytes[32..64]);
-    let sig = AlloySig::from_scalars_and_parity(r, s, v_normalized != 0);
+    let sig = AlloySig::from_scalars_and_parity(r, s, parity);
 
     let recovered = sig
         .recover_address_from_prehash(&hash)
@@ -151,34 +161,108 @@ pub fn verify_signature(address: &str, signature_hex: &str, nonce: &str) -> Resu
     Ok(())
 }
 
-/// Spawn a background task that prunes expired nonces every 60 seconds.
-pub fn spawn_nonce_pruner(nonces: super::app_state::NonceStore) {
+fn recovery_parity(v: u8) -> Result<bool, String> {
+    match v {
+        0 | 27 => Ok(false),
+        1 | 28 => Ok(true),
+        _ => Err("signature recovery id must be 0, 1, 27, or 28".to_string()),
+    }
+}
+
+pub fn spawn_nonce_pruner(
+    nonces: super::app_state::NonceStore,
+    shutdown: CancellationToken,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
-            interval.tick().await;
-            let mut store = nonces.write().await;
-            store.retain(|_, (_, created_at)| created_at.elapsed().as_secs() < 300);
+            tokio::select! {
+                _ = shutdown.cancelled() => {
+                    break;
+                }
+                _ = interval.tick() => {
+                    let mut store = nonces.write().await;
+                    store.retain(|_, (_, created_at)| created_at.elapsed().as_secs() < 300);
+                }
+            }
         }
-    });
+    })
 }
 
 /// Generate a u64 nonce from current timestamp (milliseconds).
 pub fn timestamp_nonce() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
 }
 
-/// Spawn a background task that prunes expired pending agents every 60 seconds.
-pub fn spawn_pending_agent_pruner(store: PendingAgentStore) {
+pub fn spawn_pending_agent_pruner(
+    store: PendingAgentStore,
+    shutdown: CancellationToken,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
-            interval.tick().await;
-            let mut s = store.write().await;
-            s.retain(|_, pending| pending.created_at.elapsed().as_secs() < 300);
+            tokio::select! {
+                _ = shutdown.cancelled() => {
+                    break;
+                }
+                _ = interval.tick() => {
+                    let mut s = store.write().await;
+                    s.retain(|_, pending| pending.created_at.elapsed().as_secs() < 300);
+                }
+            }
         }
-    });
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_parity_accepts_only_standard_values() {
+        assert!(!recovery_parity(0).expect("v=0 should parse"));
+        assert!(recovery_parity(1).expect("v=1 should parse"));
+        assert!(!recovery_parity(27).expect("v=27 should parse"));
+        assert!(recovery_parity(28).expect("v=28 should parse"));
+
+        assert!(recovery_parity(2).is_err());
+        assert!(recovery_parity(29).is_err());
+    }
+
+    #[test]
+    fn bearer_token_accepts_case_insensitive_scheme_and_rejects_empty() {
+        assert_eq!(bearer_token("Bearer abc.def"), Some("abc.def"));
+        assert_eq!(bearer_token("bearer   abc.def  "), Some("abc.def"));
+
+        assert_eq!(bearer_token("Basic abc.def"), None);
+        assert_eq!(bearer_token("Bearer   "), None);
+        assert_eq!(bearer_token("Bearer"), None);
+    }
+
+    #[test]
+    fn query_token_is_only_accepted_for_websocket_route() {
+        let mut ws_parts = axum::http::Request::builder()
+            .uri("/ws?token=abc.def")
+            .body(())
+            .expect("request should build")
+            .into_parts()
+            .0;
+        assert_eq!(extract_token(&ws_parts), Some("abc.def".to_string()));
+
+        let api_parts = axum::http::Request::builder()
+            .uri("/command?token=abc.def")
+            .body(())
+            .expect("request should build")
+            .into_parts()
+            .0;
+        assert_eq!(extract_token(&api_parts), None);
+
+        ws_parts
+            .headers
+            .insert("authorization", "Bearer header.token".parse().unwrap());
+        assert_eq!(extract_token(&ws_parts), Some("header.token".to_string()));
+    }
 }

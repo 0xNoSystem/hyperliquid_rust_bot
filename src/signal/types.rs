@@ -37,6 +37,10 @@ impl ExecParams {
     }
 
     pub fn free_margin(&self) -> f64 {
+        if self.lev == 0 {
+            return 0.0;
+        }
+
         if let Some(open) = self.open_pos {
             self.margin - ((open.entry_px * open.size) / self.lev as f64)
         } else {
@@ -45,6 +49,10 @@ impl ExecParams {
     }
 
     pub fn get_max_open_size(&self, ref_px: f64) -> f64 {
+        if self.lev == 0 || !ref_px.is_finite() || ref_px <= 0.0 {
+            return 0.0;
+        }
+
         self.free_margin() * self.lev as f64 / ref_px
     }
 }
@@ -220,7 +228,10 @@ impl Tracker {
             warn!("LOAD BUFFER IS EMPTY!!!");
             return;
         }
-        let last = buffer.last().unwrap();
+        let Some(last) = buffer.last() else {
+            warn!("LOAD BUFFER IS EMPTY!!!");
+            return;
+        };
         let slice = buffer.as_slice();
 
         for handler in self.indicators.values_mut() {
@@ -228,8 +239,9 @@ impl Tracker {
         }
 
         let tf_ms = self.tf.to_millis();
-        self.prev_close = Some((last.close_time / tf_ms) * tf_ms);
-        self.next_close = Some(self.prev_close.unwrap() + tf_ms);
+        let prev_close = (last.close_time / tf_ms) * tf_ms;
+        self.prev_close = Some(prev_close);
+        self.next_close = Some(prev_close + tf_ms);
     }
 
     pub fn add_indicator(&mut self, kind: IndicatorKind) {
@@ -311,4 +323,31 @@ pub struct TimedValue {
     pub value: Value,
     pub on_close: bool,
     pub ts: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exec_params_zero_leverage_does_not_divide_by_zero() {
+        let mut params = ExecParams::new(100.0, 0);
+        params.open_pos = Some(OpenPosInfo {
+            side: Side::Long,
+            size: 1.0,
+            entry_px: 100.0,
+            open_time: 1,
+        });
+
+        assert_eq!(params.free_margin(), 0.0);
+        assert_eq!(params.get_max_open_size(100.0), 0.0);
+    }
+
+    #[test]
+    fn exec_params_rejects_bad_reference_price_for_max_size() {
+        let params = ExecParams::new(100.0, 2);
+
+        assert_eq!(params.get_max_open_size(0.0), 0.0);
+        assert_eq!(params.get_max_open_size(f64::NAN), 0.0);
+    }
 }

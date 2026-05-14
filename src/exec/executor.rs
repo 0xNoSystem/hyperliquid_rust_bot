@@ -5,8 +5,11 @@ use alloy::signers::local::PrivateKeySigner;
 use flume::Receiver;
 use log::warn;
 use tokio::{
-    sync::{Mutex, mpsc::Sender},
-    time::{Duration, sleep},
+    sync::{
+        Mutex,
+        mpsc::{Sender, error::TrySendError},
+    },
+    time::{Duration, sleep, timeout},
 };
 
 use rustc_hash::FxHasher;
@@ -18,7 +21,10 @@ use hyperliquid_rust_sdk::{
 };
 
 use super::*;
+use crate::helper::exchange_client_with_timeout;
 use crate::{MAX_DECIMALS, MarketCommand, PX_DECIMAL_ANOMALY, roundf};
+
+const MARKET_COMMAND_SEND_TIMEOUT_SECS: u64 = 5;
 
 pub struct Executor {
     trade_rv: Receiver<ExecCommand>,
@@ -42,7 +48,7 @@ impl Executor {
         market_tx: Sender<MarketCommand>,
     ) -> Result<Executor, Error> {
         let exchange_client =
-            Arc::new(ExchangeClient::new(None, wallet, Some(BaseUrl::Mainnet), None, None).await?);
+            Arc::new(exchange_client_with_timeout("executor", wallet, BaseUrl::Mainnet).await?);
 
         let px_dec_fix = if PX_DECIMAL_ANOMALY.contains(&asset.name.as_str()) {
             2
@@ -70,9 +76,12 @@ impl Executor {
     where
         F: FnOnce(&mut Option<OpenPositionLocal>) -> R,
     {
-        let mut guard = self.open_position.lock().await;
-        let r = f(&mut guard);
-        self.update_market(SendUpdate::Position(*guard)).await;
+        let (r, position) = {
+            let mut guard = self.open_position.lock().await;
+            let r = f(&mut guard);
+            (r, *guard)
+        };
+        self.update_market(SendUpdate::Position(position)).await;
         r
     }
 
@@ -292,13 +301,51 @@ impl Executor {
     }
 
     #[inline]
-    async fn update_market(&self, update: SendUpdate) {
+    async fn send_market_command(&self, label: &'static str, cmd: MarketCommand) -> bool {
+        match self.market_tx.try_send(cmd) {
+            Ok(()) => true,
+            Err(TrySendError::Full(cmd)) => {
+                match timeout(
+                    Duration::from_secs(MARKET_COMMAND_SEND_TIMEOUT_SECS),
+                    self.market_tx.send(cmd),
+                )
+                .await
+                {
+                    Ok(Ok(())) => true,
+                    Ok(Err(_)) => {
+                        warn!(
+                            "[executor:{}] market command channel closed while sending {label}",
+                            self.asset.name
+                        );
+                        false
+                    }
+                    Err(_) => {
+                        warn!(
+                            "[executor:{}] timed out sending {label} to market command queue",
+                            self.asset.name
+                        );
+                        false
+                    }
+                }
+            }
+            Err(TrySendError::Closed(_)) => {
+                warn!(
+                    "[executor:{}] market command channel closed while sending {label}",
+                    self.asset.name
+                );
+                false
+            }
+        }
+    }
+
+    #[inline]
+    async fn update_market(&self, update: SendUpdate) -> bool {
         use SendUpdate::*;
         let cmd = match update {
             Trade(trade) => MarketCommand::ReceiveTrade(trade),
             Position(pos) => MarketCommand::UpdateOpenPosition(pos),
         };
-        let _ = self.market_tx.send(cmd).await;
+        self.send_market_command("position/trade update", cmd).await
     }
 
     async fn kill(&mut self, close_paused_position: bool) {
@@ -379,7 +426,9 @@ impl Executor {
                 }
                 Err(Error::AuthError(msg)) => {
                     warn!("[executor] auth error: {msg}");
-                    let _ = self.market_tx.send(MarketCommand::AuthError(msg)).await;
+                    let _ = self
+                        .send_market_command("auth error", MarketCommand::AuthError(msg))
+                        .await;
                     self.is_paused = true;
                 }
                 Err(e) => warn!("{}", e),
@@ -464,8 +513,10 @@ impl Executor {
                                 let _ = self.cancel_all_resting().await;
                                 if !was_paused {
                                     let _ = self
-                                        .market_tx
-                                        .send(MarketCommand::ManualTradeDetected)
+                                        .send_market_command(
+                                            "manual trade detected",
+                                            MarketCommand::ManualTradeDetected,
+                                        )
                                         .await;
                                 }
                             }

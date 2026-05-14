@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{
     collections::{HashMap, HashSet},
     sync::{
@@ -18,11 +16,13 @@ use serde_json::{Value, json};
 use tokio::{
     net::TcpStream,
     spawn,
-    sync::{Mutex, mpsc::UnboundedSender},
+    sync::{Mutex, mpsc::Sender},
+    task::JoinHandle,
     time,
 };
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol};
 
+use crate::metrics;
 use crate::{BaseUrl, Error, HLTradeInfo};
 use hyperliquid_rust_sdk::{Deposit, LedgerUpdate, LedgerUpdateData, UserFunding, Withdraw};
 
@@ -30,6 +30,11 @@ type Result<T> = std::result::Result<T, Error>;
 type WsWriter = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, protocol::Message>;
 
 const QUICKNODE_WS_PATH: &str = "/hypercore/ws";
+const QUICKNODE_MAX_USER_FILTER_VALUES: usize = 100;
+const QUICKNODE_WS_SEND_TIMEOUT_SECS: u64 = 5;
+static ACCOUNT_EVENT_QUEUE_FULL_WARNED: AtomicBool = AtomicBool::new(false);
+static ACCOUNT_EVENT_QUEUE_CLOSED_WARNED: AtomicBool = AtomicBool::new(false);
+static ACCOUNT_EVENT_QUEUE_FULL_DROPS: AtomicU64 = AtomicU64::new(0);
 const QUICKNODE_ACCOUNT_EVENT_TYPES: &[&str] = &[
     "funding",
     "CDeposit",
@@ -69,6 +74,7 @@ pub(crate) enum AccountEvent {
 pub(crate) struct AccountFill {
     pub(crate) user: Address,
     pub(crate) fill: HLTradeInfo,
+    #[allow(dead_code)]
     pub(crate) block: QuickNodeBlockMeta,
 }
 
@@ -76,6 +82,7 @@ pub(crate) struct AccountFill {
 pub(crate) struct AccountFunding {
     pub(crate) user: Address,
     pub(crate) funding: UserFunding,
+    #[allow(dead_code)]
     pub(crate) block: QuickNodeBlockMeta,
 }
 
@@ -83,13 +90,17 @@ pub(crate) struct AccountFunding {
 pub(crate) struct AccountNonFundingLedgerUpdate {
     pub(crate) user: Address,
     pub(crate) update: LedgerUpdateData,
+    #[allow(dead_code)]
     pub(crate) block: QuickNodeBlockMeta,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct QuickNodeBlockMeta {
+    #[allow(dead_code)]
     pub(crate) block_number: u64,
+    #[allow(dead_code)]
     pub(crate) block_time: String,
+    #[allow(dead_code)]
     pub(crate) local_time: String,
 }
 
@@ -138,7 +149,7 @@ struct QnSubscription {
 
 #[derive(Clone, Debug)]
 struct RouteSubscriber {
-    sending_channel: UnboundedSender<AccountEvent>,
+    sending_channel: Sender<AccountEvent>,
     subscription_id: u32,
     qn_subscription: QnSubscription,
 }
@@ -147,7 +158,7 @@ struct RouteSubscriber {
 struct AccountDelivery {
     stream_type: QuickNodeStreamType,
     user_filters: HashSet<String>,
-    senders: Vec<UnboundedSender<AccountEvent>>,
+    senders: Vec<Sender<AccountEvent>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -164,6 +175,8 @@ pub(crate) struct EventStream {
     subscription_routes: HashMap<u32, Vec<String>>,
     subscription_id: u32,
     jsonrpc_id: Arc<AtomicU64>,
+    reader_task: JoinHandle<()>,
+    liveness_task: Option<JoinHandle<()>>,
 }
 
 impl EventStream {
@@ -172,6 +185,7 @@ impl EventStream {
     const TESTNET_PING_AFTER_SECS: u64 = 40;
     const TESTNET_PONG_GRACE_SECS: u64 = 45;
     const LIVENESS_CHECK_INTERVAL_SECS: u64 = 10;
+    const CONNECT_TIMEOUT_SECS: u64 = 10;
 
     pub(crate) async fn new(
         endpoint: String,
@@ -197,7 +211,7 @@ impl EventStream {
         let subscriptions = Arc::new(Mutex::new(HashMap::new()));
         let liveness = Self::liveness_config(base_url);
 
-        {
+        let reader_task = {
             let url = url.clone();
             let writer = Arc::clone(&writer);
             let subscriptions = Arc::clone(&subscriptions);
@@ -244,9 +258,9 @@ impl EventStream {
                                     awaiting_pong.store(false, Ordering::Relaxed);
                                 }
                                 protocol::Message::Ping(data) => {
-                                    let mut writer = writer.lock().await;
                                     if let Err(err) =
-                                        writer.send(protocol::Message::Pong(data)).await
+                                        send_ws_message(&writer, protocol::Message::Pong(data))
+                                            .await
                                     {
                                         error!("Error replying to QuickNode websocket ping: {err}");
                                         should_reconnect = true;
@@ -353,10 +367,10 @@ impl EventStream {
                 }
 
                 warn!("QuickNode websocket reader task stopped");
-            });
-        }
+            })
+        };
 
-        if let Some(liveness) = liveness {
+        let liveness_task = if let Some(liveness) = liveness {
             let writer = Arc::clone(&writer);
             let stop_flag = Arc::clone(&stop_flag);
             let last_rx = Arc::clone(&last_rx);
@@ -364,7 +378,7 @@ impl EventStream {
             let awaiting_pong = Arc::clone(&awaiting_pong);
             let force_reconnect = Arc::clone(&force_reconnect);
 
-            spawn(async move {
+            Some(spawn(async move {
                 while !stop_flag.load(Ordering::Relaxed) {
                     let now_ms = base_instant.elapsed().as_millis() as u64;
                     let last_rx_ms = last_rx.load(Ordering::Relaxed);
@@ -373,9 +387,7 @@ impl EventStream {
                         && now_ms.saturating_sub(last_rx_ms)
                             >= liveness.ping_after.as_millis() as u64
                     {
-                        let mut writer = writer.lock().await;
-                        match writer
-                            .send(protocol::Message::Ping(Vec::new().into()))
+                        match send_ws_message(&writer, protocol::Message::Ping(Vec::new().into()))
                             .await
                         {
                             Ok(()) => {
@@ -393,8 +405,10 @@ impl EventStream {
                 }
 
                 warn!("QuickNode websocket ping task stopped");
-            });
-        }
+            }))
+        } else {
+            None
+        };
 
         Ok(EventStream {
             stop_flag,
@@ -403,14 +417,27 @@ impl EventStream {
             subscription_routes: HashMap::new(),
             subscription_id: 1,
             jsonrpc_id,
+            reader_task,
+            liveness_task,
         })
     }
 
     pub(crate) async fn subscribe_user_events(
         &mut self,
         users: Vec<Address>,
-        sending_channel: UnboundedSender<AccountEvent>,
+        sending_channel: Sender<AccountEvent>,
     ) -> Result<u32> {
+        if users.is_empty() {
+            return Err(Error::Custom(
+                "EventStream user subscription requires at least one user".to_string(),
+            ));
+        }
+        if users.len() > QUICKNODE_MAX_USER_FILTER_VALUES {
+            return Err(Error::Custom(format!(
+                "EventStream user subscription supports at most {QUICKNODE_MAX_USER_FILTER_VALUES} users"
+            )));
+        }
+
         let subscription_id = self.subscription_id;
         self.subscription_id = self
             .subscription_id
@@ -500,6 +527,7 @@ impl EventStream {
         send_payloads(&self.writer, unsubscribe_payloads).await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn unsubscribe_all(&mut self) -> Result<()> {
         let unsubscribe_payloads = {
             let mut subscriptions = self.subscriptions.lock().await;
@@ -524,10 +552,18 @@ impl EventStream {
     }
 
     async fn connect(url: &str) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-        Ok(connect_async(url)
-            .await
-            .map_err(|err| Error::Websocket(err.to_string()))?
-            .0)
+        match time::timeout(
+            Duration::from_secs(Self::CONNECT_TIMEOUT_SECS),
+            connect_async(url),
+        )
+        .await
+        {
+            Ok(Ok((ws, _))) => Ok(ws),
+            Ok(Err(err)) => Err(Error::Websocket(err.to_string())),
+            Err(_) => Err(Error::Websocket(
+                "QuickNode websocket connect timed out".to_string(),
+            )),
+        }
     }
 
     fn liveness_config(base_url: BaseUrl) -> Option<LivenessConfig> {
@@ -549,33 +585,27 @@ impl EventStream {
     async fn add_route_subscription(
         &self,
         qn_subscription: QnSubscription,
-        sending_channel: UnboundedSender<AccountEvent>,
+        sending_channel: Sender<AccountEvent>,
         subscription_id: u32,
     ) -> Result<()> {
+        let subscribe_payload = qn_subscription.subscribe_payload.clone();
         let should_subscribe = {
-            let subscriptions = self.subscriptions.lock().await;
-            subscriptions
-                .get(&qn_subscription.route_key)
-                .is_none_or(Vec::is_empty)
-        };
-
-        if should_subscribe {
-            send_payloads(
-                &self.writer,
-                vec![qn_subscription.subscribe_payload.clone()],
-            )
-            .await?;
-        }
-
-        let mut subscriptions = self.subscriptions.lock().await;
-        subscriptions
-            .entry(qn_subscription.route_key.clone())
-            .or_insert_with(Vec::new)
-            .push(RouteSubscriber {
+            let mut subscriptions = self.subscriptions.lock().await;
+            let route_subscribers = subscriptions
+                .entry(qn_subscription.route_key.clone())
+                .or_insert_with(Vec::new);
+            let should_subscribe = route_subscribers.is_empty();
+            route_subscribers.push(RouteSubscriber {
                 sending_channel,
                 subscription_id,
                 qn_subscription,
             });
+            should_subscribe
+        };
+
+        if should_subscribe {
+            send_payloads(&self.writer, vec![subscribe_payload]).await?;
+        }
 
         Ok(())
     }
@@ -584,6 +614,10 @@ impl EventStream {
 impl Drop for EventStream {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
+        self.reader_task.abort();
+        if let Some(liveness_task) = &self.liveness_task {
+            liveness_task.abort();
+        }
     }
 }
 
@@ -605,6 +639,13 @@ async fn parse_and_send_data(
     }
 
     if payload.get("id").is_some() && payload.get("result").is_some() {
+        if payload.get("result").and_then(Value::as_bool) == Some(false) {
+            send_to_all_subscriptions(
+                subscriptions,
+                AccountEvent::Error("QuickNode JSON-RPC request returned false".to_string()),
+            )
+            .await;
+        }
         return Ok(());
     }
 
@@ -634,18 +675,42 @@ async fn route_account_event(
             }
         } else if let Some(stream_name) = stream_name {
             if let Some(stream_type) = QuickNodeStreamType::from_str(&stream_name) {
-                subscriptions
+                let route_subscribers = subscriptions
                     .values()
                     .filter(|route_subscribers| {
                         route_subscribers.first().is_some_and(|subscriber| {
                             subscriber.qn_subscription.stream_type == stream_type
                         })
                     })
-                    .filter(|route_subscribers| {
-                        route_matches_payload_users(route_subscribers, &payload_users)
-                    })
-                    .flat_map(|route_subscribers| route_deliveries(route_subscribers))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>();
+
+                if payload_users.is_empty() {
+                    if route_subscribers.len() == 1 {
+                        route_deliveries(route_subscribers[0])
+                    } else {
+                        warn!(
+                            "Dropping QuickNode message with streamType={stream_name} and no filterName/users; candidate_routes={}",
+                            route_subscribers.len()
+                        );
+                        Vec::new()
+                    }
+                } else {
+                    let deliveries = route_subscribers
+                        .into_iter()
+                        .filter(|route_subscribers| {
+                            route_matches_payload_users(route_subscribers, &payload_users)
+                        })
+                        .flat_map(|route_subscribers| route_deliveries(route_subscribers))
+                        .collect::<Vec<_>>();
+
+                    if deliveries.is_empty() {
+                        warn!(
+                            "Dropping QuickNode message with streamType={stream_name}; no route matched payload users"
+                        );
+                    }
+
+                    deliveries
+                }
             } else {
                 warn!("Dropping QuickNode message for unknown streamType={stream_name}");
                 Vec::new()
@@ -693,7 +758,7 @@ fn route_matches_payload_users(
     payload_users: &HashSet<String>,
 ) -> bool {
     if payload_users.is_empty() {
-        return true;
+        return false;
     }
 
     route_subscribers
@@ -762,9 +827,25 @@ async fn send_to_all_subscriptions(
     }
 }
 
-fn send_account_event(sender: &UnboundedSender<AccountEvent>, event: AccountEvent) {
-    if let Err(err) = sender.send(event) {
-        warn!("Error sending account event from QuickNode stream: {err}");
+fn send_account_event(sender: &Sender<AccountEvent>, event: AccountEvent) {
+    match sender.try_send(event) {
+        Ok(()) => {}
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            metrics::inc_stream_account_event_dropped();
+            let drops = ACCOUNT_EVENT_QUEUE_FULL_DROPS.fetch_add(1, Ordering::Relaxed) + 1;
+            if !ACCOUNT_EVENT_QUEUE_FULL_WARNED.swap(true, Ordering::Relaxed) {
+                warn!("dropping QuickNode account event because subscriber queue is full");
+            } else if drops.is_power_of_two() {
+                warn!(
+                    "dropped {drops} QuickNode account events because subscriber queues were full"
+                );
+            }
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            if !ACCOUNT_EVENT_QUEUE_CLOSED_WARNED.swap(true, Ordering::Relaxed) {
+                warn!("dropping QuickNode account event because subscriber queue is closed");
+            }
+        }
     }
 }
 
@@ -796,20 +877,32 @@ async fn send_payloads(writer: &Arc<Mutex<WsWriter>>, payloads: Vec<Value>) -> R
         return Ok(());
     }
 
-    let mut writer = writer.lock().await;
     let mut result = Ok(());
 
     for payload in payloads {
-        if let Err(err) = writer
-            .send(protocol::Message::Text(payload.to_string().into()))
-            .await
-            .map_err(|err| Error::WsSend(err.to_string()))
+        if let Err(err) =
+            send_ws_message(writer, protocol::Message::Text(payload.to_string().into())).await
         {
             result = Err(err);
         }
     }
 
     result
+}
+
+async fn send_ws_message(writer: &Arc<Mutex<WsWriter>>, message: protocol::Message) -> Result<()> {
+    match time::timeout(Duration::from_secs(QUICKNODE_WS_SEND_TIMEOUT_SECS), async {
+        let mut writer = writer.lock().await;
+        writer.send(message).await
+    })
+    .await
+    {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(Error::WsSend(err.to_string())),
+        Err(_) => Err(Error::WsSend(
+            "QuickNode websocket send timed out".to_string(),
+        )),
+    }
 }
 
 fn build_qn_subscription(
@@ -834,6 +927,7 @@ fn build_qn_subscription(
             "jsonrpc": "2.0",
             "method": "hl_unsubscribe",
             "params": {
+                "streamType": stream_type.as_str(),
                 "filterName": route_key.clone(),
             },
             "id": unsubscribe_id,
@@ -1170,12 +1264,12 @@ fn event_time_ms(value: Option<&Value>) -> u64 {
 
 fn parse_iso_time_ms(value: &str) -> Option<u64> {
     chrono::DateTime::parse_from_rfc3339(value)
-        .map(|time| time.timestamp_millis() as u64)
         .ok()
+        .and_then(|time| u64::try_from(time.timestamp_millis()).ok())
         .or_else(|| {
             NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f")
-                .map(|time| time.and_utc().timestamp_millis() as u64)
                 .ok()
+                .and_then(|time| u64::try_from(time.and_utc().timestamp_millis()).ok())
         })
 }
 
@@ -1187,16 +1281,18 @@ fn collect_recursive_user_fields(value: &Value, users: &mut HashSet<String>) {
                     ("user", Value::String(user)) => {
                         users.insert(normalize_user(user));
                     }
-                    ("users", Value::Array(values)) => {
-                        users.extend(values.iter().filter_map(Value::as_str).map(normalize_user));
+                    ("users", Value::Array(items)) => {
+                        for user in items.iter().filter_map(Value::as_str) {
+                            users.insert(normalize_user(user));
+                        }
                     }
                     _ => collect_recursive_user_fields(value, users),
                 }
             }
         }
-        Value::Array(values) => {
-            for value in values {
-                collect_recursive_user_fields(value, users);
+        Value::Array(items) => {
+            for item in items {
+                collect_recursive_user_fields(item, users);
             }
         }
         _ => {}
@@ -1288,6 +1384,33 @@ fn build_ws_url(endpoint: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::mpsc;
+
+    fn test_route_subscriber(
+        route_key: &str,
+        stream_type: QuickNodeStreamType,
+        filter_field: &str,
+        user: &str,
+        subscription_id: u32,
+    ) -> (RouteSubscriber, mpsc::Receiver<AccountEvent>) {
+        let (tx, rx) = mpsc::channel(4);
+        let qn_subscription = build_qn_subscription(
+            route_key.to_string(),
+            stream_type,
+            json!({ filter_field: [user] }),
+            u64::from(subscription_id) * 2,
+            u64::from(subscription_id) * 2 + 1,
+        );
+
+        (
+            RouteSubscriber {
+                sending_channel: tx,
+                subscription_id,
+                qn_subscription,
+            },
+            rx,
+        )
+    }
 
     #[test]
     fn parses_mixed_quicknode_events_into_funding_and_ledger_updates() {
@@ -1377,5 +1500,158 @@ mod tests {
         assert!(
             quicknode_event_users(&payload).contains("0x0000000000000000000000000000000000000001")
         );
+    }
+
+    #[test]
+    fn unsubscribe_payload_includes_stream_type_for_quicknode() {
+        let qn_subscription = build_qn_subscription(
+            "fundings_7".to_string(),
+            QuickNodeStreamType::Events,
+            json!({ "users": ["0x0000000000000000000000000000000000000001"] }),
+            1,
+            2,
+        );
+
+        assert_eq!(
+            qn_subscription.unsubscribe_payload["params"]["filterName"],
+            json!("fundings_7")
+        );
+        assert_eq!(
+            qn_subscription.unsubscribe_payload["params"]["streamType"],
+            json!("events")
+        );
+    }
+
+    #[test]
+    fn parse_iso_time_ms_rejects_negative_timestamps() {
+        assert_eq!(parse_iso_time_ms("1969-12-31T23:59:59Z"), None);
+        assert!(parse_iso_time_ms("2026-04-30T19:00:00.030459967").is_some());
+    }
+
+    #[tokio::test]
+    async fn stream_fallback_drops_ambiguous_messages_without_users() {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let (sub_1, mut rx_1) = test_route_subscriber(
+            "fills_1",
+            QuickNodeStreamType::Trades,
+            "user",
+            "0x0000000000000000000000000000000000000001",
+            1,
+        );
+        let (sub_2, mut rx_2) = test_route_subscriber(
+            "fills_2",
+            QuickNodeStreamType::Trades,
+            "user",
+            "0x0000000000000000000000000000000000000002",
+            2,
+        );
+
+        {
+            let mut subscriptions = subscriptions.lock().await;
+            subscriptions.insert("fills_1".to_string(), vec![sub_1]);
+            subscriptions.insert("fills_2".to_string(), vec![sub_2]);
+        }
+
+        route_account_event(
+            json!({
+                "stream": "trades",
+                "data": { "price": "1.0" }
+            }),
+            &subscriptions,
+        )
+        .await;
+
+        assert!(matches!(
+            rx_1.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            rx_2.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn false_jsonrpc_result_is_reported_to_subscribers() {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let (sub, mut rx) = test_route_subscriber(
+            "fills_1",
+            QuickNodeStreamType::Trades,
+            "user",
+            "0x0000000000000000000000000000000000000001",
+            1,
+        );
+
+        subscriptions
+            .lock()
+            .await
+            .insert("fills_1".to_string(), vec![sub]);
+
+        parse_and_send_data(
+            r#"{"jsonrpc":"2.0","id":1,"result":false}"#.to_string(),
+            &subscriptions,
+        )
+        .await
+        .expect("false JSON-RPC result should be handled");
+
+        let event = tokio::time::timeout(Duration::from_millis(50), rx.recv())
+            .await
+            .expect("subscriber should receive error")
+            .expect("subscriber channel should be open");
+        assert!(matches!(
+            event,
+            AccountEvent::Error(message) if message.contains("returned false")
+        ));
+    }
+
+    #[tokio::test]
+    async fn stream_fallback_routes_only_matching_payload_users() {
+        let user_1 = "0x0000000000000000000000000000000000000001";
+        let user_2 = "0x0000000000000000000000000000000000000002";
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let (sub_1, mut rx_1) =
+            test_route_subscriber("events_1", QuickNodeStreamType::Events, "users", user_1, 1);
+        let (sub_2, mut rx_2) =
+            test_route_subscriber("events_2", QuickNodeStreamType::Events, "users", user_2, 2);
+
+        {
+            let mut subscriptions = subscriptions.lock().await;
+            subscriptions.insert("events_1".to_string(), vec![sub_1]);
+            subscriptions.insert("events_2".to_string(), vec![sub_2]);
+        }
+
+        route_account_event(
+            json!({
+                "stream": "events",
+                "data": {
+                    "events": [{
+                        "inner": {
+                            "LedgerUpdate": {
+                                "users": [user_1],
+                                "delta": {
+                                    "type": "deposit",
+                                    "usdc": "100.0"
+                                }
+                            }
+                        }
+                    }]
+                }
+            }),
+            &subscriptions,
+        )
+        .await;
+
+        let event = tokio::time::timeout(Duration::from_millis(50), rx_1.recv())
+            .await
+            .expect("matching route should receive event")
+            .expect("matching route channel should be open");
+        assert!(matches!(
+            event,
+            AccountEvent::NonFundingLedgerUpdates(updates) if updates.len() == 1
+        ));
+        assert!(matches!(
+            rx_2.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
     }
 }

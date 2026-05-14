@@ -1,6 +1,6 @@
 use crate::{
     AddMarketInfo, BackendStatus, EngineView, ExecEvent, HLTradeInfo, Market, MarketCommand,
-    MarketInfo, MarketState, MarketUpdate, TradeFillInfo, UpdateFrontend, Wallet,
+    MarketInfo, MarketState, MarketUpdate, TradeFillInfo, TradeInfo, UpdateFrontend, Wallet,
 };
 
 use crate::backend::app_state::{StrategyCache, WsConnections, broadcast_to_user};
@@ -21,38 +21,265 @@ use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
-use tokio::sync::mpsc::{
-    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
-};
+use std::time::Instant;
+use tokio::sync::mpsc::{Receiver, Sender, channel, error::TrySendError, unbounded_channel};
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, sleep};
+use tokio::time::{Duration, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
 use crate::helper::*;
 use crate::margin::{AssetMargin, MarginBook};
+use crate::metrics;
 
 pub type Session = Arc<Mutex<HashMap<String, MarketState, BuildHasherDefault<FxHasher>>>>;
+const MARGIN_SYNC_MIN_INTERVAL_SECS: u64 = 5;
+const PRICE_ROUTER_CHANNEL_SIZE: usize = 1024;
+const MARKET_PRICE_CHANNEL_SIZE: usize = 512;
+const USER_EVENT_QUEUE_SIZE: usize = 512;
+const MARKET_UPDATE_CHANNEL_SIZE: usize = 2048;
+const TRADE_PERSIST_QUEUE_SIZE: usize = 1024;
+const BROADCAST_SUBSCRIBE_TIMEOUT_SECS: u64 = 5;
+const MARKET_COMMAND_SEND_TIMEOUT_SECS: u64 = 5;
+const BOT_EVENT_SEND_TIMEOUT_SECS: u64 = 5;
+const MARGIN_SYNC_FALLBACK_SECS: u64 = 30;
+const MARGIN_SYNC_STAGGER_MAX_SECS: u64 = 30;
+const BOT_DB_QUERY_TIMEOUT_SECS: u64 = 10;
+const TRADE_PERSIST_TIMEOUT_SECS: u64 = 10;
+const EMPTY_MARKET_IDLE_TIMEOUT_SECS: u64 = 4 * 60 * 60;
+const EMPTY_MARKET_IDLE_CHECK_SECS: u64 = 60;
+const MARKET_TASK_JOIN_TIMEOUT_SECS: u64 = 10;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MarketCommandSendResult {
+    Sent,
+    Closed,
+    TimedOut,
+    Missing,
+}
+
+async fn send_market_command_with_timeout(
+    asset: &str,
+    tx: &Sender<MarketCommand>,
+    cmd: MarketCommand,
+    label: &'static str,
+    wait: Duration,
+) -> MarketCommandSendResult {
+    match tx.try_send(cmd) {
+        Ok(()) => MarketCommandSendResult::Sent,
+        Err(TrySendError::Full(cmd)) => match timeout(wait, tx.send(cmd)).await {
+            Ok(Ok(())) => MarketCommandSendResult::Sent,
+            Ok(Err(_)) => {
+                warn!("failed to send {label} command to {asset}: market channel closed");
+                MarketCommandSendResult::Closed
+            }
+            Err(_) => {
+                warn!("timed out sending {label} command to {asset}: market command queue full");
+                MarketCommandSendResult::TimedOut
+            }
+        },
+        Err(TrySendError::Closed(_)) => {
+            warn!("failed to send {label} command to {asset}: market channel closed");
+            MarketCommandSendResult::Closed
+        }
+    }
+}
+
+async fn send_market_command(
+    asset: &str,
+    tx: &Sender<MarketCommand>,
+    cmd: MarketCommand,
+    label: &'static str,
+) -> MarketCommandSendResult {
+    send_market_command_with_timeout(
+        asset,
+        tx,
+        cmd,
+        label,
+        Duration::from_secs(MARKET_COMMAND_SEND_TIMEOUT_SECS),
+    )
+    .await
+}
+
+async fn release_market_margin(asset: &str, margin_book: &Arc<Mutex<MarginBook>>) -> f64 {
+    let stale_total = {
+        let mut book = margin_book.lock().await;
+        book.remove(asset);
+        book.free()
+    };
+
+    match MarginBook::sync_total_if_stale_shared(margin_book, Duration::ZERO).await {
+        Ok(total) => total,
+        Err(err) => {
+            warn!("failed to sync margin after removing {asset}; using stale local total: {err}");
+            stale_total
+        }
+    }
+}
+
+async fn queue_bot_event(tx: &Sender<BotEvent>, event: BotEvent, label: &'static str) {
+    match tx.try_send(event) {
+        Ok(()) => {}
+        Err(TrySendError::Full(event)) => {
+            warn!("bot event queue full while queuing {label}");
+            match timeout(
+                Duration::from_secs(BOT_EVENT_SEND_TIMEOUT_SECS),
+                tx.send(event),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => warn!("bot event channel closed before delayed {label}"),
+                Err(_) => warn!("timed out queuing delayed bot event {label}"),
+            }
+        }
+        Err(TrySendError::Closed(_)) => {
+            warn!("bot event channel closed while queuing {label}");
+        }
+    }
+}
+
+fn margin_sync_fallback_delay(pubkey: &str) -> Duration {
+    let stagger = pubkey.bytes().fold(0_u64, |acc, byte| {
+        acc.wrapping_mul(31).wrapping_add(byte as u64)
+    }) % MARGIN_SYNC_STAGGER_MAX_SECS;
+    Duration::from_secs(MARGIN_SYNC_FALLBACK_SECS + stagger)
+}
+
+struct TradePersistence {
+    asset: String,
+    trade: TradeInfo,
+}
+
+fn queue_trade_persistence(
+    tx: &Sender<TradePersistence>,
+    item: TradePersistence,
+    queue_full: &mut bool,
+    dropped: &mut u64,
+) {
+    match tx.try_send(item) {
+        Ok(()) => {
+            if *queue_full {
+                log::info!("trade persistence queue recovered after dropping {dropped} records");
+                *queue_full = false;
+                *dropped = 0;
+            }
+        }
+        Err(TrySendError::Full(_)) => {
+            metrics::inc_trade_persistence_dropped();
+            *dropped = dropped.saturating_add(1);
+            if !*queue_full {
+                warn!("trade persistence queue full; dropping completed trade records");
+                *queue_full = true;
+            }
+        }
+        Err(TrySendError::Closed(_)) => {
+            warn!("trade persistence queue closed; dropping completed trade record");
+        }
+    }
+}
+
+fn parse_user_funding(raw: &str) -> Result<f64, Error> {
+    let funding = raw
+        .parse::<f64>()
+        .map_err(|err| Error::GenericParse(format!("failed to parse user funding: {err}")))?;
+
+    if !funding.is_finite() {
+        return Err(Error::GenericParse(
+            "user funding was not finite".to_string(),
+        ));
+    }
+
+    Ok(funding)
+}
+
+fn refresh_empty_market_idle(markets_empty: bool, idle_since: &mut Option<Instant>, now: Instant) {
+    if markets_empty {
+        idle_since.get_or_insert(now);
+    } else {
+        *idle_since = None;
+    }
+}
+
+fn empty_market_idle_expired(
+    markets_empty: bool,
+    idle_since: &mut Option<Instant>,
+    now: Instant,
+    timeout: Duration,
+) -> bool {
+    refresh_empty_market_idle(markets_empty, idle_since, now);
+    idle_since.is_some_and(|since| now.saturating_duration_since(since) >= timeout)
+}
+
+fn spawn_trade_persistence_worker(
+    pool: PgPool,
+    pubkey: String,
+    mut rx: Receiver<TradePersistence>,
+) {
+    tokio::spawn(async move {
+        while let Some(item) = rx.recv().await {
+            persist_trade(&pool, &pubkey, item).await;
+        }
+    });
+}
+
+async fn persist_trade(pool: &PgPool, pubkey: &str, item: TradePersistence) {
+    let side_str = format!("{:?}", item.trade.side);
+    let open_type = format!("{:?}", item.trade.open.fill_type);
+    let close_type = format!("{:?}", item.trade.close.fill_type);
+
+    let query = sqlx::query(
+        "INSERT INTO trades (pubkey, market, side, size, pnl, total_pnl, fees, funding, open_time, open_price, open_type, close_time, close_price, close_type, strategy) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+    )
+    .bind(pubkey)
+    .bind(&item.asset)
+    .bind(&side_str)
+    .bind(item.trade.size)
+    .bind(item.trade.pnl)
+    .bind(item.trade.total_pnl)
+    .bind(item.trade.fees)
+    .bind(item.trade.funding)
+    .bind(item.trade.open.time as i64)
+    .bind(item.trade.open.price)
+    .bind(&open_type)
+    .bind(item.trade.close.time as i64)
+    .bind(item.trade.close.price)
+    .bind(&close_type)
+    .bind(&item.trade.strategy);
+
+    match timeout(
+        Duration::from_secs(TRADE_PERSIST_TIMEOUT_SECS),
+        query.execute(pool),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => log::warn!("Failed to persist trade for {}: {:?}", item.asset, e),
+        Err(_) => log::warn!("Timed out persisting trade for {}", item.asset),
+    }
+}
 
 pub struct Bot {
     info_client: InfoClient,
     wallet: Arc<Wallet>,
     markets: HashMap<String, Sender<MarketCommand>, BuildHasherDefault<FxHasher>>,
-    market_price_routes: HashMap<String, UnboundedSender<PriceAsset>, BuildHasherDefault<FxHasher>>,
+    market_price_routes: HashMap<String, Sender<PriceAsset>, BuildHasherDefault<FxHasher>>,
+    saturated_market_price_routes: HashSet<String, BuildHasherDefault<FxHasher>>,
     market_required_assets: HashMap<String, HashSet<Arc<str>>, BuildHasherDefault<FxHasher>>,
     asset_consumers: HashMap<Arc<str>, HashSet<String>, BuildHasherDefault<FxHasher>>,
     asset_feeds: HashMap<Arc<str>, BotAssetFeed, BuildHasherDefault<FxHasher>>,
-    broadcast_tx: UnboundedSender<BroadcastCmd>,
+    broadcast_tx: Sender<BroadcastCmd>,
     candle_rx: Sender<CacheCmdIn>,
     user_event_relay: Option<UserEventRelayHandle>,
-    #[allow(unused)]
-    fees: (f64, f64),
+    _fees: (f64, f64),
     _bot_tx: Sender<BotEvent>,
     bot_rv: Receiver<BotEvent>,
-    price_router_rv: Option<UnboundedReceiver<PriceAsset>>,
-    price_router_tx: UnboundedSender<PriceAsset>,
-    update_rv: Option<UnboundedReceiver<MarketUpdate>>,
-    update_tx: UnboundedSender<MarketUpdate>,
+    market_handles: HashMap<String, JoinHandle<()>, BuildHasherDefault<FxHasher>>,
+    price_router_rv: Option<Receiver<PriceAsset>>,
+    price_router_tx: Sender<PriceAsset>,
+    update_rv: Option<Receiver<MarketUpdate>>,
+    update_tx: Sender<MarketUpdate>,
     ws_connections: Option<WsConnections>,
     pubkey: Option<String>,
     pool: Option<PgPool>,
@@ -75,16 +302,16 @@ enum UserEventMessage {
 impl Bot {
     pub async fn new(
         wallet: Wallet,
-        broadcast_tx: UnboundedSender<BroadcastCmd>,
+        broadcast_tx: Sender<BroadcastCmd>,
         candle_rx: Sender<CacheCmdIn>,
         user_event_relay: Option<UserEventRelayHandle>,
     ) -> Result<(Self, Sender<BotEvent>), Error> {
-        let info_client = InfoClient::with_reconnect(None, Some(wallet.url)).await?;
+        let info_client = info_client_with_reconnect_timeout("bot", wallet.url).await?;
         let fees = wallet.get_user_fees().await?;
 
         let (bot_tx, bot_rv) = channel::<BotEvent>(64);
-        let (price_router_tx, price_router_rv) = unbounded_channel::<PriceAsset>();
-        let (update_tx, update_rv) = unbounded_channel::<MarketUpdate>();
+        let (price_router_tx, price_router_rv) = channel::<PriceAsset>(PRICE_ROUTER_CHANNEL_SIZE);
+        let (update_tx, update_rv) = channel::<MarketUpdate>(MARKET_UPDATE_CHANNEL_SIZE);
 
         Ok((
             Self {
@@ -92,15 +319,17 @@ impl Bot {
                 wallet: wallet.into(),
                 markets: HashMap::default(),
                 market_price_routes: HashMap::default(),
+                saturated_market_price_routes: HashSet::default(),
                 market_required_assets: HashMap::default(),
                 asset_consumers: HashMap::default(),
                 asset_feeds: HashMap::default(),
                 broadcast_tx,
                 candle_rx,
                 user_event_relay,
-                fees,
+                _fees: fees,
                 _bot_tx: bot_tx.clone(),
                 bot_rv,
+                market_handles: HashMap::default(),
                 price_router_rv: Some(price_router_rv),
                 price_router_tx,
                 update_rv: Some(update_rv),
@@ -124,6 +353,10 @@ impl Bot {
         }
     }
 
+    pub(crate) async fn shutdown_unused(mut self) {
+        let _ = info_shutdown_ws_timeout("bot", &mut self.info_client).await;
+    }
+
     async fn ensure_asset_feed(&mut self, asset: Arc<str>) -> Result<AssetMeta, Error> {
         if let Some(feed) = self.asset_feeds.get(&asset) {
             return Ok(feed.meta.clone());
@@ -135,13 +368,32 @@ impl Bot {
             reply: one_tx,
         };
 
-        self.broadcast_tx
-            .send(BroadcastCmd::Subscribe(sub_request))
-            .map_err(|e| Error::Custom(format!("broadcast channel closed: {}", e)))?;
+        match self
+            .broadcast_tx
+            .try_send(BroadcastCmd::Subscribe(sub_request))
+        {
+            Ok(()) => {}
+            Err(TrySendError::Full(cmd)) => {
+                timeout(
+                    Duration::from_secs(BROADCAST_SUBSCRIBE_TIMEOUT_SECS),
+                    self.broadcast_tx.send(cmd),
+                )
+                .await
+                .map_err(|_| Error::Custom("timed out queuing broadcast subscription".into()))?
+                .map_err(|e| Error::Custom(format!("broadcast channel closed: {}", e)))?;
+            }
+            Err(TrySendError::Closed(_)) => {
+                return Err(Error::Custom("broadcast channel closed".into()));
+            }
+        }
 
-        let sub_info = one_rx
-            .await
-            .map_err(|_| Error::Custom("subscription reply dropped".to_string()))??;
+        let sub_info = timeout(
+            Duration::from_secs(BROADCAST_SUBSCRIBE_TIMEOUT_SECS),
+            one_rx,
+        )
+        .await
+        .map_err(|_| Error::Custom("timed out waiting for subscription reply".to_string()))?
+        .map_err(|_| Error::Custom("subscription reply dropped".to_string()))??;
 
         let meta = sub_info.meta.clone();
         let mut px_receiver = sub_info.px_receiver;
@@ -150,23 +402,45 @@ impl Bot {
         let asset_key = Arc::clone(&asset);
 
         let handle = tokio::spawn(async move {
+            let mut queue_full = false;
+            let mut dropped = 0_u64;
             loop {
                 match px_receiver.recv().await {
-                    Ok(data) => {
-                        if price_router_tx
-                            .send((Arc::clone(&asset_key), data))
-                            .is_err()
-                        {
-                            break;
+                    Ok(data) => match price_router_tx.try_send((Arc::clone(&asset_key), data)) {
+                        Ok(()) => {
+                            if queue_full {
+                                log::info!(
+                                    "{} bot price router recovered after dropping {} updates",
+                                    &asset_key,
+                                    dropped
+                                );
+                                queue_full = false;
+                                dropped = 0;
+                            }
                         }
-                    }
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            metrics::inc_price_router_dropped();
+                            dropped = dropped.saturating_add(1);
+                            if !queue_full {
+                                log::warn!(
+                                    "{} bot price router full; dropping live price updates",
+                                    &asset_key
+                                );
+                                queue_full = true;
+                            }
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+                    },
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         log::warn!("{} bot feed lagged by {} messages", &asset_key, n);
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        let _ = bot_tx
-                            .send(BotEvent::AssetFeedDied((*asset_key).to_string()))
-                            .await;
+                        queue_bot_event(
+                            &bot_tx,
+                            BotEvent::AssetFeedDied((*asset_key).to_string()),
+                            "AssetFeedDied",
+                        )
+                        .await;
                         break;
                     }
                 }
@@ -203,24 +477,119 @@ impl Bot {
 
         self.asset_consumers.remove(&asset);
 
-        if self.drop_asset_feed(&asset).await
-            && self
-                .broadcast_tx
-                .send(BroadcastCmd::Unsubscribe(Arc::clone(&asset)))
-                .is_err()
-        {
-            warn!("failed to unsubscribe {} from broadcaster", &asset);
+        if self.drop_asset_feed(&asset).await {
+            self.queue_broadcast_unsubscribe(asset).await;
         }
     }
 
-    fn route_price(&self, asset: Arc<str>, data: PriceData) {
-        let Some(markets) = self.asset_consumers.get(&asset) else {
+    async fn drop_all_asset_feeds(&mut self) {
+        let assets = self.asset_feeds.keys().cloned().collect::<Vec<_>>();
+        for asset in assets {
+            if self.drop_asset_feed(&asset).await {
+                self.queue_broadcast_unsubscribe(asset).await;
+            }
+        }
+
+        self.asset_consumers.clear();
+        self.market_required_assets.clear();
+        self.market_price_routes.clear();
+        self.saturated_market_price_routes.clear();
+    }
+
+    async fn join_market_task(&mut self, asset: &str) {
+        let Some(mut handle) = self.market_handles.remove(asset) else {
             return;
         };
 
+        match timeout(
+            Duration::from_secs(MARKET_TASK_JOIN_TIMEOUT_SECS),
+            &mut handle,
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                warn!("market task for {asset} failed while joining: {err}");
+            }
+            Err(_) => {
+                warn!("timed out joining market task for {asset}; aborting task");
+                handle.abort();
+                let _ = handle.await;
+            }
+        }
+    }
+
+    async fn join_all_market_tasks(&mut self) {
+        self.markets.clear();
+        let assets = self.market_handles.keys().cloned().collect::<Vec<_>>();
+        for asset in assets {
+            self.join_market_task(&asset).await;
+        }
+    }
+
+    async fn queue_broadcast_unsubscribe(&self, asset: Arc<str>) {
+        match self
+            .broadcast_tx
+            .try_send(BroadcastCmd::Unsubscribe(Arc::clone(&asset)))
+        {
+            Ok(()) => {}
+            Err(TrySendError::Full(cmd)) => {
+                warn!("broadcast queue full while unsubscribing {}", &asset);
+                match timeout(
+                    Duration::from_secs(BROADCAST_SUBSCRIBE_TIMEOUT_SECS),
+                    self.broadcast_tx.send(cmd),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => {
+                        warn!(
+                            "broadcast channel closed before delayed unsubscribe for {}",
+                            &asset
+                        );
+                    }
+                    Err(_) => {
+                        warn!(
+                            "timed out queuing delayed broadcaster unsubscribe for {}",
+                            &asset
+                        );
+                    }
+                }
+            }
+            Err(TrySendError::Closed(_)) => {
+                warn!("failed to unsubscribe {} from broadcaster", &asset);
+            }
+        }
+    }
+
+    fn route_price(&mut self, asset: Arc<str>, data: PriceData) {
+        let Some(markets) = self.asset_consumers.get(&asset) else {
+            return;
+        };
+        let markets = markets.iter().cloned().collect::<Vec<_>>();
+
         for market in markets {
-            if let Some(tx) = self.market_price_routes.get(market) {
-                let _ = tx.send((Arc::clone(&asset), data.clone()));
+            if let Some(tx) = self.market_price_routes.get(&market) {
+                match tx.try_send((Arc::clone(&asset), data.clone())) {
+                    Ok(()) => {
+                        if self.saturated_market_price_routes.remove(&market) {
+                            log::info!("price route recovered for market {market}");
+                        }
+                    }
+                    Err(TrySendError::Full(_)) => {
+                        metrics::inc_market_price_route_dropped();
+                        if self.saturated_market_price_routes.insert(market.clone()) {
+                            log::warn!(
+                                "price route full for market {market}; dropping live price updates"
+                            );
+                        }
+                    }
+                    Err(TrySendError::Closed(_)) => {
+                        if self.saturated_market_price_routes.insert(market.clone()) {
+                            log::warn!("price route closed for market {market}; dropping updates");
+                        }
+                    }
+                }
             }
         }
     }
@@ -294,6 +663,7 @@ impl Bot {
 
     async fn clear_market_feed_state(&mut self, market: &str) {
         self.market_price_routes.remove(market);
+        self.saturated_market_price_routes.remove(market);
         let mut required_assets = self
             .market_required_assets
             .remove(market)
@@ -327,6 +697,12 @@ impl Bot {
             config,
         } = info;
 
+        if lev == 0 {
+            return Err(Error::Custom(
+                "leverage must be greater than zero".to_string(),
+            ));
+        }
+
         // Resolve strategy → compiled strategy + indicators + name
         let rhai_engine = self
             .rhai_engine
@@ -355,19 +731,32 @@ impl Bot {
                     .as_ref()
                     .ok_or_else(|| Error::Custom("DB pool not initialized".to_string()))?;
 
-                let row = sqlx::query_as::<_, crate::backend::db::StrategyRow>(
-                    "SELECT * FROM strategies WHERE id = $1",
+                let row = timeout(
+                    Duration::from_secs(BOT_DB_QUERY_TIMEOUT_SECS),
+                    sqlx::query_as::<_, crate::backend::db::StrategyRow>(
+                        "SELECT * FROM strategies WHERE id = $1",
+                    )
+                    .bind(sid)
+                    .fetch_optional(pool),
                 )
-                .bind(sid)
-                .fetch_optional(pool)
                 .await
+                .map_err(|_| Error::Custom("DB query timed out fetching strategy".to_string()))?
                 .map_err(|e| Error::Custom(format!("DB error fetching strategy: {e}")))?
                 .ok_or_else(|| Error::Custom(format!("strategy {sid} not found")))?;
 
-                let state_decls: Option<crate::backend::scripting::StateDeclarations> = row
+                let state_decls: Option<crate::backend::scripting::StateDeclarations> = match row
                     .state_declarations
                     .as_ref()
-                    .and_then(|v| serde_json::from_value(v.clone()).ok());
+                    .map(|v| serde_json::from_value(v.clone()))
+                {
+                    Some(Ok(decls)) => Some(decls),
+                    Some(Err(e)) => {
+                        return Err(Error::Custom(format!(
+                            "strategy {sid} has invalid state declarations: {e}"
+                        )));
+                    }
+                    None => None,
+                };
 
                 let compiled = crate::backend::scripting::compile_strategy(
                     &rhai_engine,
@@ -378,8 +767,10 @@ impl Bot {
                 )
                 .map_err(|e| Error::Custom(format!("strategy {sid} failed to compile: {e}")))?;
 
-                let indicators: Vec<crate::IndexId> =
-                    serde_json::from_value(row.indicators).unwrap_or_default();
+                let indicators: Vec<crate::IndexId> = serde_json::from_value(row.indicators)
+                    .map_err(|e| {
+                        Error::Custom(format!("strategy {sid} has invalid indicators: {e}"))
+                    })?;
 
                 // Cache for next time
                 {
@@ -414,8 +805,7 @@ impl Bot {
             return Ok(());
         }
 
-        let mut book = margin_book.lock().await;
-        self.chain_open_positions = book.sync().await?;
+        self.chain_open_positions = MarginBook::sync_shared(margin_book).await?;
         if self
             .chain_open_positions
             .iter()
@@ -429,7 +819,8 @@ impl Bot {
             return Ok(());
         }
 
-        let margin = book.allocate(asset.clone(), margin_alloc).await?;
+        let mut book = margin_book.lock().await;
+        let margin = book.allocate_from_current(asset.clone(), margin_alloc)?;
         drop(book);
 
         self.send_to_frontend(UpdateFrontend::PreconfirmMarket(asset.clone()))
@@ -438,7 +829,7 @@ impl Bot {
         let market_asset = Arc::<str>::from(asset.as_str());
         let had_feed = self.asset_feeds.contains_key(&market_asset);
         let meta = self.ensure_asset_feed(Arc::clone(&market_asset)).await?;
-        let (price_tx, price_rx) = unbounded_channel::<PriceAsset>();
+        let (price_tx, price_rx) = channel::<PriceAsset>(MARKET_PRICE_CHANNEL_SIZE);
 
         let market_result = Market::new(
             self.wallet.clone(),
@@ -473,26 +864,32 @@ impl Bot {
         let ws_conns = self.ws_connections.clone();
         let bot_pubkey = self.pubkey.clone();
         let remove_market_tx = self._bot_tx.clone();
+        let task_asset = asset.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             if let Err(e) = market.start().await {
                 if let (Some(conns), Some(pk)) = (&ws_conns, &bot_pubkey) {
-                    broadcast_to_user(conns, pk, UpdateFrontend::CancelMarket(asset.clone())).await;
+                    broadcast_to_user(conns, pk, UpdateFrontend::CancelMarket(task_asset.clone()))
+                        .await;
                     broadcast_to_user(
                         conns,
                         pk,
                         UpdateFrontend::UserError(format!(
                             "Market {} exited with error:\n {:?}",
-                            &asset, e
+                            &task_asset, e
                         )),
                     )
                     .await;
                 }
-                let _ = remove_market_tx
-                    .send(BotEvent::RemoveMarket(asset.clone()))
-                    .await;
+                queue_bot_event(
+                    &remove_market_tx,
+                    BotEvent::RemoveMarket(task_asset.clone()),
+                    "RemoveMarket",
+                )
+                .await;
             }
         });
+        self.market_handles.insert(asset, handle);
 
         Ok(())
     }
@@ -508,59 +905,81 @@ impl Bot {
             return Ok(());
         }
 
-        if let Some(tx) = self.markets.remove(&asset) {
-            let tx = tx.clone();
-            let cmd = MarketCommand::Close;
-            let close = match tx.send(cmd).await {
-                Ok(()) => true,
-                Err(e) => {
-                    log::warn!("Failed to send Close command: {:?}", e);
-                    false
+        if let Some(tx) = self.markets.get(&asset).cloned() {
+            match send_market_command(&asset, &tx, MarketCommand::Close, "Close").await {
+                MarketCommandSendResult::Sent
+                | MarketCommandSendResult::Closed
+                | MarketCommandSendResult::Missing => {
+                    self.markets.remove(&asset);
+                    let total = release_market_margin(&asset, margin_book).await;
+                    self.send_to_frontend(UpdateFrontend::UpdateTotalMargin(total))
+                        .await;
+                    self.clear_market_feed_state(&asset).await;
+                    self.join_market_task(&asset).await;
                 }
-            };
-
-            if close {
-                let mut book = margin_book.lock().await;
-                book.remove(&asset);
-                let _ = book.sync().await;
+                MarketCommandSendResult::TimedOut => {
+                    return Err(Error::Custom(format!(
+                        "timed out closing {asset}: market command queue full"
+                    )));
+                }
             }
         }
-        self.clear_market_feed_state(&asset).await;
 
         Ok(())
     }
-
-    pub async fn pause_all(&self) {
-        for tx in self.markets.values() {
-            let _ = tx.send(MarketCommand::Pause).await;
+    pub async fn pause_all(&self) -> Vec<String> {
+        let mut paused = Vec::new();
+        for (asset, tx) in &self.markets {
+            if send_market_command(asset, tx, MarketCommand::Pause, "Pause").await
+                == MarketCommandSendResult::Sent
+            {
+                paused.push(asset.clone());
+            }
         }
+        paused
     }
 
-    pub async fn resume_all(&self) {
-        for tx in self.markets.values() {
-            let _ = tx.send(MarketCommand::Resume).await;
+    pub async fn resume_all(&self) -> Vec<String> {
+        let mut resumed = Vec::new();
+        for (asset, tx) in &self.markets {
+            if send_market_command(asset, tx, MarketCommand::Resume, "Resume").await
+                == MarketCommandSendResult::Sent
+            {
+                resumed.push(asset.clone());
+            }
         }
+        resumed
     }
 
     pub async fn close_all(&mut self) {
-        for (_asset, tx) in self.markets.drain() {
-            let _ = tx.send(MarketCommand::Close).await;
+        let markets = std::mem::take(&mut self.markets);
+        let mut closed_assets = Vec::new();
+
+        for (asset, tx) in markets {
+            match send_market_command(&asset, &tx, MarketCommand::Close, "Close").await {
+                MarketCommandSendResult::Sent
+                | MarketCommandSendResult::Closed
+                | MarketCommandSendResult::Missing => {
+                    self.clear_market_feed_state(&asset).await;
+                    closed_assets.push(asset);
+                }
+                MarketCommandSendResult::TimedOut => {
+                    self.markets.insert(asset, tx);
+                }
+            }
         }
-        self.market_price_routes.clear();
-        self.market_required_assets.clear();
-        self.asset_consumers.clear();
-        let assets: Vec<_> = self.asset_feeds.keys().cloned().collect();
-        for asset in assets {
-            self.unsubscribe_asset_if_idle(asset).await;
+
+        for asset in closed_assets {
+            self.join_market_task(&asset).await;
         }
     }
 
-    pub async fn send_cmd(&self, asset: String, cmd: MarketCommand) {
+    async fn send_cmd(&self, asset: String, cmd: MarketCommand) -> MarketCommandSendResult {
         if let Some(tx) = self.markets.get(&asset) {
             let tx = tx.clone();
-            if let Err(e) = tx.send(cmd).await {
-                log::warn!("Failed to send Market command: {:?}", e);
-            }
+            send_market_command(&asset, &tx, cmd, "Market").await
+        } else {
+            MarketCommandSendResult::Missing
         }
     }
 
@@ -656,10 +1075,14 @@ impl Bot {
     }
 
     async fn sync_margin_book(&self, margin_book: &Arc<Mutex<MarginBook>>) {
-        let mut book = margin_book.lock().await;
-        match book.sync().await {
-            Ok(_) => {
-                let total = book.total_on_chain - book.used();
+        let result = MarginBook::sync_total_if_stale_shared(
+            margin_book,
+            Duration::from_secs(MARGIN_SYNC_MIN_INTERVAL_SECS),
+        )
+        .await;
+
+        match result {
+            Ok(total) => {
                 self.send_to_frontend(UpdateFrontend::UpdateTotalMargin(total))
                     .await;
             }
@@ -707,11 +1130,47 @@ impl Bot {
     }
 
     async fn handle_user_funding(&mut self, coin: String, usdc: String) {
-        if let Ok(fd) = usdc.parse::<f64>() {
-            let cmd = MarketCommand::UserEvent(ExecEvent::Funding(fd));
-            self.send_cmd(coin, cmd).await;
-        } else {
-            warn!("Failed to parse user funding");
+        match parse_user_funding(&usdc) {
+            Ok(fd) => {
+                let cmd = MarketCommand::UserEvent(ExecEvent::Funding(fd));
+                self.send_cmd(coin, cmd).await;
+            }
+            Err(err) => warn!("{err}"),
+        }
+    }
+
+    async fn shutdown_runtime(
+        &mut self,
+        session: &Session,
+        margin_book: &Arc<Mutex<MarginBook>>,
+        cancel_token: &CancellationToken,
+        margin_book_handle: &mut Option<JoinHandle<()>>,
+        close_markets: bool,
+    ) {
+        if let Some(relay) = &self.user_event_relay {
+            relay.unsubscribe(self.wallet.pubkey);
+        }
+
+        if close_markets {
+            self.close_all().await;
+        }
+        self.join_all_market_tasks().await;
+        self.drop_all_asset_feeds().await;
+
+        {
+            let mut guard = session.lock().await;
+            guard.clear();
+        }
+
+        let mut book = margin_book.lock().await;
+        book.reset();
+        drop(book);
+
+        let _ = info_shutdown_ws_timeout("bot", &mut self.info_client).await;
+        cancel_token.cancel();
+
+        if let Some(handle) = margin_book_handle.take() {
+            let _ = handle.await;
         }
     }
 
@@ -733,14 +1192,16 @@ impl Bot {
         self.rhai_engine = Some(rhai_engine);
         self.strategy_cache = Some(strategy_cache);
 
-        //SAFE
-        let mut update_rv = self.update_rv.take().unwrap();
-        //SAFE
-        let mut price_router_rv = self.price_router_rv.take().unwrap();
+        let Some(mut update_rv) = self.update_rv.take() else {
+            return Err(Error::Custom("bot update receiver missing".to_string()));
+        };
+        let Some(mut price_router_rv) = self.price_router_rv.take() else {
+            return Err(Error::Custom("bot price receiver missing".to_string()));
+        };
 
         let session: Session = Arc::new(Mutex::new(HashMap::default()));
 
-        let (margin_sync_reset_tx, mut margin_sync_reset_rx) = unbounded_channel::<()>();
+        let (margin_sync_reset_tx, mut margin_sync_reset_rx) = channel::<()>(1);
         let user = self.wallet.clone();
         let margin_book = MarginBook::new(user, Some(margin_sync_reset_tx));
         let margin_arc = Arc::new(Mutex::new(margin_book));
@@ -753,9 +1214,11 @@ impl Bot {
         let margin_tx = self._bot_tx.clone();
         let margin_ws = ws_connections.clone();
         let margin_pk = pubkey.clone();
+        let margin_timer_book = Arc::clone(&margin_arc);
+        let margin_fallback_delay = margin_sync_fallback_delay(&pubkey);
         let margin_book_handle = tokio::spawn(async move {
             loop {
-                let timer = sleep(Duration::from_secs(30));
+                let timer = sleep(margin_fallback_delay);
                 tokio::pin!(timer);
 
                 tokio::select! {
@@ -771,22 +1234,33 @@ impl Bot {
                             let conns = margin_ws.read().await;
                             conns.get(&margin_pk).is_some_and(|v| !v.is_empty())
                         };
-                        if has_conn {
-                            let _ = margin_tx.send(BotEvent::SyncMargin).await;
+                        let has_margin_allocations = {
+                            let book = margin_timer_book.lock().await;
+                            !book.is_empty()
+                        };
+                        if has_conn && has_margin_allocations {
+                            queue_bot_event(&margin_tx, BotEvent::SyncMargin, "SyncMargin").await;
                         }
                     }
                 }
             }
         });
+        let mut margin_book_handle = Some(margin_book_handle);
 
         // MarketUpdate relay task — broadcasts to user via WsConnections
         let session_upd = session.clone();
         let upd_ws = ws_connections.clone();
         let upd_pk = pubkey.clone();
-        let upd_pool = self.pool.clone();
         let upd_bot_tx = self._bot_tx.clone();
+        let trade_persist_tx = self.pool.clone().map(|pool| {
+            let (tx, rx) = channel::<TradePersistence>(TRADE_PERSIST_QUEUE_SIZE);
+            spawn_trade_persistence_worker(pool, pubkey.clone(), rx);
+            tx
+        });
 
         tokio::spawn(async move {
+            let mut trade_persist_queue_full = false;
+            let mut trade_persist_dropped = 0_u64;
             while let Some(market_update) = update_rv.recv().await {
                 match market_update {
                     M::InitMarket(info) => {
@@ -801,10 +1275,11 @@ impl Bot {
                     M::MarginUpdate(asset_margin) => {
                         let (asset, margin) = asset_margin.clone();
 
-                        let result = {
-                            let mut book = margin_market_edit.lock().await;
-                            book.update_asset(asset_margin.clone()).await
-                        };
+                        let result = MarginBook::update_asset_shared(
+                            &margin_market_edit,
+                            asset_margin.clone(),
+                        )
+                        .await;
 
                         match result {
                             Ok(_) => {
@@ -828,6 +1303,7 @@ impl Bot {
                     }
 
                     M::MarketInfoUpdate((asset, edit)) => {
+                        let mut trade_to_persist = None;
                         let edit = {
                             let mut guard = session_upd.lock().await;
                             if let Some(s) = guard.get_mut(&asset) {
@@ -852,37 +1328,7 @@ impl Bot {
                                         trade.strategy = Some(s.strategy_name.clone());
                                         s.pnl += trade.pnl;
                                         s.trades.push_back(trade.clone());
-
-                                        // Persist to DB
-                                        if let Some(ref pool) = upd_pool {
-                                            let side_str = format!("{:?}", trade.side);
-                                            let open_type = format!("{:?}", trade.open.fill_type);
-                                            let close_type = format!("{:?}", trade.close.fill_type);
-                                            if let Err(e) = sqlx::query(
-                                                "INSERT INTO trades (pubkey, market, side, size, pnl, total_pnl, fees, funding, open_time, open_price, open_type, close_time, close_price, close_type, strategy) \
-                                                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"
-                                            )
-                                                .bind(&upd_pk)
-                                                .bind(&asset)
-                                                .bind(&side_str)
-                                                .bind(trade.size)
-                                                .bind(trade.pnl)
-                                                .bind(trade.total_pnl)
-                                                .bind(trade.fees)
-                                                .bind(trade.funding)
-                                                .bind(trade.open.time as i64)
-                                                .bind(trade.open.price)
-                                                .bind(&open_type)
-                                                .bind(trade.close.time as i64)
-                                                .bind(trade.close.price)
-                                                .bind(&close_type)
-                                                .bind(&trade.strategy)
-                                                .execute(pool)
-                                                .await
-                                            {
-                                                log::warn!("Failed to persist trade for {}: {:?}", asset, e);
-                                            }
-                                        }
+                                        trade_to_persist = Some((asset.clone(), trade.clone()));
 
                                         crate::EditMarketInfo::Trade(trade)
                                     }
@@ -891,6 +1337,16 @@ impl Bot {
                                 edit
                             }
                         };
+                        if let (Some(tx), Some((asset, trade))) =
+                            (trade_persist_tx.as_ref(), trade_to_persist)
+                        {
+                            queue_trade_persistence(
+                                tx,
+                                TradePersistence { asset, trade },
+                                &mut trade_persist_queue_full,
+                                &mut trade_persist_dropped,
+                            );
+                        }
                         broadcast_to_user(&upd_ws, &upd_pk, MarketInfoEdit((asset, edit))).await;
                     }
 
@@ -900,7 +1356,7 @@ impl Bot {
 
                     M::AuthFailed(msg) => {
                         log::error!("[bot] auth failed: {msg} — notifying main loop");
-                        let _ = upd_bot_tx.send(BotEvent::AuthFailed(msg)).await;
+                        queue_bot_event(&upd_bot_tx, BotEvent::AuthFailed(msg), "AuthFailed").await;
                     }
 
                     M::FeedDied(asset) => {
@@ -914,13 +1370,14 @@ impl Bot {
                             )),
                         )
                         .await;
-                        let _ = upd_bot_tx.send(BotEvent::RemoveMarket(asset)).await;
+                        queue_bot_event(&upd_bot_tx, BotEvent::RemoveMarket(asset), "RemoveMarket")
+                            .await;
                     }
                 }
             }
         });
 
-        let (user_tx, mut user_rv) = unbounded_channel::<UserEventMessage>();
+        let (user_tx, mut user_rv) = channel::<UserEventMessage>(USER_EVENT_QUEUE_SIZE);
         let mut relay_user_events = false;
 
         if let Some(relay) = self.user_event_relay.clone() {
@@ -928,10 +1385,39 @@ impl Bot {
                 Ok(mut quicknode_rx) => {
                     log::info!("Subscribed to shared QuickNode account event relay");
                     let user_tx = user_tx.clone();
+                    let relay_token = cancel_token.clone();
                     tokio::spawn(async move {
-                        while let Some(event) = quicknode_rx.recv().await {
-                            if user_tx.send(UserEventMessage::QuickNode(event)).is_err() {
-                                break;
+                        let mut queue_full = false;
+                        let mut dropped = 0_u64;
+                        loop {
+                            tokio::select! {
+                                _ = relay_token.cancelled() => break,
+                                event = quicknode_rx.recv() => {
+                                    let Some(event) = event else {
+                                        break;
+                                    };
+
+                                    match user_tx.try_send(UserEventMessage::QuickNode(event)) {
+                                        Ok(()) => {
+                                            if queue_full {
+                                                log::info!(
+                                                    "QuickNode account event queue recovered after dropping {dropped} events"
+                                                );
+                                                queue_full = false;
+                                                dropped = 0;
+                                            }
+                                        }
+                                        Err(TrySendError::Full(_)) => {
+                                            metrics::inc_quicknode_account_queue_dropped();
+                                            dropped = dropped.saturating_add(1);
+                                            if !queue_full {
+                                                warn!("QuickNode account event queue full; dropping events");
+                                                queue_full = true;
+                                            }
+                                        }
+                                        Err(TrySendError::Closed(_)) => break,
+                                    }
+                                }
                             }
                         }
                     });
@@ -947,37 +1433,96 @@ impl Bot {
 
         if !relay_user_events {
             let (sdk_tx, mut sdk_rx) = unbounded_channel();
-            let _id = self
-                .info_client
-                .subscribe(
-                    Subscription::UserEvents {
-                        user: self.wallet.pubkey,
-                    },
-                    sdk_tx.clone(),
-                )
-                .await?;
-            let _ledger_id = self
-                .info_client
-                .subscribe(
-                    Subscription::UserNonFundingLedgerUpdates {
-                        user: self.wallet.pubkey,
-                    },
-                    sdk_tx.clone(),
-                )
-                .await?;
+            let sdk_token = cancel_token.clone();
+            let _id = info_subscribe_timeout(
+                "SDK user events",
+                &mut self.info_client,
+                Subscription::UserEvents {
+                    user: self.wallet.pubkey,
+                },
+                sdk_tx.clone(),
+            )
+            .await?;
+            let _ledger_id = info_subscribe_timeout(
+                "SDK non-funding ledger updates",
+                &mut self.info_client,
+                Subscription::UserNonFundingLedgerUpdates {
+                    user: self.wallet.pubkey,
+                },
+                sdk_tx.clone(),
+            )
+            .await?;
 
             tokio::spawn(async move {
-                while let Some(msg) = sdk_rx.recv().await {
-                    if user_tx.send(UserEventMessage::Sdk(msg)).is_err() {
-                        break;
+                let mut queue_full = false;
+                let mut dropped = 0_u64;
+                loop {
+                    tokio::select! {
+                        _ = sdk_token.cancelled() => break,
+                        msg = sdk_rx.recv() => {
+                            let Some(msg) = msg else {
+                                break;
+                            };
+
+                            match user_tx.try_send(UserEventMessage::Sdk(msg)) {
+                                Ok(()) => {
+                                    if queue_full {
+                                        log::info!(
+                                            "SDK user-event queue recovered after dropping {dropped} events"
+                                        );
+                                        queue_full = false;
+                                        dropped = 0;
+                                    }
+                                }
+                                Err(TrySendError::Full(_)) => {
+                                    metrics::inc_sdk_account_queue_dropped();
+                                    dropped = dropped.saturating_add(1);
+                                    if !queue_full {
+                                        warn!(
+                                            "SDK user-event queue full; dropping fallback account events"
+                                        );
+                                        queue_full = true;
+                                    }
+                                }
+                                Err(TrySendError::Closed(_)) => break,
+                            }
+                        }
                     }
                 }
             });
         }
 
+        let mut empty_market_idle_since = self.markets.is_empty().then(Instant::now);
+        let mut empty_market_idle_check =
+            tokio::time::interval(Duration::from_secs(EMPTY_MARKET_IDLE_CHECK_SECS));
+        empty_market_idle_check.tick().await;
+
         loop {
             tokio::select!(
                 biased;
+
+                _ = empty_market_idle_check.tick() => {
+                    if empty_market_idle_expired(
+                        self.markets.is_empty(),
+                        &mut empty_market_idle_since,
+                        Instant::now(),
+                        Duration::from_secs(EMPTY_MARKET_IDLE_TIMEOUT_SECS),
+                    ) {
+                        log::info!(
+                            "Bot for user {pubkey} has tracked no markets for {} seconds; shutting down",
+                            EMPTY_MARKET_IDLE_TIMEOUT_SECS
+                        );
+                        self.shutdown_runtime(
+                            &session,
+                            &margin_user_edit,
+                            &cancel_token,
+                            &mut margin_book_handle,
+                            false,
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                },
 
                 Some(msg) = user_rv.recv() => {
                     self.handle_user_event_message(msg, &margin_user_edit).await;
@@ -1005,18 +1550,25 @@ impl Bot {
                     match event {
                         AddMarket(add_market_info) => {
                             let asset = add_market_info.asset.clone();
-                            if let Err(e) = self.add_market(add_market_info, &margin_user_edit).await {
-                                self.send_to_frontend(UserError(format!("FAILED TO ADD MARKET: {}", e))).await;
-                                self.send_to_frontend(CancelMarket(asset)).await;
+                            match self.add_market(add_market_info, &margin_user_edit).await {
+                                Ok(()) => {
+                                    refresh_empty_market_idle(
+                                        self.markets.is_empty(),
+                                        &mut empty_market_idle_since,
+                                        Instant::now(),
+                                    );
+                                }
+                                Err(e) => {
+                                    self.send_to_frontend(UserError(format!("FAILED TO ADD MARKET: {}", e))).await;
+                                    self.send_to_frontend(CancelMarket(asset)).await;
+                                }
                             }
                         }
 
                         ResumeMarket(asset) => {
-                            let mut book = margin_user_edit.lock().await;
-                            match book.sync().await {
+                            match MarginBook::sync_shared(&margin_user_edit).await {
                                 Ok(positions) => {
                                     if positions.iter().any(|p| p.position.coin == asset) {
-                                        drop(book);
                                         self.send_to_frontend(UserError(format!(
                                             "Cannot resume {}: close the on-chain position first",
                                             &asset
@@ -1025,15 +1577,29 @@ impl Bot {
                                     }
                                 }
                                 Err(e) => {
-                                    drop(book);
                                     self.send_to_frontend(UserError(format!(
                                         "Failed to check on-chain positions: {}", e
                                     ))).await;
                                     continue;
                                 }
                             }
-                            drop(book);
-                            self.send_cmd(asset.clone(), MarketCommand::Resume).await;
+                            match self.send_cmd(asset.clone(), MarketCommand::Resume).await {
+                                MarketCommandSendResult::Sent => {}
+                                MarketCommandSendResult::TimedOut => {
+                                    self.send_to_frontend(UserError(format!(
+                                        "Resume failed: {} market command queue is full",
+                                        &asset
+                                    ))).await;
+                                    continue;
+                                }
+                                MarketCommandSendResult::Closed | MarketCommandSendResult::Missing => {
+                                    self.send_to_frontend(UserError(format!(
+                                        "Resume failed: {} market is not available",
+                                        &asset
+                                    ))).await;
+                                    continue;
+                                }
+                            }
                             let mut guard = session.lock().await;
                             if let Some(s) = guard.get_mut(&asset) {
                                 s.is_paused = false;
@@ -1045,7 +1611,23 @@ impl Bot {
                         }
 
                         PauseMarket(asset) => {
-                            self.send_cmd(asset.clone(), MarketCommand::Pause).await;
+                            match self.send_cmd(asset.clone(), MarketCommand::Pause).await {
+                                MarketCommandSendResult::Sent => {}
+                                MarketCommandSendResult::TimedOut => {
+                                    self.send_to_frontend(UserError(format!(
+                                        "Pause failed: {} market command queue is full",
+                                        &asset
+                                    ))).await;
+                                    continue;
+                                }
+                                MarketCommandSendResult::Closed | MarketCommandSendResult::Missing => {
+                                    self.send_to_frontend(UserError(format!(
+                                        "Pause failed: {} market is not available",
+                                        &asset
+                                    ))).await;
+                                    continue;
+                                }
+                            }
                             let mut guard = session.lock().await;
                             if let Some(s) = guard.get_mut(&asset) {
                                 s.is_paused = true;
@@ -1057,9 +1639,23 @@ impl Bot {
                         }
 
                         RemoveMarket(asset) => {
-                            let _ = self.remove_market(asset.as_str(), &margin_user_edit).await;
-                            let mut guard = session.lock().await;
-                            let _ = guard.remove(&asset);
+                            match self.remove_market(asset.as_str(), &margin_user_edit).await {
+                                Ok(()) => {
+                                    let mut guard = session.lock().await;
+                                    let _ = guard.remove(&asset);
+                                    refresh_empty_market_idle(
+                                        self.markets.is_empty(),
+                                        &mut empty_market_idle_since,
+                                        Instant::now(),
+                                    );
+                                }
+                                Err(e) => {
+                                    self.send_to_frontend(UserError(format!(
+                                        "Failed to remove {} market: {}",
+                                        asset, e
+                                    ))).await;
+                                }
+                            }
                         }
 
                         SyncMarketFeeds(payload) => {
@@ -1091,9 +1687,23 @@ impl Bot {
                             }
 
                             for market in affected_markets {
-                                let _ = self.remove_market(market.as_str(), &margin_user_edit).await;
-                                let mut guard = session.lock().await;
-                                let _ = guard.remove(&market);
+                                match self.remove_market(market.as_str(), &margin_user_edit).await {
+                                    Ok(()) => {
+                                        let mut guard = session.lock().await;
+                                        let _ = guard.remove(&market);
+                                        refresh_empty_market_idle(
+                                            self.markets.is_empty(),
+                                            &mut empty_market_idle_since,
+                                            Instant::now(),
+                                        );
+                                    }
+                                    Err(e) => {
+                                        self.send_to_frontend(UserError(format!(
+                                            "Failed to remove {} after feed loss: {}",
+                                            market, e
+                                        ))).await;
+                                    }
+                                }
                             }
                         }
 
@@ -1103,11 +1713,14 @@ impl Bot {
                                 if let Some(s) = guard.get_mut(&command.asset) {
                                     s.strategy_name = name.clone();
                                 }
-                            }else if let MarketCommand::UpdateLeverage(_lev) = command.cmd{
-                                let mut guard = session.lock().await;
-                                if let Some(s) = guard.get_mut(&command.asset)
-                                    && s.position.is_some()
-                                {
+                            } else if let MarketCommand::UpdateLeverage(_lev) = command.cmd {
+                                let has_position = {
+                                    let guard = session.lock().await;
+                                    guard
+                                        .get(&command.asset)
+                                        .is_some_and(|s| s.position.is_some())
+                                };
+                                if has_position {
                                     self.send_to_frontend(
                                         UserError(format!(
                                             "Leverage update failed: {} market has open order(s)", &command.asset)
@@ -1148,27 +1761,54 @@ impl Bot {
                                             continue;
                                         }
                                     };
-                                    let row = match sqlx::query_as::<_, crate::backend::db::StrategyRow>(
-                                        "SELECT * FROM strategies WHERE id = $1",
+                                    let row = match timeout(
+                                        Duration::from_secs(BOT_DB_QUERY_TIMEOUT_SECS),
+                                        sqlx::query_as::<_, crate::backend::db::StrategyRow>(
+                                            "SELECT * FROM strategies WHERE id = $1",
+                                        )
+                                        .bind(sid)
+                                        .fetch_optional(pool),
                                     )
-                                    .bind(sid)
-                                    .fetch_optional(pool)
                                     .await
                                     {
-                                        Ok(Some(r)) => r,
-                                        Ok(None) => {
-                                            self.send_to_frontend(UserError(format!("Strategy {} not found", sid))).await;
+                                        Ok(Ok(Some(r))) => r,
+                                        Ok(Ok(None)) => {
+                                            self.send_to_frontend(UserError(format!(
+                                                "Strategy {} not found",
+                                                sid
+                                            )))
+                                            .await;
                                             continue;
                                         }
-                                        Err(e) => {
-                                            self.send_to_frontend(UserError(format!("DB error: {e}"))).await;
+                                        Ok(Err(e)) => {
+                                            self.send_to_frontend(UserError(format!("DB error: {e}")))
+                                                .await;
+                                            continue;
+                                        }
+                                        Err(_) => {
+                                            self.send_to_frontend(UserError(format!(
+                                                "Timed out fetching strategy {}",
+                                                sid
+                                            )))
+                                            .await;
                                             continue;
                                         }
                                     };
-                                    let state_decls: Option<crate::backend::scripting::StateDeclarations> = row
-                                        .state_declarations
-                                        .as_ref()
-                                        .and_then(|v| serde_json::from_value(v.clone()).ok());
+                                    let state_decls: Option<crate::backend::scripting::StateDeclarations> =
+                                        match row
+                                            .state_declarations
+                                            .as_ref()
+                                            .map(|v| serde_json::from_value(v.clone()))
+                                        {
+                                            Some(Ok(decls)) => Some(decls),
+                                            Some(Err(e)) => {
+                                                self.send_to_frontend(UserError(format!(
+                                                    "Strategy has invalid state declarations: {e}"
+                                                ))).await;
+                                                continue;
+                                            }
+                                            None => None,
+                                        };
                                     let compiled = match crate::backend::scripting::compile_strategy(
                                         &rhai_engine, &row.on_idle, &row.on_open, &row.on_busy, state_decls.as_ref(),
                                     ) {
@@ -1179,7 +1819,15 @@ impl Bot {
                                         }
                                     };
                                     let indicators: Vec<crate::IndexId> =
-                                        serde_json::from_value(row.indicators).unwrap_or_default();
+                                        match serde_json::from_value(row.indicators) {
+                                            Ok(indicators) => indicators,
+                                            Err(e) => {
+                                                self.send_to_frontend(UserError(format!(
+                                                    "Strategy has invalid indicators: {e}"
+                                                ))).await;
+                                                continue;
+                                            }
+                                        };
                                     {
                                         let mut guard = cache.write().await;
                                         guard.insert(sid, crate::backend::app_state::CachedStrategy {
@@ -1212,23 +1860,38 @@ impl Bot {
                         ManualUpdateMargin(asset_margin) => {
                             let asset = asset_margin.0.clone();
 
-                            let mut guard = session.lock().await;
-                            if let Some(s) = guard.get_mut(&asset) {
-                                if matches!(s.engine_state, EngineView::Open | EngineView::Opening | EngineView::Closing){
+                            let margin_update_blocked = {
+                                let guard = session.lock().await;
+                                guard.get(&asset).map(|s| {
+                                    matches!(
+                                        s.engine_state,
+                                        EngineView::Open
+                                            | EngineView::Opening
+                                            | EngineView::Closing
+                                    )
+                                })
+                            };
+
+                            match margin_update_blocked {
+                                Some(true) => {
                                     self.send_to_frontend(
                                         UserError(format!(
                                             "Margin update failed: {} market has open order(s)", &asset)
                                             )).await;
                                     continue;
                                 }
-                            let result = {
-                                let mut book = margin_user_edit.lock().await;
-                                book.update_asset(asset_margin.clone()).await
-                            };
+                                Some(false) => {}
+                                None => continue,
+                            }
+
+                            let result =
+                                MarginBook::update_asset_shared(&margin_user_edit, asset_margin.clone())
+                                    .await;
 
                             match result {
                                 Ok(new_margin) => {
                                     {
+                                        let mut guard = session.lock().await;
                                         if let Some(s) = guard.get_mut(&asset) {
                                             s.margin = new_margin;
                                         }
@@ -1242,11 +1905,6 @@ impl Bot {
                                     self.send_to_frontend(UserError(e.to_string())).await;
                                 }
                             }
-
-
-                            }
-
-
                         }
 
                         SyncMargin => {
@@ -1255,13 +1913,32 @@ impl Bot {
 
                         ReloadWallet(new_signer) => {
                             log::info!("[bot] reloading wallet for all {} markets", self.markets.len());
-                            self.wallet = Arc::new(
-                                Wallet::new(BaseUrl::Mainnet, self.wallet.pubkey, new_signer.clone()).await
-                                    .expect("Wallet::new failed during hot-reload"),
-                            );
+                            let wallet = match Wallet::new(BaseUrl::Mainnet, self.wallet.pubkey, new_signer.clone()).await {
+                                Ok(wallet) => wallet,
+                                Err(e) => {
+                                    log::error!("[bot] failed to reload wallet: {e}");
+                                    self.key_valid = false;
+                                    self.send_to_frontend(NeedsApiKey(true)).await;
+                                    self.send_to_frontend(UserError(format!(
+                                        "API key reload failed: {e}. Please re-authorize in Settings.",
+                                    ))).await;
+                                    continue;
+                                }
+                            };
+                            self.wallet = Arc::new(wallet);
                             for (asset, tx) in &self.markets {
-                                if let Err(e) = tx.send(MarketCommand::ReloadWallet(new_signer.clone())).await {
-                                    log::error!("[bot] failed to reload wallet for market {asset}: {e}");
+                                if send_market_command(
+                                    asset,
+                                    tx,
+                                    MarketCommand::ReloadWallet(new_signer.clone()),
+                                    "ReloadWallet",
+                                )
+                                .await
+                                    == MarketCommandSendResult::TimedOut
+                                {
+                                    log::error!(
+                                        "[bot] timed out reloading wallet for market {asset}"
+                                    );
                                 }
                             }
                             self.key_valid = true;
@@ -1277,43 +1954,66 @@ impl Bot {
                                 "API key rejected: {msg}. Please re-authorize in Settings.",
                             ))).await;
                             // Pause all markets
-                            for tx in self.markets.values() {
-                                let _ = tx.send(MarketCommand::Pause).await;
+                            for (asset, tx) in &self.markets {
+                                let _ = send_market_command(
+                                    asset,
+                                    tx,
+                                    MarketCommand::Pause,
+                                    "Pause",
+                                )
+                                .await;
                             }
                         }
 
                         ResumeAll => {
-                            let mut book = margin_user_edit.lock().await;
-                            let blocked: Vec<String> = match book.sync().await {
+                            let blocked: Vec<String> = match MarginBook::sync_shared(&margin_user_edit).await {
                                 Ok(positions) => positions
                                     .iter()
                                     .filter(|p| self.markets.contains_key(&p.position.coin))
                                     .map(|p| p.position.coin.clone())
                                     .collect(),
                                 Err(e) => {
-                                    drop(book);
                                     self.send_to_frontend(UserError(format!(
                                         "Failed to check on-chain positions: {}", e
                                     ))).await;
                                     continue;
                                 }
                             };
-                            drop(book);
 
+                            let blocked_set: HashSet<_> = blocked.iter().cloned().collect();
+                            let mut resumed: Vec<String> = Vec::new();
+                            let mut timed_out: Vec<String> = Vec::new();
                             for (asset, tx) in self.markets.iter() {
-                                if !blocked.contains(asset) {
-                                    let _ = tx.send(MarketCommand::Resume).await;
+                                if !blocked_set.contains(asset) {
+                                    match send_market_command(
+                                        asset,
+                                        tx,
+                                        MarketCommand::Resume,
+                                        "Resume",
+                                    )
+                                    .await
+                                    {
+                                        MarketCommandSendResult::Sent => {
+                                            resumed.push(asset.clone());
+                                        }
+                                        MarketCommandSendResult::TimedOut => {
+                                            timed_out.push(asset.clone());
+                                        }
+                                        MarketCommandSendResult::Closed
+                                        | MarketCommandSendResult::Missing => {}
+                                    }
                                 }
                             }
 
-                            let mut resumed: Vec<String> = Vec::new();
+                            let resumed_set: HashSet<_> = resumed.iter().cloned().collect();
                             let mut guard = session.lock().await;
                             for (asset, s) in guard.iter_mut() {
-                                if blocked.contains(asset) {
+                                if blocked_set.contains(asset) {
                                     continue;
                                 }
-                                s.is_paused = false;
-                                resumed.push(asset.clone());
+                                if resumed_set.contains(asset) {
+                                    s.is_paused = false;
+                                }
                             }
                             drop(guard);
 
@@ -1329,19 +2029,28 @@ impl Bot {
                                     blocked.join(", ")
                                 ))).await;
                             }
+
+                            if !timed_out.is_empty() {
+                                self.send_to_frontend(UserError(format!(
+                                    "Resume timed out for {}: market command queue is full",
+                                    timed_out.join(", ")
+                                ))).await;
+                            }
                         }
 
                         PauseAll => {
-                            self.pause_all().await;
-                            let assets: Vec<String> = self.markets.keys().cloned().collect();
+                            let paused = self.pause_all().await;
+                            let paused_set: HashSet<_> = paused.iter().cloned().collect();
                             let mut guard = session.lock().await;
-                            for (_asset, s) in guard.iter_mut() {
-                                s.is_paused = true;
+                            for (asset, s) in guard.iter_mut() {
+                                if paused_set.contains(asset) {
+                                    s.is_paused = true;
+                                }
                             }
                             drop(guard);
-                            for asset in assets {
+                            for asset in &paused {
                                 broadcast_to_user(&ws_connections, &pubkey, MarketInfoEdit((
-                                    asset, crate::EditMarketInfo::Paused(true),
+                                    asset.clone(), crate::EditMarketInfo::Paused(true),
                                 ))).await;
                             }
                         }
@@ -1354,11 +2063,18 @@ impl Bot {
                             }
                             let mut book = margin_user_edit.lock().await;
                             book.reset();
+                            refresh_empty_market_idle(
+                                self.markets.is_empty(),
+                                &mut empty_market_idle_since,
+                                Instant::now(),
+                            );
                         }
 
                         GetSession => {
-                            let guard = session.lock().await;
-                            let sess: Vec<MarketInfo> = guard.values().map(MarketInfo::from).collect();
+                            let sess: Vec<MarketInfo> = {
+                                let guard = session.lock().await;
+                                guard.values().map(MarketInfo::from).collect()
+                            };
 
                             let universe: Vec<AssetMeta> = match get_all_assets(&self.info_client).await {
                                 Ok(u) => u,
@@ -1372,19 +2088,14 @@ impl Bot {
                         }
 
                         Kill => {
-                            if let Some(relay) = &self.user_event_relay {
-                                relay.unsubscribe(self.wallet.pubkey);
-                            }
-                            self.close_all().await;
-                            {
-                                let mut guard = session.lock().await;
-                                guard.clear();
-                            }
-                            let mut book = margin_user_edit.lock().await;
-                            book.reset();
-                            let _ = self.info_client.shutdown_ws().await;
-                            cancel_token.cancel();
-                            let _ = margin_book_handle.await;
+                            self.shutdown_runtime(
+                                &session,
+                                &margin_user_edit,
+                                &cancel_token,
+                                &mut margin_book_handle,
+                                true,
+                            )
+                            .await;
                             return Ok(());
                         }
                     }
@@ -1462,4 +2173,123 @@ pub struct UpdateStrategyPayload {
 pub struct BotToMarket {
     pub asset: String,
     pub cmd: MarketCommand,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn market_command_send_queues_when_capacity_available() {
+        let (tx, mut rx) = channel(1);
+
+        let result = send_market_command_with_timeout(
+            "BTC",
+            &tx,
+            MarketCommand::Close,
+            "Close",
+            Duration::from_millis(1),
+        )
+        .await;
+
+        assert_eq!(result, MarketCommandSendResult::Sent);
+        assert!(matches!(rx.recv().await, Some(MarketCommand::Close)));
+    }
+
+    #[tokio::test]
+    async fn market_command_send_times_out_when_queue_stays_full() {
+        let (tx, mut rx) = channel(1);
+        tx.try_send(MarketCommand::Pause)
+            .expect("first command should fit");
+
+        let result = send_market_command_with_timeout(
+            "BTC",
+            &tx,
+            MarketCommand::Resume,
+            "Resume",
+            Duration::from_millis(1),
+        )
+        .await;
+
+        assert_eq!(result, MarketCommandSendResult::TimedOut);
+        assert!(matches!(rx.recv().await, Some(MarketCommand::Pause)));
+    }
+
+    #[tokio::test]
+    async fn market_command_send_reports_closed_channel() {
+        let (tx, rx) = channel(1);
+        drop(rx);
+
+        let result = send_market_command_with_timeout(
+            "BTC",
+            &tx,
+            MarketCommand::Close,
+            "Close",
+            Duration::from_millis(1),
+        )
+        .await;
+
+        assert_eq!(result, MarketCommandSendResult::Closed);
+    }
+
+    #[test]
+    fn margin_sync_fallback_delay_is_bounded_and_stable() {
+        let first = margin_sync_fallback_delay("user-a");
+        let second = margin_sync_fallback_delay("user-a");
+        let other = margin_sync_fallback_delay("user-b");
+
+        assert_eq!(first, second);
+        assert!(first >= Duration::from_secs(MARGIN_SYNC_FALLBACK_SECS));
+        assert!(
+            first < Duration::from_secs(MARGIN_SYNC_FALLBACK_SECS + MARGIN_SYNC_STAGGER_MAX_SECS)
+        );
+        assert_ne!(first, other);
+    }
+
+    #[test]
+    fn empty_market_idle_tracks_zero_market_duration() {
+        let start = Instant::now();
+        let timeout = Duration::from_secs(60);
+        let mut idle_since = None;
+
+        assert!(!empty_market_idle_expired(
+            true,
+            &mut idle_since,
+            start,
+            timeout
+        ));
+        assert_eq!(idle_since, Some(start));
+
+        assert!(!empty_market_idle_expired(
+            false,
+            &mut idle_since,
+            start + Duration::from_secs(30),
+            timeout
+        ));
+        assert_eq!(idle_since, None);
+
+        let empty_again = start + Duration::from_secs(40);
+        assert!(!empty_market_idle_expired(
+            true,
+            &mut idle_since,
+            empty_again,
+            timeout
+        ));
+        assert_eq!(idle_since, Some(empty_again));
+
+        assert!(empty_market_idle_expired(
+            true,
+            &mut idle_since,
+            empty_again + timeout,
+            timeout
+        ));
+    }
+
+    #[test]
+    fn parse_user_funding_rejects_non_finite_values() {
+        assert_eq!(parse_user_funding("1.25").unwrap(), 1.25);
+        assert!(parse_user_funding("NaN").is_err());
+        assert!(parse_user_funding("inf").is_err());
+        assert!(parse_user_funding("-inf").is_err());
+    }
 }
