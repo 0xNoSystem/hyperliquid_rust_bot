@@ -431,7 +431,12 @@ impl Market {
 
         match response {
             ExchangeResponseStatus::Ok(_) => Ok(lev),
-            ExchangeResponseStatus::Err(e) => Err(Error::Custom(e)),
+            ExchangeResponseStatus::Err(e) => {
+                if e.to_lowercase().contains("user or api wallet") {
+                    return Err(Error::AuthError(e));
+                }
+                Err(Error::Custom(e))
+            }
         }
     }
 

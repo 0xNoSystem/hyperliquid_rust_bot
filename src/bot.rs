@@ -871,6 +871,7 @@ impl Bot {
                 if let (Some(conns), Some(pk)) = (&ws_conns, &bot_pubkey) {
                     broadcast_to_user(conns, pk, UpdateFrontend::CancelMarket(task_asset.clone()))
                         .await;
+
                     broadcast_to_user(
                         conns,
                         pk,
@@ -881,12 +882,18 @@ impl Bot {
                     )
                     .await;
                 }
+
                 queue_bot_event(
                     &remove_market_tx,
                     BotEvent::RemoveMarket(task_asset.clone()),
                     "RemoveMarket",
                 )
                 .await;
+
+                if let Error::AuthError(s) = e {
+                    queue_bot_event(&remove_market_tx, BotEvent::AuthFailed(s), "RemoveMarket")
+                        .await;
+                }
             }
         });
         self.market_handles.insert(asset, handle);
@@ -1954,15 +1961,21 @@ impl Bot {
                                 "API key rejected: {msg}. Please re-authorize in Settings.",
                             ))).await;
                             // Pause all markets
-                            for (asset, tx) in &self.markets {
-                                let _ = send_market_command(
-                                    asset,
-                                    tx,
-                                    MarketCommand::Pause,
-                                    "Pause",
-                                )
-                                .await;
+                            let paused = self.pause_all().await;
+                            let paused_set: HashSet<_> = paused.iter().cloned().collect();
+                            let mut guard = session.lock().await;
+                            for (asset, s) in guard.iter_mut() {
+                                if paused_set.contains(asset) {
+                                    s.is_paused = true;
+                                }
                             }
+                            drop(guard);
+                            for asset in &paused {
+                                broadcast_to_user(&ws_connections, &pubkey, MarketInfoEdit((
+                                    asset.clone(), crate::EditMarketInfo::Paused(true),
+                                ))).await;
+                            }
+
                         }
 
                         ResumeAll => {
