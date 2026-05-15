@@ -232,33 +232,66 @@ Scripts return an intent to tell the engine what to do. Return nothing (no expli
 ### Opening Positions
 
 ```rust
-// Market orders
-open_market(LONG, margin_pct(50.0))
-open_market(SHORT, margin_amount(100.0))
-open_market(LONG, margin_pct(100.0), triggers(5.0, 3.0))
-
-// Limit orders
-open_limit(LONG, margin_pct(50.0), 42000.0)
-open_limit(SHORT, raw_size(0.5), 42000.0, triggers(5.0, 3.0))
-open_limit(LONG, margin_pct(50.0), 42000.0, timeout(FORCE, timedelta(MIN15, 2)))
-open_limit(LONG, margin_pct(50.0), 42000.0, timeout(CANCEL, timedelta(HOUR1, 1)), triggers(5.0, 3.0))
+open_market(LONG, margin_pct(50.0), triggers(3.0, 2.0))
+open_limit(
+    LONG,
+    margin_pct(40.0),
+    last_price.close,
+    timeout(CANCEL, timedelta(MIN15, 2)),
+    triggers(3.0, 2.0),
+)
 ```
+
+`open_market` forms:
+
+- `open_market(side, size)`
+- `open_market(side, size, tp_sl)`
+
+`open_limit` forms:
+
+- `open_limit(side, size, price)`
+- `open_limit(side, size, price, tp_sl)`
+- `open_limit(side, size, price, timeout)`
+- `open_limit(side, size, price, timeout, tp_sl)`
+
+Parameter meaning:
+
+- `side`: `LONG` or `SHORT`
+- `size`: `margin_pct(x)`, `margin_amount(usdc)`, or `raw_size(units)`
+- `price`: limit price in quote units (for example USDC)
+- `timeout`: `timeout(FORCE|CANCEL, timedelta(TF, count))`
+- `tp_sl`: `triggers(tp_pct, sl_pct)`, `tp_only(tp_pct)`, or `sl_only(sl_pct)`
 
 ### Closing Positions
 
 ```rust
-// Close entire position at market
 flatten_market()
-
-// Close entire position with a limit order
-flatten_limit(43000.0)
-flatten_limit(43000.0, timeout(FORCE, timedelta(MIN5, 3)))
-
-// Partial close
 reduce_market(margin_pct(50.0))
-reduce_limit(margin_pct(50.0), 43000.0)
-reduce_limit(raw_size(0.1), 43000.0, timeout(CANCEL, timedelta(MIN15, 1)))
+flatten_limit(last_price.close, timeout(FORCE, timedelta(MIN5, 3)))
+reduce_limit(
+    margin_pct(50.0),
+    last_price.close,
+    timeout(CANCEL, timedelta(MIN15, 1)),
+)
 ```
+
+`flatten` forms:
+
+- `flatten_market()`
+- `flatten_limit(price)`
+- `flatten_limit(price, timeout)`
+
+`reduce` forms:
+
+- `reduce_market(size)`
+- `reduce_limit(size, price)`
+- `reduce_limit(size, price, timeout)`
+
+Parameter meaning:
+
+- `size`: `margin_pct(x)`, `margin_amount(usdc)`, or `raw_size(units)`
+- `price`: limit price in quote units (for example USDC)
+- `timeout`: `timeout(FORCE|CANCEL, timedelta(TF, count))`
 
 ### Other Actions
 

@@ -1,19 +1,20 @@
 import {
     BookOpen,
-    Braces,
+    Boxes,
     Check,
     Clock3,
     Code2,
-    Compass,
     Copy,
     Database,
     Gauge,
-    ImagePlus,
     ListChecks,
-    Route,
+    LockKeyhole,
+    Play,
     ScrollText,
     ShieldCheck,
+    SquareFunction,
     Terminal,
+    XCircle,
 } from "lucide-react";
 import { useState } from "react";
 import type { ComponentType, ReactNode } from "react";
@@ -28,40 +29,40 @@ type Section = {
 
 const sections: Section[] = [
     {
-        id: "overview",
-        title: "Overview",
-        eyebrow: "How scripts run",
-        icon: Compass,
-    },
-    {
-        id: "llm-prompt",
-        title: "LLM Prompt",
-        eyebrow: "Copy before asking",
-        icon: ScrollText,
-    },
-    {
         id: "lifecycle",
         title: "Lifecycle",
-        eyebrow: "Idle, open, busy",
-        icon: Route,
+        eyebrow: "Which method runs",
+        icon: Play,
     },
     {
-        id: "authoring",
-        title: "Authoring Rules",
-        eyebrow: "Strict Rhai",
-        icon: Code2,
+        id: "common-variables",
+        title: "Common Variables",
+        eyebrow: "Available everywhere",
+        icon: Boxes,
     },
     {
-        id: "orders",
-        title: "Orders & TTL",
-        eyebrow: "Intents",
+        id: "on-idle",
+        title: "on_idle",
+        eyebrow: "No position",
         icon: Clock3,
+    },
+    {
+        id: "on-open",
+        title: "on_open",
+        eyebrow: "Position open",
+        icon: LockKeyhole,
+    },
+    {
+        id: "on-busy",
+        title: "on_busy",
+        eyebrow: "Order pending",
+        icon: Gauge,
     },
     {
         id: "indicators",
         title: "Indicators",
-        eyebrow: "Keys and extract",
-        icon: Gauge,
+        eyebrow: "extract()",
+        icon: SquareFunction,
     },
     {
         id: "state",
@@ -70,61 +71,46 @@ const sections: Section[] = [
         icon: Database,
     },
     {
-        id: "objects",
-        title: "Runtime Objects",
-        eyebrow: "Price, position, busy",
-        icon: Braces,
+        id: "open-trades",
+        title: "Open Trades",
+        eyebrow: "Market and limit",
+        icon: Terminal,
+    },
+    {
+        id: "close-positions",
+        title: "Close Positions",
+        eyebrow: "Flatten and reduce",
+        icon: XCircle,
+    },
+    {
+        id: "timeouts-triggers",
+        title: "Timeouts & Triggers",
+        eyebrow: "TP, SL, TTL",
+        icon: ShieldCheck,
     },
     {
         id: "examples",
         title: "Examples",
-        eyebrow: "Patterns",
-        icon: Terminal,
+        eyebrow: "Working patterns",
+        icon: Code2,
     },
     {
         id: "backtesting",
         title: "Backtesting",
-        eyebrow: "Validation",
+        eyebrow: "Validate first",
         icon: ListChecks,
     },
     {
-        id: "screenshots",
-        title: "Screenshot Slots",
-        eyebrow: "Where images help",
-        icon: ImagePlus,
+        id: "llm-prompt",
+        title: "LLM Prompt",
+        eyebrow: "Copy reference",
+        icon: ScrollText,
     },
 ];
 
 const sectionById = Object.fromEntries(
     sections.map((section) => [section.id, section])
 ) as Record<string, Section>;
-
-const indicatorRows = [
-    ["RSI", "{asset}_rsi_{periods}_{tf}", "rsi_value"],
-    ["EMA", "{asset}_ema_{periods}_{tf}", "ema_value"],
-    ["EMA Cross", "{asset}_emaCross_{short}_{long}_{tf}", "ema_short, ema_long, ema_trend"],
-    ["Stochastic RSI", "{asset}_stochRsi_{periods}_{k}_{d}_{tf}", "stoch_k, stoch_d"],
-    ["MACD", "{asset}_macd_{fast}_{slow}_{signal}_{tf}", "macd_macd, macd_signal, macd_histogram"],
-    ["Ichimoku", "{asset}_ichimoku_{tenkan}_{kijun}_{senkou_b}_{tf}", "ichi_tenkan, ichi_kijun, ichi_span_a, ichi_span_b, ichi_chikou"],
-    ["Bollinger Bands", "{asset}_bollinger_{periods}_{std}_{tf}", "bb_upper, bb_mid, bb_lower, bb_width"],
-    ["ATR / ADX / SMA / DEMA / TEMA / ROC / OBV / Volume MA / Hist Vol / VWAP Dev / CCI", "Use the README key table", "{name}_value"],
-];
-
-const timeframeRows = [
-    ["1m", "MIN1"],
-    ["3m", "MIN3"],
-    ["5m", "MIN5"],
-    ["15m", "MIN15"],
-    ["30m", "MIN30"],
-    ["1h", "HOUR1"],
-    ["2h", "HOUR2"],
-    ["4h", "HOUR4"],
-    ["12h", "HOUR12"],
-    ["1d", "DAY1"],
-    ["3d", "indicator key only"],
-    ["1w", "indicator key only"],
-    ["1M", "indicator key only"],
-];
 
 const llmStrategyPrompt = `You are a strategy-generation assistant for KWANT, a Hyperliquid trading terminal where strategies are written as three Rhai scripts: on_idle, on_open, and on_busy.
 
@@ -173,6 +159,31 @@ KWANT STRATEGY API REFERENCE
 
 ${readmeReference}`;
 
+const indicatorRows = [
+    ["Single value", "RSI, EMA, DEMA, TEMA, SMA, ATR, ADX, ROC, OBV, CCI, Volume MA, Historical Volatility, VWAP Deviation, SMA on RSI", "name_value, name_on_close, name_ts"],
+    ["EMA Cross", "{asset}_emaCross_{short}_{long}_{tf}", "name_short, name_long, name_trend, name_on_close, name_ts"],
+    ["Stochastic RSI", "{asset}_stochRsi_{periods}_{k}_{d}_{tf}", "name_k, name_d, name_on_close, name_ts"],
+    ["MACD", "{asset}_macd_{fast}_{slow}_{signal}_{tf}", "name_macd, name_signal, name_histogram, name_on_close, name_ts"],
+    ["Ichimoku", "{asset}_ichimoku_{tenkan}_{kijun}_{senkou_b}_{tf}", "name_tenkan, name_kijun, name_span_a, name_span_b, name_chikou, name_on_close, name_ts"],
+    ["Bollinger Bands", "{asset}_bollinger_{periods}_{std}_{tf}", "name_upper, name_mid, name_lower, name_width, name_on_close, name_ts"],
+];
+
+const timeframeRows = [
+    ["1m", "MIN1"],
+    ["3m", "MIN3"],
+    ["5m", "MIN5"],
+    ["15m", "MIN15"],
+    ["30m", "MIN30"],
+    ["1h", "HOUR1"],
+    ["2h", "HOUR2"],
+    ["4h", "HOUR4"],
+    ["12h", "HOUR12"],
+    ["1d", "DAY1"],
+    ["3d", "indicator key only"],
+    ["1w", "indicator key only"],
+    ["1M", "indicator key only"],
+];
+
 function CodeBlock({ children }: { children: string }) {
     return (
         <pre className="border-line-subtle bg-app-surface-1/80 text-app-text/85 overflow-x-auto rounded-md border p-4 font-mono text-[12px] leading-relaxed">
@@ -211,6 +222,21 @@ function SectionHeader({
     );
 }
 
+function DocsSection({
+    section,
+    children,
+}: {
+    section: Section;
+    children: ReactNode;
+}) {
+    return (
+        <section className="border-line-subtle bg-surface-pane/80 rounded-md border p-5 md:p-6">
+            <SectionHeader {...section} />
+            <div className="space-y-5">{children}</div>
+        </section>
+    );
+}
+
 function InfoGrid({
     items,
 }: {
@@ -240,40 +266,45 @@ function InfoGrid({
     );
 }
 
-function ScreenshotSlot({
-    title,
-    description,
+function DataTable({
+    columns,
+    rows,
 }: {
-    title: string;
-    description: string;
+    columns: string[];
+    rows: string[][];
 }) {
     return (
-        <figure className="border-line-muted bg-app-surface-1/60 rounded-md border border-dashed p-5">
-            <div className="mb-3 flex items-center gap-2">
-                <ImagePlus className="text-accent-brand h-4 w-4" />
-                <figcaption className="text-app-text text-sm font-semibold">
-                    {title}
-                </figcaption>
-            </div>
-            <p className="text-app-text/55 text-sm leading-6">
-                {description}
-            </p>
-        </figure>
-    );
-}
-
-function DocsSection({
-    section,
-    children,
-}: {
-    section: Section;
-    children: ReactNode;
-}) {
-    return (
-        <section className="border-line-subtle bg-surface-pane/80 rounded-md border p-5 md:p-6">
-            <SectionHeader {...section} />
-            <div className="space-y-5">{children}</div>
-        </section>
+        <div className="overflow-hidden rounded-md border border-line-subtle">
+            <table className="w-full text-left text-sm">
+                <thead className="bg-app-surface-2 text-app-text/50">
+                    <tr>
+                        {columns.map((column) => (
+                            <th key={column} className="px-4 py-3 font-medium">
+                                {column}
+                            </th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody className="divide-line-subtle divide-y">
+                    {rows.map((row) => (
+                        <tr key={row.join("|")}>
+                            {row.map((cell, index) => (
+                                <td
+                                    key={`${cell}-${index}`}
+                                    className={
+                                        index === 0
+                                            ? "text-accent-brand-soft px-4 py-3 font-mono text-xs"
+                                            : "text-app-text/65 px-4 py-3 text-sm leading-6"
+                                    }
+                                >
+                                    {cell}
+                                </td>
+                            ))}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
     );
 }
 
@@ -305,7 +336,7 @@ export default function Docs() {
                                     Strategy Docs
                                 </p>
                                 <p className="text-app-text/40 text-xs">
-                                    Rhai authoring guide
+                                    Variables by method
                                 </p>
                             </div>
                         </div>
@@ -331,44 +362,564 @@ export default function Docs() {
                                 Rhai Strategy API
                             </span>
                             <span className="text-app-text/40 text-xs">
-                                Use this alongside the strategy editor in Lab.
+                                The clearest way to read this page: pick the
+                                method you are writing, then use only the
+                                variables listed for it.
                             </span>
                         </div>
                         <h1 className="text-app-text max-w-4xl text-3xl font-semibold leading-tight md:text-4xl">
-                            Write, test, and deploy automated Hyperliquid
-                            strategies.
+                            Strategy scripts are three methods with explicit
+                            variables.
                         </h1>
                         <p className="text-app-text/65 mt-4 max-w-4xl text-sm leading-7 md:text-base">
-                            Strategies are three Rhai scripts compiled with
-                            strict variables, evaluated by the Rust signal
-                            engine, and translated into order intents. This page
-                            turns the README into a practical authoring guide
-                            with lifecycle rules, API references, and screenshot
-                            slots for the UI.
+                            Every strategy has `on_idle`, `on_open`, and
+                            `on_busy`. Each method receives the common runtime
+                            variables, then one method-specific variable. The
+                            script returns an intent such as `open_market`,
+                            `flatten_limit`, `arm`, or nothing.
                         </p>
                     </header>
 
-                    <DocsSection section={sectionById["overview"]}>
+                    <DocsSection section={sectionById["lifecycle"]}>
                         <InfoGrid
                             items={[
                                 {
-                                    title: "Browser",
-                                    body: "The Lab editor saves raw Rhai code, indicator config, and optional state declarations.",
+                                    title: "on_idle",
+                                    body: "Runs when the engine has no open position. It also runs while the strategy is armed.",
+                                    code: "open, arm, disarm",
                                 },
                                 {
-                                    title: "Backend",
-                                    body: "The backend expands macros, compiles strict ASTs, and stores the raw scripts in the database.",
+                                    title: "on_open",
+                                    body: "Runs when the market already has an open position.",
+                                    code: "flatten or reduce",
                                 },
                                 {
-                                    title: "Signal Engine",
-                                    body: "Every relevant candle update refreshes indicators, evaluates one lifecycle script, and emits an optional intent.",
+                                    title: "on_busy",
+                                    body: "Runs while an open or close order is pending. Only abort() is acted on while busy.",
+                                    code: "usually empty",
                                 },
                             ]}
                         />
-                        <CodeBlock>{`Browser editor -> save raw code
-Backend -> expand extract() + state preamble -> compile AST
-SignalEngine -> evaluate on_idle / on_open / on_busy
-Executor -> place, cancel, or force orders on Hyperliquid`}</CodeBlock>
+                        <CodeBlock>{`// Returning an intent tells the engine to act.
+return open_market(LONG, margin_pct(50.0));
+
+// Returning nothing means no trade for this tick.
+return;
+
+// A final expression also works.
+open_market(LONG, margin_pct(50.0))
+
+// A trailing semicolon turns the expression into (), so no intent is returned.
+open_market(LONG, margin_pct(50.0));`}</CodeBlock>
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["common-variables"]}>
+                        <p className="text-app-text/65 text-sm leading-6">
+                            These names exist in all three methods:
+                            `on_idle`, `on_open`, and `on_busy`.
+                        </p>
+                        <DataTable
+                            columns={["Variable", "Type", "What it means"]}
+                            rows={[
+                                [
+                                    "free_margin",
+                                    "f64",
+                                    "Available margin in USDC. Sizing helpers such as margin_pct() use this value.",
+                                ],
+                                [
+                                    "lev",
+                                    "i64",
+                                    "Current leverage multiplier for the market.",
+                                ],
+                                [
+                                    "last_price",
+                                    "Price",
+                                    "The candle that triggered this evaluation tick.",
+                                ],
+                                [
+                                    "indicators",
+                                    "Map",
+                                    "Raw indicator map. Prefer extract() instead of accessing this directly.",
+                                ],
+                                [
+                                    "state variables",
+                                    "declared names",
+                                    "Any variables declared in the State Variables box are available as bare names.",
+                                ],
+                            ]}
+                        />
+                        <DataTable
+                            columns={["last_price field", "Type", "Meaning"]}
+                            rows={[
+                                ["last_price.open", "f64", "Candle open price."],
+                                ["last_price.high", "f64", "Candle high price."],
+                                ["last_price.low", "f64", "Candle low price."],
+                                ["last_price.close", "f64", "Candle close price."],
+                                ["last_price.vlm", "f64", "Candle volume."],
+                                [
+                                    "last_price.open_time",
+                                    "i64",
+                                    "Candle open timestamp in milliseconds.",
+                                ],
+                                [
+                                    "last_price.close_time",
+                                    "i64",
+                                    "Candle close timestamp in milliseconds.",
+                                ],
+                            ]}
+                        />
+                        <div className="border-line-subtle bg-app-surface-2/70 rounded-md border p-4">
+                            <p className="text-app-text/60 text-sm leading-6">
+                                In a cross-asset strategy, `last_price` may be a
+                                candle from a configured confirmation asset, not
+                                the traded market. Use `self_` indicator keys
+                                and timestamp guards when a calculation must be
+                                tied to the traded market.
+                            </p>
+                        </div>
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["on-idle"]}>
+                        <p className="text-app-text/65 text-sm leading-6">
+                            Use `on_idle` to look for entries or to manage the
+                            armed state before an entry.
+                        </p>
+                        <DataTable
+                            columns={["Variable", "Type", "What it means"]}
+                            rows={[
+                                [
+                                    "is_armed",
+                                    "i64",
+                                    "Expiry timestamp in milliseconds while armed. It is -1 when not armed.",
+                                ],
+                            ]}
+                        />
+                        <CodeBlock>{`// on_idle
+let rsi = extract("self_rsi_14_15m");
+
+if !rsi_on_close {
+    return;
+}
+
+if is_armed > 0 && rsi_value < 30.0 {
+    return open_market(LONG, margin_pct(50.0), sl_only(3.0));
+}
+
+if rsi_value < 35.0 {
+    return arm(timedelta(MIN15, 1));
+}`}</CodeBlock>
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["on-open"]}>
+                        <p className="text-app-text/65 text-sm leading-6">
+                            Use `on_open` to manage an existing position. This
+                            is where exits, partial closes, and position-side
+                            checks belong.
+                        </p>
+                        <DataTable
+                            columns={["Variable", "Type", "What it means"]}
+                            rows={[
+                                [
+                                    "open_position",
+                                    "OpenPosInfo",
+                                    "The currently open position for the traded market.",
+                                ],
+                            ]}
+                        />
+                        <DataTable
+                            columns={["open_position field", "Type", "Meaning"]}
+                            rows={[
+                                [
+                                    "open_position.side",
+                                    "Side",
+                                    "LONG or SHORT. Compare directly with the constants.",
+                                ],
+                                [
+                                    "open_position.size",
+                                    "f64",
+                                    "Current position size in asset units.",
+                                ],
+                                [
+                                    "open_position.entry_px",
+                                    "f64",
+                                    "Average entry price.",
+                                ],
+                                [
+                                    "open_position.open_time",
+                                    "i64",
+                                    "Position open timestamp in milliseconds.",
+                                ],
+                            ]}
+                        />
+                        <CodeBlock>{`// on_open
+let rsi = extract("self_rsi_14_15m");
+
+if !rsi_on_close {
+    return;
+}
+
+if open_position.side == LONG && rsi_value > 70.0 {
+    return flatten_market();
+}
+
+if open_position.side == SHORT && rsi_value < 30.0 {
+    return flatten_market();
+}`}</CodeBlock>
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["on-busy"]}>
+                        <p className="text-app-text/65 text-sm leading-6">
+                            Use `on_busy` only for emergency behavior. The
+                            engine ignores returned trade intents while busy
+                            unless the returned intent is `abort()`.
+                        </p>
+                        <DataTable
+                            columns={["Variable", "Type", "What it means"]}
+                            rows={[
+                                [
+                                    "busy_reason",
+                                    "BusyType",
+                                    "Whether the engine is waiting for an open or close order.",
+                                ],
+                            ]}
+                        />
+                        <DataTable
+                            columns={["Helper", "Returns", "Meaning"]}
+                            rows={[
+                                [
+                                    "busy_reason.is_opening()",
+                                    "bool",
+                                    "True while waiting for an open order to fill.",
+                                ],
+                                [
+                                    "busy_reason.is_closing()",
+                                    "bool",
+                                    "True while waiting for a close order to fill.",
+                                ],
+                            ]}
+                        />
+                        <CodeBlock>{`// on_busy
+// Most strategies should leave this empty.
+
+// Emergency example:
+if busy_reason.is_closing() {
+    return abort();
+}`}</CodeBlock>
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["indicators"]}>
+                        <p className="text-app-text/65 text-sm leading-6">
+                            Add indicators in Lab, then click an indicator badge
+                            to insert the exact `extract()` call. `extract()` is
+                            a source transform, so it must use this exact shape:
+                        </p>
+                        <img
+                            src="/add_indicator.png"
+                            alt="Add indicator flow in strategy lab"
+                            className="border-line-subtle mx-auto w-full max-w-xl rounded-md border object-contain"
+                        />
+                        <CodeBlock>{`let rsi = extract("self_rsi_14_15m");`}</CodeBlock>
+                        <p className="text-app-text/65 text-sm leading-6">
+                            The key must be a string literal and the statement
+                            must end with a semicolon. If the indicator is
+                            missing or still warming up, the generated code does
+                            `return;` and skips the tick.
+                        </p>
+                        <DataTable
+                            columns={["Indicator group", "Key format", "Generated variables"]}
+                            rows={indicatorRows}
+                        />
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                            {timeframeRows.map(([suffix, constant]) => (
+                                <div
+                                    key={suffix}
+                                    className="border-line-subtle bg-app-surface-2/70 flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+                                >
+                                    <span className="text-accent-brand-soft font-mono">
+                                        {suffix}
+                                    </span>
+                                    <span className="text-app-text/50 font-mono text-xs">
+                                        {constant}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                        <CodeBlock>{`// Use self_ for the traded market.
+let market_rsi = extract("self_rsi_14_15m");
+
+// Use explicit assets for confirmation signals.
+let btc_rsi = extract("BTC_rsi_14_1h");
+
+// Avoid repeated trades on the same closed candle.
+if !market_rsi_on_close || market_rsi_ts == last_market_ts {
+    return;
+}
+
+last_market_ts = market_rsi_ts;`}</CodeBlock>
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["state"]}>
+                        <p className="text-app-text/65 text-sm leading-6">
+                            Declare state in Lab with one `name = default` per
+                            line. State variables are loaded before each method
+                            runs and written back after evaluation.
+                        </p>
+                        <CodeBlock>{`last_market_ts = 0
+trade_count = 0
+last_signal = "none"
+prev_uptrend = null
+can_trade = true`}</CodeBlock>
+                        <InfoGrid
+                            items={[
+                                {
+                                    title: "Default values",
+                                    body: "Numbers, strings, booleans, and null are supported. null becomes Rhai ().",
+                                },
+                                {
+                                    title: "Names",
+                                    body: "Use identifiers that start with a letter or underscore, then letters, digits, or underscores.",
+                                },
+                                {
+                                    title: "Shared methods",
+                                    body: "The same state names are available in on_idle, on_open, and on_busy.",
+                                },
+                            ]}
+                        />
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["open-trades"]}>
+                        <p className="text-app-text/65 text-sm leading-6">
+                            Open helpers are only useful from `on_idle`. Market
+                            orders execute as taker orders. Limit orders place a
+                            maker-style order at your limit price.
+                        </p>
+                        <CodeBlock>{`open_market(LONG, margin_pct(50.0), triggers(3.0, 2.0))
+
+open_limit(
+    LONG,
+    margin_pct(40.0),
+    last_price.close,
+    timeout(CANCEL, timedelta(MIN15, 2)),
+    triggers(3.0, 2.0),
+)`}</CodeBlock>
+                        <DataTable
+                            columns={["Open helper", "Signature", "Meaning"]}
+                            rows={[
+                                [
+                                    "open_market",
+                                    "open_market(side, size)",
+                                    "Open at market; optional TP/SL variant also exists.",
+                                ],
+                                [
+                                    "open_market",
+                                    "open_market(side, size, tp_sl)",
+                                    "Attach triggers(tp, sl), tp_only(tp), or sl_only(sl).",
+                                ],
+                                [
+                                    "open_limit",
+                                    "open_limit(side, size, price)",
+                                    "Place a limit open at the provided price.",
+                                ],
+                                [
+                                    "open_limit",
+                                    "open_limit(side, size, price, timeout)",
+                                    "Add timeout(FORCE|CANCEL, timedelta(TF, count)).",
+                                ],
+                                [
+                                    "open_limit",
+                                    "open_limit(side, size, price, timeout, tp_sl)",
+                                    "Use both timeout and TP/SL in one order intent.",
+                                ],
+                            ]}
+                        />
+                        <DataTable
+                            columns={["Sizing helper", "Meaning", "Conversion"]}
+                            rows={[
+                                [
+                                    "margin_pct(pct)",
+                                    "Use a percentage of free margin.",
+                                    "(free_margin * pct / 100 * lev) / reference_price",
+                                ],
+                                [
+                                    "margin_amount(usdc)",
+                                    "Use a fixed USDC margin amount.",
+                                    "(amount * lev) / reference_price",
+                                ],
+                                [
+                                    "raw_size(units)",
+                                    "Use an exact asset-unit size.",
+                                    "No margin conversion.",
+                                ],
+                            ]}
+                        />
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["close-positions"]}>
+                        <p className="text-app-text/65 text-sm leading-6">
+                            Close helpers belong in `on_open`. `flatten_*`
+                            closes the whole position. `reduce_*` closes part of
+                            it.
+                        </p>
+                        <CodeBlock>{`flatten_market()
+reduce_market(margin_pct(50.0))
+flatten_limit(last_price.close, timeout(FORCE, timedelta(MIN5, 3)))
+reduce_limit(
+    margin_pct(50.0),
+    last_price.close,
+    timeout(CANCEL, timedelta(MIN15, 1)),
+)`}</CodeBlock>
+                        <DataTable
+                            columns={["Close helper", "Signature", "Meaning"]}
+                            rows={[
+                                [
+                                    "flatten_market",
+                                    "flatten_market()",
+                                    "Close the full open position at market.",
+                                ],
+                                [
+                                    "flatten_limit",
+                                    "flatten_limit(price)",
+                                    "Close the full open position with a limit order.",
+                                ],
+                                [
+                                    "flatten_limit",
+                                    "flatten_limit(price, timeout)",
+                                    "Full limit close with timeout policy.",
+                                ],
+                                [
+                                    "reduce_market",
+                                    "reduce_market(size)",
+                                    "Partially close at market using the provided size.",
+                                ],
+                                [
+                                    "reduce_limit",
+                                    "reduce_limit(size, price)",
+                                    "Partially close with a limit price.",
+                                ],
+                                [
+                                    "reduce_limit",
+                                    "reduce_limit(size, price, timeout)",
+                                    "Partial limit close with timeout policy.",
+                                ],
+                            ]}
+                        />
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["timeouts-triggers"]}>
+                        <InfoGrid
+                            items={[
+                                {
+                                    title: "Triggers",
+                                    body: "Attach take-profit and stop-loss to open orders with percentage values adjusted by leverage.",
+                                    code: "triggers(5.0, 3.0)",
+                                },
+                                {
+                                    title: "FORCE",
+                                    body: "On timeout, cancel the target limit order and submit the market equivalent. Flatten force-closes at market.",
+                                    code: "timeout(FORCE, timedelta(MIN15, 1))",
+                                },
+                                {
+                                    title: "CANCEL",
+                                    body: "On timeout, cancel tracked resting orders. If exposure exists after cancellation, the executor force-closes defensively.",
+                                    code: "timeout(CANCEL, timedelta(MIN15, 1))",
+                                },
+                            ]}
+                        />
+                        <CodeBlock>{`triggers(5.0, 3.0)   // TP and SL
+tp_only(5.0)          // TP only
+sl_only(3.0)          // SL only
+
+timeout(FORCE, timedelta(MIN15, 1))
+timeout(CANCEL, timedelta(MIN15, 1))`}</CodeBlock>
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["examples"]}>
+                        <div className="space-y-4">
+                            <div>
+                                <h3 className="text-app-text mb-2 text-base font-semibold">
+                                    Minimal on_idle entry
+                                </h3>
+                                <CodeBlock>{`let rsi = extract("self_rsi_14_15m");
+
+if !rsi_on_close {
+    return;
+}
+
+if rsi_value < 30.0 {
+    return open_market(LONG, margin_pct(50.0), triggers(3.0, 2.0));
+}`}</CodeBlock>
+                            </div>
+                            <div>
+                                <h3 className="text-app-text mb-2 text-base font-semibold">
+                                    Stateful one-trade-per-candle guard
+                                </h3>
+                                <CodeBlock>{`// State Variables
+last_market_ts = 0
+
+// on_idle
+let ema = extract("self_emaCross_9_21_15m");
+
+if !ema_on_close || ema_ts == last_market_ts {
+    return;
+}
+
+last_market_ts = ema_ts;
+
+if ema_trend {
+    return open_market(LONG, margin_pct(40.0));
+}`}</CodeBlock>
+                            </div>
+                            <div>
+                                <h3 className="text-app-text mb-2 text-base font-semibold">
+                                    on_open exit
+                                </h3>
+                                <CodeBlock>{`let rsi = extract("self_rsi_14_15m");
+
+if !rsi_on_close {
+    return;
+}
+
+if open_position.side == LONG && rsi_value > 70.0 {
+    return flatten_market();
+}
+
+if open_position.side == SHORT && rsi_value < 30.0 {
+    return flatten_market();
+}`}</CodeBlock>
+                            </div>
+                        </div>
+                    </DocsSection>
+
+                    <DocsSection section={sectionById["backtesting"]}>
+                        <InfoGrid
+                            items={[
+                                {
+                                    title: "Before live use",
+                                    body: "Backtest the strategy with the same scripts, state declarations, indicators, market, margin, leverage, fees, and funding assumptions.",
+                                },
+                                {
+                                    title: "Why orders fail",
+                                    body: "Common causes are compile errors, missing indicator warmup, min notional, invalid limit price, max size, or close-without-position.",
+                                },
+                                {
+                                    title: "Sandbox limits",
+                                    body: "Scripts are capped at 100,000 operations, expression depth 64, strings 4096 bytes, arrays 1024, and maps 256.",
+                                },
+                            ]}
+                        />
+                        <div className="border-line-subtle bg-app-surface-2/70 rounded-md border p-4">
+                            <div className="mb-2 flex items-center gap-2">
+                                <ShieldCheck className="text-accent-success h-4 w-4" />
+                                <h3 className="text-app-text text-sm font-semibold">
+                                    Minimum order value
+                                </h3>
+                            </div>
+                            <p className="text-app-text/60 text-sm leading-6">
+                                Open orders and partial closes must meet the
+                                minimum notional of $10 USDC. Full closes may be
+                                smaller.
+                            </p>
+                        </div>
                     </DocsSection>
 
                     <DocsSection section={sectionById["llm-prompt"]}>
@@ -396,375 +947,6 @@ Executor -> place, cancel, or force orders on Hyperliquid`}</CodeBlock>
                         <CodeBlock>{llmStrategyPrompt}</CodeBlock>
                     </DocsSection>
 
-                    <DocsSection section={sectionById["lifecycle"]}>
-                        <div className="overflow-hidden rounded-md border border-line-subtle">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-app-surface-2 text-app-text/50">
-                                    <tr>
-                                        <th className="px-4 py-3 font-medium">
-                                            Script
-                                        </th>
-                                        <th className="px-4 py-3 font-medium">
-                                            Runs When
-                                        </th>
-                                        <th className="px-4 py-3 font-medium">
-                                            Extra Variable
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-line-subtle divide-y">
-                                    {[
-                                        [
-                                            "on_idle",
-                                            "No position is open, or the strategy is armed.",
-                                            "is_armed: expiry timestamp, or -1",
-                                        ],
-                                        [
-                                            "on_open",
-                                            "A position is open.",
-                                            "open_position",
-                                        ],
-                                        [
-                                            "on_busy",
-                                            "An order is pending.",
-                                            "busy_reason",
-                                        ],
-                                    ].map(([name, runs, extra]) => (
-                                        <tr key={name}>
-                                            <td className="text-accent-brand-soft px-4 py-3 font-mono">
-                                                {name}
-                                            </td>
-                                            <td className="text-app-text/70 px-4 py-3">
-                                                {runs}
-                                            </td>
-                                            <td className="text-app-text/60 px-4 py-3 font-mono text-xs">
-                                                {extra}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <p className="text-app-text/60 text-sm leading-6">
-                            Each script may return an intent as its final
-                            expression or with `return`. Returning `()` means no
-                            trade for that tick.
-                        </p>
-                    </DocsSection>
-
-                    <DocsSection section={sectionById["authoring"]}>
-                        <InfoGrid
-                            items={[
-                                {
-                                    title: "Strict variables",
-                                    body: "Any referenced name must be declared by Rhai, the engine, state declarations, or extract expansion.",
-                                    code: "typos fail on save",
-                                },
-                                {
-                                    title: "Raw code is stored",
-                                    body: "The DB keeps user code. Macro expansion is transient and happens before compile.",
-                                    code: "extract() + state preamble",
-                                },
-                                {
-                                    title: "Debugging",
-                                    body: "Use print() in live mode. Runtime errors are sent to the market log and the tick emits no intent.",
-                                    code: 'print("rsi=" + rsi_value)',
-                                },
-                            ]}
-                        />
-                        <CodeBlock>{`// Valid: final expression returns the intent
-open_market(LONG, margin_pct(50.0))
-
-// Valid: explicit return
-return open_market(LONG, margin_pct(50.0));
-
-// No trade: trailing semicolon makes the expression evaluate to ()
-open_market(LONG, margin_pct(50.0));`}</CodeBlock>
-                    </DocsSection>
-
-                    <DocsSection section={sectionById["orders"]}>
-                        <div className="grid gap-4 md:grid-cols-2">
-                            <div className="space-y-3">
-                                <h3 className="text-app-text text-base font-semibold">
-                                    Open
-                                </h3>
-                                <CodeBlock>{`open_market(LONG, margin_pct(50.0))
-open_market(SHORT, margin_amount(100.0), triggers(5.0, 3.0))
-open_limit(LONG, raw_size(0.5), 42000.0)
-open_limit(LONG, margin_pct(50.0), 42000.0, timeout(FORCE, timedelta(MIN15, 2)))`}</CodeBlock>
-                            </div>
-                            <div className="space-y-3">
-                                <h3 className="text-app-text text-base font-semibold">
-                                    Close
-                                </h3>
-                                <CodeBlock>{`flatten_market()
-flatten_limit(43000.0, timeout(FORCE, timedelta(MIN5, 3)))
-reduce_market(margin_pct(50.0))
-reduce_limit(raw_size(0.1), 43000.0, timeout(CANCEL, timedelta(MIN15, 1)))`}</CodeBlock>
-                            </div>
-                        </div>
-                        <InfoGrid
-                            items={[
-                                {
-                                    title: "FORCE",
-                                    body: "Cancels the target non-TP/SL limit order, then submits the market equivalent. Flatten force-close cancels tracked resting orders first.",
-                                },
-                                {
-                                    title: "CANCEL",
-                                    body: "Cancels tracked resting orders. If exposure exists after cancellation, the executor force-closes defensively.",
-                                },
-                                {
-                                    title: "Validation",
-                                    body: "Orders must pass min notional, max size, limit price, and TP/SL validation before submission.",
-                                },
-                            ]}
-                        />
-                    </DocsSection>
-
-                    <DocsSection section={sectionById["indicators"]}>
-                        <p className="text-app-text/65 text-sm leading-6">
-                            Indicator values are configured in the UI and read
-                            with `extract()`. The traded market can also be
-                            referenced with `self_...`, which makes reusable
-                            strategies easier.
-                        </p>
-                        <CodeBlock>{`let rsi = extract("self_rsi_14_15m");
-
-if !rsi_on_close {
-    return;
-}
-
-if rsi_value < 30.0 {
-    return open_market(LONG, margin_pct(50.0));
-}`}</CodeBlock>
-                        <div className="overflow-hidden rounded-md border border-line-subtle">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-app-surface-2 text-app-text/50">
-                                    <tr>
-                                        <th className="px-4 py-3 font-medium">
-                                            Indicator
-                                        </th>
-                                        <th className="px-4 py-3 font-medium">
-                                            Key Format
-                                        </th>
-                                        <th className="px-4 py-3 font-medium">
-                                            Variables
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-line-subtle divide-y">
-                                    {indicatorRows.map(([name, key, vars]) => (
-                                        <tr key={name}>
-                                            <td className="text-app-text/80 px-4 py-3">
-                                                {name}
-                                            </td>
-                                            <td className="text-accent-brand-soft px-4 py-3 font-mono text-xs">
-                                                {key}
-                                            </td>
-                                            <td className="text-app-text/60 px-4 py-3 font-mono text-xs">
-                                                {vars}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                            {timeframeRows.map(([suffix, constant]) => (
-                                <div
-                                    key={suffix}
-                                    className="border-line-subtle bg-app-surface-2/70 flex items-center justify-between rounded-md border px-3 py-2 text-sm"
-                                >
-                                    <span className="text-accent-brand-soft font-mono">
-                                        {suffix}
-                                    </span>
-                                    <span className="text-app-text/50 font-mono text-xs">
-                                        {constant}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    </DocsSection>
-
-                    <DocsSection section={sectionById["state"]}>
-                        <p className="text-app-text/65 text-sm leading-6">
-                            State variables are declared in the editor, one per
-                            line. They are loaded before each script evaluation
-                            and written back after evaluation.
-                        </p>
-                        <CodeBlock>{`count = 0
-last_signal = "none"
-prev_uptrend = null
-last_market_ts = 0`}</CodeBlock>
-                        <CodeBlock>{`let rsi = extract("self_rsi_14_15m");
-
-if !rsi_on_close || rsi_ts == last_market_ts {
-    return;
-}
-
-last_market_ts = rsi_ts;
-count += 1;`}</CodeBlock>
-                        <InfoGrid
-                            items={[
-                                {
-                                    title: "Supported defaults",
-                                    body: 'Numbers, strings, booleans, and null. Null becomes Rhai ().',
-                                },
-                                {
-                                    title: "Shared lifecycle",
-                                    body: "The same state variables are visible in on_idle, on_open, and on_busy.",
-                                },
-                                {
-                                    title: "Reset behavior",
-                                    body: "State resets when the strategy reloads, the bot restarts, or a backtest engine resets.",
-                                },
-                            ]}
-                        />
-                    </DocsSection>
-
-                    <DocsSection section={sectionById["objects"]}>
-                        <div className="grid gap-4 md:grid-cols-3">
-                            <div>
-                                <h3 className="text-app-text mb-2 text-sm font-semibold">
-                                    last_price
-                                </h3>
-                                <CodeBlock>{`.open
-.high
-.low
-.close
-.vlm
-.open_time
-.close_time`}</CodeBlock>
-                            </div>
-                            <div>
-                                <h3 className="text-app-text mb-2 text-sm font-semibold">
-                                    open_position
-                                </h3>
-                                <CodeBlock>{`.side
-.size
-.entry_px
-.open_time`}</CodeBlock>
-                            </div>
-                            <div>
-                                <h3 className="text-app-text mb-2 text-sm font-semibold">
-                                    busy_reason
-                                </h3>
-                                <CodeBlock>{`busy_reason.is_opening()
-busy_reason.is_closing()`}</CodeBlock>
-                            </div>
-                        </div>
-                        <p className="text-app-text/60 text-sm leading-6">
-                            Cross-asset strategies can evaluate on a non-market
-                            asset tick, so derive limit prices from
-                            `last_price.close` only when you know the tick
-                            belongs to the traded market.
-                        </p>
-                    </DocsSection>
-
-                    <DocsSection section={sectionById["examples"]}>
-                        <div className="space-y-4">
-                            <div>
-                                <h3 className="text-app-text mb-2 text-base font-semibold">
-                                    RSI mean reversion
-                                </h3>
-                                <CodeBlock>{`let rsi = extract("self_rsi_14_15m");
-
-if !rsi_on_close {
-    return;
-}
-
-if rsi_value < 30.0 {
-    open_market(LONG, margin_pct(50.0), triggers(3.0, 2.0))
-} else if rsi_value > 70.0 {
-    open_market(SHORT, margin_pct(50.0), triggers(3.0, 2.0))
-}`}</CodeBlock>
-                            </div>
-                            <div>
-                                <h3 className="text-app-text mb-2 text-base font-semibold">
-                                    Armed cross-asset entry
-                                </h3>
-                                <CodeBlock>{`let btc_rsi_1h = extract("BTC_rsi_12_1h");
-let market_ema = extract("self_emaCross_9_21_15m");
-
-if !market_ema_on_close || market_ema_ts == last_entry_ts {
-    return;
-}
-
-last_entry_ts = market_ema_ts;
-
-if is_armed > 0 && !prev_uptrend && market_ema_trend {
-    prev_uptrend = market_ema_trend;
-    return open_market(LONG, margin_pct(80.0), sl_only(28.0));
-}
-
-if btc_rsi_1h_value < 60.0 && !market_ema_trend {
-    prev_uptrend = market_ema_trend;
-    return arm(timedelta(MIN15, 1));
-}
-
-prev_uptrend = market_ema_trend;`}</CodeBlock>
-                            </div>
-                        </div>
-                    </DocsSection>
-
-                    <DocsSection section={sectionById["backtesting"]}>
-                        <InfoGrid
-                            items={[
-                                {
-                                    title: "Inputs",
-                                    body: "Choose strategy, traded asset, time range, resolution, margin, leverage, fees, and funding assumptions.",
-                                },
-                                {
-                                    title: "Outputs",
-                                    body: "Review equity curve, trade list, win rate, max drawdown, and position snapshots.",
-                                },
-                                {
-                                    title: "Sandbox",
-                                    body: "Scripts are capped at 100,000 operations, expression depth 64, strings 4096 bytes, arrays 1024, and maps 256.",
-                                },
-                            ]}
-                        />
-                        <div className="border-line-subtle bg-app-surface-2/70 rounded-md border p-4">
-                            <div className="mb-2 flex items-center gap-2">
-                                <ShieldCheck className="text-accent-success h-4 w-4" />
-                                <h3 className="text-app-text text-sm font-semibold">
-                                    Minimum order value
-                                </h3>
-                            </div>
-                            <p className="text-app-text/60 text-sm leading-6">
-                                Open orders and partial closes must meet the
-                                minimum notional of $10 USDC. Full closes may be
-                                smaller.
-                            </p>
-                        </div>
-                    </DocsSection>
-
-                    <DocsSection section={sectionById["screenshots"]}>
-                        <p className="text-app-text/65 text-sm leading-6">
-                            Add screenshots in these slots when you want the
-                            docs to point directly at the current UI. Keep each
-                            image focused on one workflow.
-                        </p>
-                        <div className="grid gap-4 md:grid-cols-2">
-                            <ScreenshotSlot
-                                title="Lab strategy editor"
-                                description="Show the three script panels: on_idle, on_open, and on_busy. This is the best image near the Lifecycle section."
-                            />
-                            <ScreenshotSlot
-                                title="State Variables box"
-                                description="Show the one-per-line state initialization field. Use it near the State section."
-                            />
-                            <ScreenshotSlot
-                                title="Add Indicator picker"
-                                description="Show asset, indicator kind, parameters, timeframe, and the inserted extract() call. Use it near the Indicators section."
-                            />
-                            <ScreenshotSlot
-                                title="Backtest run form and result"
-                                description="Show the run configuration and the equity/trade result view. Use it near Backtesting."
-                            />
-                        </div>
-                    </DocsSection>
-
                     <section className="border-line-subtle bg-app-surface-2/70 rounded-md border p-5">
                         <div className="flex items-start gap-3">
                             <ScrollText className="text-accent-brand mt-0.5 h-5 w-5" />
@@ -773,11 +955,9 @@ prev_uptrend = market_ema_trend;`}</CodeBlock>
                                     Source of truth
                                 </h2>
                                 <p className="text-app-text/60 mt-2 text-sm leading-6">
-                                    This page is the readable in-app guide. Keep
-                                    behavior details in sync with the root
-                                    README and the Rust scripting engine when
-                                    helper functions, indicators, or timeout
-                                    behavior change.
+                                    Keep this page in sync with the Rust Rhai
+                                    engine when variables, helper functions,
+                                    indicator keys, or timeout behavior change.
                                 </p>
                             </div>
                         </div>
