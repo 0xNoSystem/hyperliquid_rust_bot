@@ -360,7 +360,13 @@ async fn execute_command(
         Ok(tx) => tx,
         Err(e) => {
             log::warn!("Bot creation failed for {}: {:?}", auth.pubkey, e);
-            return (StatusCode::PRECONDITION_FAILED, e.to_string()).into_response();
+            let message = e.to_string();
+            let status = if is_missing_api_key_error(&message) {
+                StatusCode::PRECONDITION_FAILED
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            };
+            return (status, message).into_response();
         }
     };
 
@@ -373,6 +379,10 @@ async fn execute_command(
             StatusCode::SERVICE_UNAVAILABLE.into_response()
         }
     }
+}
+
+fn is_missing_api_key_error(message: &str) -> bool {
+    message.contains("user has no API key set")
 }
 
 async fn live_bot_sender(

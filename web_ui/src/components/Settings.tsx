@@ -315,11 +315,23 @@ export default function Settings() {
                                 <h2 className="text-xl font-semibold">
                                     Builder Fee Approved
                                 </h2>
-                                <p className="text-app-text/60 text-sm">
+                                 <p className="text-app-text/60 text-sm">
                                     Your wallet has approved the configured
                                     builder fee.
                                 </p>
+<a
+                                    href="https://app.hyperliquid.xyz/builderCodes"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-accent-info-link inline-flex items-center gap-1 hover:underline"
+                                >
+                                    Hyperliquid Builder Codes page
+                                    <ExternalLink className="h-3 w-3" />
+                                </a>
+
+
                             </div>
+
                         </div>
                     )}
                 </div>

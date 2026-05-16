@@ -297,32 +297,65 @@ impl BotBuildContext {
         pool: &PgPool,
         encryption_key: &[u8; 32],
     ) -> Result<(Bot, Sender<BotEvent>), crate::Error> {
+        info!("[bot/startup] loading encrypted agent key for user={pubkey}");
         let row = tokio::time::timeout(
             Duration::from_secs(MANAGER_DB_QUERY_TIMEOUT_SECS),
-            sqlx::query_scalar::<_, Option<Vec<u8>>>(
+            sqlx::query_as::<_, (Option<Vec<u8>>,)>(
                 "SELECT api_key_enc FROM users WHERE pubkey = $1",
             )
             .bind(pubkey)
             .fetch_optional(pool),
         )
         .await
-        .map_err(|_| crate::Error::Custom("DB query timed out fetching API key".to_string()))?
-        .map_err(|e| crate::Error::Custom(format!("DB error: {}", e)))?
-        .flatten()
-        .ok_or_else(|| crate::Error::Custom("user has no API key set".to_string()))?;
+        .map_err(|_| {
+            warn!("[bot/startup] timed out fetching encrypted agent key for user={pubkey}");
+            crate::Error::Custom("DB query timed out fetching API key".to_string())
+        })?
+        .map_err(|e| {
+            warn!("[bot/startup] DB error fetching encrypted agent key for user={pubkey}: {e}");
+            crate::Error::Custom(format!("DB error: {}", e))
+        })?;
 
-        let decrypted = super::crypto::decrypt(encryption_key, &row)?;
-        let private_key_str = String::from_utf8(decrypted)
-            .map_err(|e| crate::Error::Custom(format!("invalid UTF-8 key: {}", e)))?;
+        let row = match row {
+            Some((Some(row),)) => row,
+            Some((None,)) => {
+                warn!("[bot/startup] user row has no encrypted agent key for user={pubkey}");
+                return Err(crate::Error::Custom("user has no API key set".to_string()));
+            }
+            None => {
+                warn!("[bot/startup] no user row found while loading agent key for user={pubkey}");
+                return Err(crate::Error::Custom("user has no API key set".to_string()));
+            }
+        };
+        info!(
+            "[bot/startup] encrypted agent key loaded for user={pubkey}, bytes={}",
+            row.len()
+        );
 
-        let signer: PrivateKeySigner = private_key_str
-            .trim()
-            .parse()
-            .map_err(|e| crate::Error::Custom(format!("invalid private key: {}", e)))?;
+        let decrypted = super::crypto::decrypt(encryption_key, &row).map_err(|e| {
+            warn!("[bot/startup] failed to decrypt encrypted agent key for user={pubkey}: {e}");
+            e
+        })?;
+        let private_key_str = String::from_utf8(decrypted).map_err(|e| {
+            warn!("[bot/startup] decrypted agent key is not UTF-8 for user={pubkey}: {e}");
+            crate::Error::Custom(format!("invalid UTF-8 key: {}", e))
+        })?;
+
+        let signer: PrivateKeySigner = private_key_str.trim().parse().map_err(|e| {
+            warn!("[bot/startup] decrypted agent key is not a valid private key for user={pubkey}: {e}");
+            crate::Error::Custom(format!("invalid private key: {}", e))
+        })?;
+        info!("[bot/startup] encrypted agent key decrypted and parsed for user={pubkey}");
 
         let url = BaseUrl::Mainnet;
-        let user_address = crate::helper::address(pubkey)?;
-        let wallet = Wallet::new(url, user_address, signer).await?;
+        let user_address = crate::helper::address(pubkey).map_err(|e| {
+            warn!("[bot/startup] invalid user address for user={pubkey}: {e}");
+            e
+        })?;
+        let wallet = Wallet::new(url, user_address, signer).await.map_err(|e| {
+            warn!("[bot/startup] failed to initialize wallet for user={pubkey}: {e}");
+            e
+        })?;
 
         Bot::new(
             wallet,
@@ -331,6 +364,10 @@ impl BotBuildContext {
             self.user_event_relay.clone(),
         )
         .await
+        .map_err(|e| {
+            warn!("[bot/startup] failed to initialize bot for user={pubkey}: {e}");
+            e
+        })
     }
 }
 
