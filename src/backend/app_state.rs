@@ -8,8 +8,9 @@ use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Sender, error::TrySendError};
 use uuid::Uuid;
 
+use alloy::primitives::Address;
 use alloy::signers::local::PrivateKeySigner;
-use hyperliquid_rust_sdk::ApproveAgent;
+use hyperliquid_rust_sdk::{ApproveAgent, ApproveBuilderFee};
 
 use super::bot_manager::BotManager;
 use super::scripting::{CompiledStrategy, StateDeclarations};
@@ -39,6 +40,16 @@ pub struct PendingAgent {
 /// In-memory store: pubkey → pending agent (one per user).
 pub type PendingAgentStore = Arc<RwLock<HashMap<String, PendingAgent>>>;
 
+pub struct PendingBuilderFeeApproval {
+    pub approve_builder_fee: ApproveBuilderFee,
+    pub builder: Address,
+    pub fee: u64,
+    pub created_at: Instant,
+}
+
+/// In-memory store: pubkey → pending builder fee approval (one per user).
+pub type PendingBuilderFeeApprovalStore = Arc<RwLock<HashMap<String, PendingBuilderFeeApproval>>>;
+
 /// Users with an in-flight bot startup.
 pub type BotStartupStore = Arc<RwLock<HashSet<String>>>;
 
@@ -67,6 +78,7 @@ pub struct AppState {
     pub encryption_key: [u8; 32],
     pub nonces: NonceStore,
     pub pending_agents: PendingAgentStore,
+    pub pending_builder_fee_approvals: PendingBuilderFeeApprovalStore,
 }
 
 /// Send an `UpdateFrontend` message to every connected device for a given user.

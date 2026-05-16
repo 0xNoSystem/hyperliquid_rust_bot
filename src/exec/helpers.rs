@@ -6,6 +6,9 @@ pub(super) fn extract_order_status(
     let response = match res {
         ExchangeResponseStatus::Ok(exchange_response) => exchange_response,
         ExchangeResponseStatus::Err(e) => {
+            if is_unapproved_builder_error(&e) {
+                return Err(Error::UnapprovedBuilder(e));
+            }
             return Err(Error::ExecutionFailure(e));
         }
     };
@@ -19,4 +22,10 @@ pub(super) fn extract_order_status(
         })?;
 
     Ok(status)
+}
+
+pub(super) fn is_unapproved_builder_error(message: &str) -> bool {
+    message
+        .to_lowercase()
+        .contains("builder fee has not been approved")
 }

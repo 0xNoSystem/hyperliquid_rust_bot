@@ -22,7 +22,7 @@ use hyperliquid_rust_sdk::{
 
 use super::*;
 use crate::helper::exchange_client_with_timeout;
-use crate::{MAX_DECIMALS, MarketCommand, PX_DECIMAL_ANOMALY, roundf};
+use crate::{BUILDER, MAX_DECIMALS, MarketCommand, PX_DECIMAL_ANOMALY, roundf};
 
 const MARKET_COMMAND_SEND_TIMEOUT_SECS: u64 = 5;
 
@@ -72,6 +72,10 @@ impl Executor {
         })
     }
 
+    pub(crate) fn set_trading_enabled(&mut self, enabled: bool) {
+        self.is_paused = !enabled;
+    }
+
     async fn with_position<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut Option<OpenPositionLocal>) -> R,
@@ -96,8 +100,16 @@ impl Executor {
         let size = order.get_sz();
 
         let status_res = match order {
-            HlOrder::Market(market_order) => self.exchange_client.market_open(market_order).await?,
-            HlOrder::Limit(limit_order) => self.exchange_client.order(limit_order, None).await?,
+            HlOrder::Market(market_order) => {
+                self.exchange_client
+                    .market_open_with_builder(market_order, &BUILDER)
+                    .await?
+            }
+            HlOrder::Limit(limit_order) => {
+                self.exchange_client
+                    .order_with_builder(limit_order, None, &BUILDER)
+                    .await?
+            }
         };
 
         match extract_order_status(status_res)? {
@@ -118,6 +130,9 @@ impl Executor {
                 tpsl: trigger,
             }),
 
+            ExchangeDataStatus::Error(err) if is_unapproved_builder_error(&err) => {
+                Err(Error::UnapprovedBuilder(err))
+            }
             ExchangeDataStatus::Error(err) => Err(Error::Custom(err)),
 
             _ => Err(Error::ExecutionFailure(
@@ -428,6 +443,16 @@ impl Executor {
                     warn!("[executor] auth error: {msg}");
                     let _ = self
                         .send_market_command("auth error", MarketCommand::AuthError(msg))
+                        .await;
+                    self.is_paused = true;
+                }
+                Err(Error::UnapprovedBuilder(msg)) => {
+                    warn!("[executor] builder fee approval error: {msg}");
+                    let _ = self
+                        .send_market_command(
+                            "builder approval error",
+                            MarketCommand::BuilderApprovalError(msg),
+                        )
                         .await;
                     self.is_paused = true;
                 }

@@ -7,6 +7,7 @@ import {
     KeyRound,
     RefreshCw,
     CheckCircle,
+    ShieldCheck,
     LayoutGrid,
     List,
 } from "lucide-react";
@@ -38,6 +39,7 @@ export default function MarketsPage() {
         totalMargin,
         errorMsg,
         needsApiKey,
+        needsBuilderApproval,
         dismissError,
         cacheMarket,
         deleteCachedMarket,
@@ -53,10 +55,21 @@ export default function MarketsPage() {
     const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
     useEffect(() => {
-        const state = location.state as { agentApproved?: boolean } | null;
+        const state = location.state as {
+            agentApproved?: boolean;
+            builderApproved?: boolean;
+        } | null;
         if (state?.agentApproved) {
             setSuccessBanner(
                 "Trading agent approved — your API key is secured."
+            );
+            window.history.replaceState({}, "");
+            const timer = setTimeout(() => setSuccessBanner(null), 5000);
+            return () => clearTimeout(timer);
+        }
+        if (state?.builderApproved) {
+            setSuccessBanner(
+                "Builder fee approved — paused markets can resume trading."
             );
             window.history.replaceState({}, "");
             const timer = setTimeout(() => setSuccessBanner(null), 5000);
@@ -194,6 +207,14 @@ export default function MarketsPage() {
                                         <KeyRound className="h-4 w-4" />
                                         Connect API Key
                                     </button>
+                                ) : needsBuilderApproval ? (
+                                    <button
+                                        onClick={() => navigate("/settings")}
+                                        className="text-accent-info-link mt-1 flex items-center gap-2 text-sm font-medium hover:underline"
+                                    >
+                                        <ShieldCheck className="h-4 w-4" />
+                                        Approve Builder Fee
+                                    </button>
                                 ) : totalMargin ? (
                                     `$${totalMargin.toFixed(2)}`
                                 ) : (
@@ -282,16 +303,57 @@ export default function MarketsPage() {
                                         Connect your API key
                                     </h2>
                                     <p className="text-app-text/60 mt-1">
-                                        Add your Hyperliquid API key to start
-                                        trading.
+                                        Add markets now; they will stay paused
+                                        until your API key is approved.
                                     </p>
-                                    <button
-                                        onClick={() => navigate("/settings")}
-                                        className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover mt-5 inline-flex items-center gap-2 rounded-md border px-4 py-2"
-                                    >
-                                        <KeyRound className="h-4 w-4" /> Go to
-                                        Settings
-                                    </button>
+                                    <div className="mt-5 flex flex-wrap justify-center gap-3">
+                                        <button
+                                            onClick={() => openAddModal()}
+                                            className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover inline-flex items-center gap-2 rounded-md border px-4 py-2"
+                                        >
+                                            <Plus className="h-4 w-4" /> Add
+                                            Market
+                                        </button>
+                                        <button
+                                            onClick={() =>
+                                                navigate("/settings")
+                                            }
+                                            className="border-line-weak hover:bg-glow-10 inline-flex items-center gap-2 rounded-md border px-4 py-2"
+                                        >
+                                            <KeyRound className="h-4 w-4" /> Go
+                                            to Settings
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : needsBuilderApproval ? (
+                                <div>
+                                    <ShieldCheck className="text-app-text/30 mx-auto h-12 w-12" />
+                                    <h2 className="mt-4 text-2xl font-semibold">
+                                        Approve builder fee
+                                    </h2>
+                                    <p className="text-app-text/60 mt-1">
+                                        Markets can be added, but trading stays
+                                        paused until the builder fee is
+                                        approved.
+                                    </p>
+                                    <div className="mt-5 flex flex-wrap justify-center gap-3">
+                                        <button
+                                            onClick={() => openAddModal()}
+                                            className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover inline-flex items-center gap-2 rounded-md border px-4 py-2"
+                                        >
+                                            <Plus className="h-4 w-4" /> Add
+                                            Market
+                                        </button>
+                                        <button
+                                            onClick={() =>
+                                                navigate("/settings")
+                                            }
+                                            className="border-line-weak hover:bg-glow-10 inline-flex items-center gap-2 rounded-md border px-4 py-2"
+                                        >
+                                            <ShieldCheck className="h-4 w-4" />{" "}
+                                            Go to Settings
+                                        </button>
+                                    </div>
                                 </div>
                             ) : (
                                 <div>

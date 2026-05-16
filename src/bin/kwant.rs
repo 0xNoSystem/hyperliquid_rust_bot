@@ -111,6 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ws_connections: WsConnections = Arc::new(RwLock::new(HashMap::new()));
     let nonces = Arc::new(RwLock::new(HashMap::new()));
     let pending_agents = Arc::new(RwLock::new(HashMap::new()));
+    let pending_builder_fee_approvals = Arc::new(RwLock::new(HashMap::new()));
 
     // Spawn pruners
     infrastructure_tasks.push((
@@ -140,6 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         encryption_key,
         nonces,
         pending_agents,
+        pending_builder_fee_approvals,
     });
 
     let app = create_router(Arc::clone(&state));

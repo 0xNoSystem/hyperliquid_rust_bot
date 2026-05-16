@@ -1,6 +1,7 @@
 use crate::{
     AddMarketInfo, BackendStatus, EngineView, ExecEvent, HLTradeInfo, Market, MarketCommand,
-    MarketInfo, MarketState, MarketUpdate, TradeFillInfo, TradeInfo, UpdateFrontend, Wallet,
+    MarketInfo, MarketState, MarketUpdate, TradeFillInfo, TradeInfo, UpdateFrontend, UserSession,
+    Wallet,
 };
 
 use crate::backend::app_state::{StrategyCache, WsConnections, broadcast_to_user};
@@ -31,6 +32,7 @@ use tokio_util::sync::CancellationToken;
 use crate::helper::*;
 use crate::margin::{AssetMargin, MarginBook};
 use crate::metrics;
+use crate::{DEFAULT_BUILDER_ADDRESS, DEFAULT_BUILDER_FEE};
 
 pub type Session = Arc<Mutex<HashMap<String, MarketState, BuildHasherDefault<FxHasher>>>>;
 const MARGIN_SYNC_MIN_INTERVAL_SECS: u64 = 5;
@@ -287,6 +289,7 @@ pub struct Bot {
     strategy_cache: Option<StrategyCache>,
     chain_open_positions: Vec<AssetPosition>,
     key_valid: bool,
+    builder_approved: bool,
 }
 
 struct BotAssetFeed {
@@ -341,6 +344,7 @@ impl Bot {
                 strategy_cache: None,
                 chain_open_positions: Vec::new(),
                 key_valid: true,
+                builder_approved: true,
             },
             bot_tx,
         ))
@@ -350,6 +354,46 @@ impl Bot {
     async fn send_to_frontend(&self, msg: UpdateFrontend) {
         if let (Some(conns), Some(pubkey)) = (&self.ws_connections, &self.pubkey) {
             broadcast_to_user(conns, pubkey, msg).await;
+        }
+    }
+
+    async fn refresh_builder_approval_status(&mut self, pubkey: &str) {
+        let user = match address(pubkey) {
+            Ok(user) => user,
+            Err(err) => {
+                log::warn!("[bot] failed to parse user address for builder fee check: {err}");
+                return;
+            }
+        };
+        let builder = match address(DEFAULT_BUILDER_ADDRESS) {
+            Ok(builder) => builder,
+            Err(err) => {
+                log::error!("[bot] failed to parse configured builder address: {err}");
+                return;
+            }
+        };
+
+        match info_call_timeout(
+            "builder fee approval",
+            self.info_client.max_builder_fee(user, builder),
+        )
+        .await
+        {
+            Ok(max_fee) => {
+                self.builder_approved = max_fee.0 >= DEFAULT_BUILDER_FEE;
+                self.send_to_frontend(UpdateFrontend::NeedsBuilderApproval(!self.builder_approved))
+                    .await;
+                log::info!(
+                    "[bot] builder fee approval checked user={} max_fee={} required={} approved={}",
+                    pubkey,
+                    max_fee.0,
+                    DEFAULT_BUILDER_FEE,
+                    self.builder_approved
+                );
+            }
+            Err(err) => {
+                log::warn!("[bot] failed to check builder fee approval for user={pubkey}: {err}");
+            }
         }
     }
 
@@ -860,6 +904,16 @@ impl Bot {
         self.market_price_routes.insert(asset.clone(), price_tx);
         self.market_required_assets
             .insert(asset.clone(), HashSet::default());
+        let api_key_valid = self.key_valid;
+        let trading_enabled = api_key_valid && self.builder_approved;
+        if !api_key_valid {
+            self.send_to_frontend(UpdateFrontend::NeedsApiKey(true))
+                .await;
+        }
+        if !self.builder_approved {
+            self.send_to_frontend(UpdateFrontend::NeedsBuilderApproval(true))
+                .await;
+        }
 
         let ws_conns = self.ws_connections.clone();
         let bot_pubkey = self.pubkey.clone();
@@ -867,7 +921,7 @@ impl Bot {
         let task_asset = asset.clone();
 
         let handle = tokio::spawn(async move {
-            if let Err(e) = market.start().await {
+            if let Err(e) = market.start(trading_enabled, api_key_valid).await {
                 if let (Some(conns), Some(pk)) = (&ws_conns, &bot_pubkey) {
                     broadcast_to_user(conns, pk, UpdateFrontend::CancelMarket(task_asset.clone()))
                         .await;
@@ -1198,6 +1252,7 @@ impl Bot {
         self.pool = Some(pool);
         self.rhai_engine = Some(rhai_engine);
         self.strategy_cache = Some(strategy_cache);
+        self.refresh_builder_approval_status(&pubkey).await;
 
         let Some(mut update_rv) = self.update_rv.take() else {
             return Err(Error::Custom("bot update receiver missing".to_string()));
@@ -1364,6 +1419,18 @@ impl Bot {
                     M::AuthFailed(msg) => {
                         log::error!("[bot] auth failed: {msg} — notifying main loop");
                         queue_bot_event(&upd_bot_tx, BotEvent::AuthFailed(msg), "AuthFailed").await;
+                    }
+
+                    M::BuilderApprovalFailed(msg) => {
+                        log::error!(
+                            "[bot] builder fee approval failed: {msg} — notifying main loop"
+                        );
+                        queue_bot_event(
+                            &upd_bot_tx,
+                            BotEvent::BuilderApprovalFailed(msg),
+                            "BuilderApprovalFailed",
+                        )
+                        .await;
                     }
 
                     M::FeedDied(asset) => {
@@ -1543,7 +1610,7 @@ impl Bot {
                     // Block trading commands when key is invalid
                     if !self.key_valid {
                         match &event {
-                            AddMarket(_) | ResumeMarket(_) | ResumeAll | ManualUpdateMargin(_) | UpdateMarketStrategy(_) => {
+                            ResumeMarket(_) | ResumeAll => {
                                 self.send_to_frontend(UserError(
                                     "API key expired or revoked. Please re-authorize in Settings.".to_string(),
                                 )).await;
@@ -1551,6 +1618,18 @@ impl Bot {
                                 continue;
                             }
                             // Allow ReloadWallet, SyncMargin, PauseAll, PauseMarket, RemoveMarket, GetSession, Kill, etc.
+                            _ => {}
+                        }
+                    }
+                    if !self.builder_approved {
+                        match &event {
+                            ResumeMarket(_) | ResumeAll => {
+                                self.send_to_frontend(UserError(
+                                    "Builder fee has not been approved. Please approve builder fees in Settings.".to_string(),
+                                )).await;
+                                self.send_to_frontend(NeedsBuilderApproval(true)).await;
+                                continue;
+                            }
                             _ => {}
                         }
                     }
@@ -1715,6 +1794,25 @@ impl Bot {
                         }
 
                         MarketComm(command) => {
+                            if !self.key_valid && matches!(command.cmd, MarketCommand::Resume) {
+                                self.send_to_frontend(UserError(
+                                    "API key expired or revoked. Please re-authorize in Settings."
+                                        .to_string(),
+                                ))
+                                .await;
+                                self.send_to_frontend(NeedsApiKey(true)).await;
+                                continue;
+                            }
+                            if !self.builder_approved
+                                && matches!(command.cmd, MarketCommand::Resume)
+                            {
+                                self.send_to_frontend(UserError(
+                                    "Builder fee has not been approved. Please approve builder fees in Settings.".to_string(),
+                                ))
+                                .await;
+                                self.send_to_frontend(NeedsBuilderApproval(true)).await;
+                                continue;
+                            }
                             if let MarketCommand::UpdateStrategy(_, _, ref name) = command.cmd {
                                 let mut guard = session.lock().await;
                                 if let Some(s) = guard.get_mut(&command.asset) {
@@ -2051,6 +2149,44 @@ impl Bot {
                             }
                         }
 
+                        BuilderApprovalFailed(msg) => {
+                            log::error!(
+                                "[bot] builder fee approval failed: {msg} — pausing all markets"
+                            );
+                            self.builder_approved = false;
+                            self.send_to_frontend(NeedsBuilderApproval(true)).await;
+                            self.send_to_frontend(UserError(
+                                "Builder fee has not been approved. Please approve builder fees in Settings.".to_string(),
+                            ))
+                            .await;
+                            let paused = self.pause_all().await;
+                            let paused_set: HashSet<_> = paused.iter().cloned().collect();
+                            let mut guard = session.lock().await;
+                            for (asset, s) in guard.iter_mut() {
+                                if paused_set.contains(asset) {
+                                    s.is_paused = true;
+                                }
+                            }
+                            drop(guard);
+                            for asset in &paused {
+                                broadcast_to_user(
+                                    &ws_connections,
+                                    &pubkey,
+                                    MarketInfoEdit((
+                                        asset.clone(),
+                                        crate::EditMarketInfo::Paused(true),
+                                    )),
+                                )
+                                .await;
+                            }
+                        }
+
+                        BuilderApproved => {
+                            self.builder_approved = true;
+                            self.send_to_frontend(NeedsBuilderApproval(false)).await;
+                            log::info!("[bot] builder fee approval restored");
+                        }
+
                         PauseAll => {
                             let paused = self.pause_all().await;
                             let paused_set: HashSet<_> = paused.iter().cloned().collect();
@@ -2084,6 +2220,7 @@ impl Bot {
                         }
 
                         GetSession => {
+                            self.refresh_builder_approval_status(&pubkey).await;
                             let sess: Vec<MarketInfo> = {
                                 let guard = session.lock().await;
                                 guard.values().map(MarketInfo::from).collect()
@@ -2097,7 +2234,12 @@ impl Bot {
                                 },
                             };
 
-                            self.send_to_frontend(LoadSession((sess, universe))).await;
+                            self.send_to_frontend(LoadSession(UserSession {
+                                markets: sess,
+                                universe,
+                                agent_approved: self.key_valid,
+                                builder_approved: self.builder_approved,
+                            })).await;
                         }
 
                         Kill => {
@@ -2156,6 +2298,10 @@ pub enum BotEvent {
     ReloadWallet(alloy::signers::local::PrivateKeySigner),
     #[serde(skip)]
     AuthFailed(String),
+    #[serde(skip)]
+    BuilderApprovalFailed(String),
+    #[serde(skip)]
+    BuilderApproved,
     #[serde(skip)]
     SyncMarketFeeds(SyncMarketFeeds),
     #[serde(skip)]

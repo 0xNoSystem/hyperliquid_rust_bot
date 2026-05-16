@@ -127,6 +127,14 @@ impl SignalEngine {
         self.strategy.reset_scope();
     }
 
+    pub fn set_trading_enabled(&mut self, enabled: bool) {
+        self.paused = !enabled;
+        if !enabled {
+            self.state = EngineState::Idle;
+            self.pending_orders = None;
+        }
+    }
+
     pub fn add_indicator(&mut self, id: IndexId) {
         let key = (Arc::clone(&id.0), id.2);
         if let Some(tracker) = self.trackers.get_mut(&key) {

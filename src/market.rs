@@ -397,11 +397,18 @@ impl Market {
         ))
     }
 
-    async fn init(&mut self) -> Result<Option<f64>, Error> {
+    async fn init(&mut self, api_key_valid: bool) -> Result<(Option<f64>, Option<String>), Error> {
         //check if lev > max_lev
         let lev = self.lev.min(self.asset.max_leverage);
-        Self::update_lev(&self.exchange_client, self.asset.name.as_str(), lev).await?;
         self.lev = lev;
+        let mut auth_error = None;
+        if api_key_valid {
+            match Self::update_lev(&self.exchange_client, self.asset.name.as_str(), lev).await {
+                Ok(lev) => self.lev = lev,
+                Err(Error::AuthError(msg)) => auth_error = Some(msg),
+                Err(err) => return Err(err),
+            }
+        }
 
         if !send_engine_command(
             &self.senders.engine_tx,
@@ -421,7 +428,7 @@ impl Market {
         )
         .await?;
         let last_price = self.load_engine(5000).await?;
-        Ok(last_price)
+        Ok((last_price, auth_error))
     }
 
     async fn update_lev(client: &ExchangeClient, asset: &str, lev: usize) -> Result<usize, Error> {
@@ -609,6 +616,15 @@ impl Market {
                 )
                 .await;
             }
+            MarketCommand::BuilderApprovalError(msg) => {
+                let _ = send_market_update(
+                    bot_update_tx,
+                    asset,
+                    "builder approval failure",
+                    MarketUpdate::BuilderApprovalFailed(msg),
+                )
+                .await;
+            }
             _ => {}
         }
     }
@@ -625,9 +641,12 @@ impl Market {
 }
 
 impl Market {
-    pub async fn start(mut self) -> Result<(), Error> {
+    pub async fn start(mut self, trading_enabled: bool, api_key_valid: bool) -> Result<(), Error> {
         use ExecCommand::*;
-        let last_price = self.init().await?;
+        let (last_price, auth_error) = self.init(api_key_valid).await?;
+        let trading_enabled = trading_enabled && auth_error.is_none();
+        self.signal_engine.set_trading_enabled(trading_enabled);
+        self.executor.set_trading_enabled(trading_enabled);
 
         let info = MarketInfo {
             asset: self.asset.name.clone(),
@@ -636,7 +655,7 @@ impl Market {
             strategy_name: self.strategy.0.clone(),
             margin: self.margin,
             pnl: 0.0,
-            is_paused: false,
+            is_paused: !trading_enabled,
             indicators: self.signal_engine.get_indicators_data(),
             position: None,
             engine_state: EngineView::Idle,
@@ -648,6 +667,15 @@ impl Market {
             MarketUpdate::InitMarket(info),
         )
         .await;
+        if let Some(msg) = auth_error {
+            let _ = send_market_update(
+                &self.senders.bot_tx,
+                self.asset.name.as_str(),
+                "auth failure",
+                MarketUpdate::AuthFailed(msg),
+            )
+            .await;
+        }
 
         let mut signal_engine = self.signal_engine;
         let mut executor = self.executor;
@@ -1227,6 +1255,20 @@ impl Market {
                     .await;
                 }
 
+                MarketCommand::BuilderApprovalError(msg) => {
+                    log::warn!(
+                        "[market:{}] builder fee approval error from executor: {msg}",
+                        asset.name
+                    );
+                    let _ = send_market_update(
+                        &bot_update_tx,
+                        asset.name.as_str(),
+                        "builder approval failure",
+                        MarketUpdate::BuilderApprovalFailed(msg),
+                    )
+                    .await;
+                }
+
                 MarketCommand::ReloadWallet(signer) => {
                     let market_client = exchange_client_with_timeout(
                         "market wallet reload",
@@ -1243,6 +1285,57 @@ impl Market {
                     match (market_client, exec_client) {
                         (Ok(new_client), Ok(exec_client)) => {
                             self.exchange_client = new_client;
+                            match Self::update_lev(
+                                &self.exchange_client,
+                                asset.name.as_str(),
+                                self.lev,
+                            )
+                            .await
+                            {
+                                Ok(lev) => {
+                                    self.lev = lev;
+                                    let _ = send_engine_command(
+                                        &engine_update_tx,
+                                        asset.name.as_str(),
+                                        "wallet reload leverage",
+                                        EngineCommand::UpdateExecParams(ExecParam::Lev(lev)),
+                                    )
+                                    .await;
+                                    let _ = send_market_update(
+                                        &bot_update_tx,
+                                        asset.name.as_str(),
+                                        "wallet reload leverage",
+                                        MarketUpdate::MarketInfoUpdate((
+                                            asset.name.clone(),
+                                            EditMarketInfo::Lev(lev),
+                                        )),
+                                    )
+                                    .await;
+                                }
+                                Err(Error::AuthError(msg)) => {
+                                    let _ = send_market_update(
+                                        &bot_update_tx,
+                                        asset.name.as_str(),
+                                        "wallet reload auth failure",
+                                        MarketUpdate::AuthFailed(msg),
+                                    )
+                                    .await;
+                                    continue;
+                                }
+                                Err(err) => {
+                                    let _ = send_market_update(
+                                        &bot_update_tx,
+                                        asset.name.as_str(),
+                                        "wallet reload leverage error",
+                                        MarketUpdate::RelayToFrontend(UpdateFrontend::UserError(
+                                            format!(
+                                                "Failed to apply leverage after API key reload: {err}"
+                                            ),
+                                        )),
+                                    )
+                                    .await;
+                                }
+                            }
                             send_exec_command(
                                 &self.senders.exec_tx,
                                 asset.name.as_str(),
@@ -1411,6 +1504,8 @@ pub enum MarketCommand {
     ReloadWallet(PrivateKeySigner),
     #[serde(skip)]
     AuthError(String),
+    #[serde(skip)]
+    BuilderApprovalError(String),
     Resume,
     Pause,
     Close,
@@ -1436,6 +1531,7 @@ pub enum MarketUpdate {
     MarketInfoUpdate((String, EditMarketInfo)),
     RelayToFrontend(UpdateFrontend),
     AuthFailed(String),
+    BuilderApprovalFailed(String),
     FeedDied(String), // asset name — Bot should remove this market
 }
 

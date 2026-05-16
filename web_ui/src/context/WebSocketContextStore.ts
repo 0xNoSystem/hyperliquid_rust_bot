@@ -13,6 +13,8 @@ export interface WebSocketContextValue {
     isOffline: boolean;
     needsApiKey: boolean;
     setNeedsApiKey: (v: boolean) => void;
+    needsBuilderApproval: boolean;
+    setNeedsBuilderApproval: (v: boolean) => void;
     sendCommand: (body: unknown) => Promise<Response>;
     dismissError: () => void;
     cacheMarket: (asset: string) => void;

@@ -402,9 +402,14 @@ export interface AddMarketInfo {
     config?: IndexId[];
 }
 
-export type BackendLoadSessionPayload =
-    | [BackendMarketInfo[], assetMeta[]]
-    | assetMeta[];
+export interface UserSession {
+    markets: BackendMarketInfo[];
+    universe: assetMeta[];
+    agentApproved: boolean;
+    builderApproved: boolean;
+}
+
+export type BackendLoadSessionPayload = UserSession;
 
 export type MarketStream =
     | { price: { asset: string; price: number } }
@@ -595,6 +600,8 @@ export type Message =
     | { backtestProgress: BacktestProgressUpdate }
     | { backtestResult: BacktestResultUpdate }
     | { loadSession: BackendLoadSessionPayload }
+    | { needsApiKey: boolean }
+    | { needsBuilderApproval: boolean }
     | { status: BackendStatus };
 
 export type assetMargin = [string, number];

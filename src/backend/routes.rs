@@ -22,7 +22,8 @@ use crate::backtest::{BacktestResult, BacktestRunRequest};
 use crate::metrics::{RuntimeMetricsSnapshot, runtime_metrics_snapshot};
 use crate::{
     BacktestProgressUpdate, BacktestResultUpdate, BacktestRunError, BacktestRunPayload,
-    BacktestRunResponse, Backtester, Bot, BotEvent, UpdateFrontend, get_time_now,
+    BacktestRunResponse, Backtester, Bot, BotEvent, DEFAULT_BUILDER_ADDRESS, DEFAULT_BUILDER_FEE,
+    UpdateFrontend, get_time_now,
 };
 
 const WS_SEND_TIMEOUT_SECS: u64 = 5;
@@ -32,6 +33,8 @@ const DEFAULT_STRATEGY_LIST_LIMIT: i64 = 200;
 const MAX_STRATEGY_LIST_LIMIT: i64 = 500;
 const HYPERLIQUID_HTTP_TIMEOUT_SECS: u64 = 10;
 const AGENT_NAME_PREFIX_MAX_LEN: usize = 64;
+const MAX_PERP_BUILDER_FEE: u64 = 100; // 0.1%, Hyperliquid f units.
+const PENDING_BUILDER_APPROVAL_TTL_SECS: u64 = 300;
 const STRATEGY_NAME_MAX_LEN: usize = 128;
 const STRATEGY_SCRIPT_MAX_BYTES: usize = 64 * 1024;
 const STRATEGY_INDICATORS_MAX: usize = 512;
@@ -73,6 +76,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // Agent approval
         .route("/agent/prepare", post(prepare_agent))
         .route("/agent/approve", post(approve_agent_route))
+        .route("/builder/prepare", post(prepare_builder_fee))
+        .route("/builder/approve", post(approve_builder_fee_route))
         // WebSocket
         .route("/ws", get(ws_handler))
         // Middleware
@@ -1370,6 +1375,292 @@ async fn approve_agent_route(
     StatusCode::OK.into_response()
 }
 
+#[derive(Deserialize)]
+struct PrepareBuilderFeePayload {
+    builder: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApproveBuilderFeePayload {
+    signature: SignaturePayload,
+}
+
+async fn prepare_builder_fee(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Json(payload): Json<PrepareBuilderFeePayload>,
+) -> impl IntoResponse {
+    log::info!(
+        "[builder/prepare] user={} requested builder fee approval preparation",
+        auth.pubkey
+    );
+
+    let (builder, normalized_builder) = match parse_builder_address(payload.builder.as_deref()) {
+        Ok(parsed) => parsed,
+        Err((status, message)) => return (status, message).into_response(),
+    };
+    let fee_bps = match validate_builder_fee(DEFAULT_BUILDER_FEE) {
+        Ok(fee) => fee,
+        Err((status, message)) => return (status, message).into_response(),
+    };
+    let nonce = auth::timestamp_nonce();
+    let max_fee_rate = format!("{}%", DEFAULT_BUILDER_FEE as f64 / 1000.0);
+
+    log::info!(
+        "[builder/prepare] user={} builder={} fee={} nonce={}",
+        auth.pubkey,
+        normalized_builder,
+        fee_bps,
+        nonce
+    );
+
+    let approve_builder_fee = hyperliquid_rust_sdk::ApproveBuilderFee {
+        signature_chain_id: 421614,
+        hyperliquid_chain: "Mainnet".to_string(),
+        builder,
+        max_fee_rate: max_fee_rate.clone(),
+        nonce,
+    };
+
+    let eip712_payload = serde_json::json!({
+        "domain": {
+            "name": "HyperliquidSignTransaction",
+            "version": "1",
+            "chainId": 421614,
+            "verifyingContract": "0x0000000000000000000000000000000000000000"
+        },
+        "primaryType": "HyperliquidTransaction:ApproveBuilderFee",
+        "types": {
+            "EIP712Domain": [
+                {"name": "name", "type": "string"},
+                {"name": "version", "type": "string"},
+                {"name": "chainId", "type": "uint256"},
+                {"name": "verifyingContract", "type": "address"}
+            ],
+            "HyperliquidTransaction:ApproveBuilderFee": [
+                {"name": "hyperliquidChain", "type": "string"},
+                {"name": "maxFeeRate", "type": "string"},
+                {"name": "builder", "type": "address"},
+                {"name": "nonce", "type": "uint64"}
+            ]
+        },
+        "message": {
+            "hyperliquidChain": "Mainnet",
+            "signatureChainId": "0x66eee",
+            "maxFeeRate": max_fee_rate,
+            "builder": normalized_builder,
+            "nonce": nonce,
+            "type": "approveBuilderFee"
+        }
+    });
+
+    {
+        let mut store = state.pending_builder_fee_approvals.write().await;
+        store.insert(
+            auth.pubkey,
+            super::app_state::PendingBuilderFeeApproval {
+                approve_builder_fee,
+                builder,
+                fee: fee_bps,
+                created_at: Instant::now(),
+            },
+        );
+    }
+
+    Json(serde_json::json!({ "eip712Payload": eip712_payload })).into_response()
+}
+
+async fn approve_builder_fee_route(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Json(payload): Json<ApproveBuilderFeePayload>,
+) -> impl IntoResponse {
+    log::info!(
+        "[builder/approve] user={} submitting builder fee approval",
+        auth.pubkey
+    );
+
+    let pending = {
+        let mut store = state.pending_builder_fee_approvals.write().await;
+        store.remove(&auth.pubkey)
+    };
+    let Some(pending) = pending else {
+        log::warn!(
+            "[builder/approve] no pending builder fee approval for user={}",
+            auth.pubkey
+        );
+        return (
+            StatusCode::NOT_FOUND,
+            "No pending builder fee approval — call /builder/prepare first",
+        )
+            .into_response();
+    };
+    if builder_approval_expired(pending.created_at, Instant::now()) {
+        log::warn!(
+            "[builder/approve] pending builder fee approval expired for user={}",
+            auth.pubkey
+        );
+        return (
+            StatusCode::GONE,
+            "Pending builder fee approval expired — call /builder/prepare again",
+        )
+            .into_response();
+    }
+
+    let action = match serde_json::to_value(hyperliquid_rust_sdk::Actions::ApproveBuilderFee(
+        pending.approve_builder_fee.clone(),
+    )) {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("[builder/approve] failed to serialize ApproveBuilderFee: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let exchange_payload = serde_json::json!({
+        "action": action,
+        "nonce": pending.approve_builder_fee.nonce,
+        "signature": {
+            "r": payload.signature.r,
+            "s": payload.signature.s,
+            "v": payload.signature.v
+        },
+        "expiresAfter": null,
+        "isFrontend": true,
+        "vaultAddress": null
+    });
+
+    let body = match serde_json::to_string(&exchange_payload) {
+        Ok(body) => body,
+        Err(err) => {
+            log::error!("[builder/approve] failed to serialize exchange payload: {err}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to submit builder fee approval".to_string(),
+            )
+                .into_response();
+        }
+    };
+    log::debug!("[builder/approve] exchange payload bytes={}", body.len());
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(HYPERLIQUID_HTTP_TIMEOUT_SECS))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            log::error!("[builder/approve] failed to build HTTP client: {err}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to submit builder fee approval".to_string(),
+            )
+                .into_response();
+        }
+    };
+    let resp = match client
+        .post("https://api.hyperliquid.xyz/exchange")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            log::error!("[builder/approve] Hyperliquid exchange request failed: {err}");
+            return (StatusCode::BAD_GATEWAY, "Failed to reach Hyperliquid").into_response();
+        }
+    };
+
+    let hl_status = resp.status();
+    let hl_body = match resp.text().await {
+        Ok(body) => body,
+        Err(err) => {
+            log::error!("[builder/approve] failed to read Hyperliquid response body: {err}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                "Failed to read Hyperliquid response".to_string(),
+            )
+                .into_response();
+        }
+    };
+    log::info!("[builder/approve] HL /exchange responded: status={hl_status}");
+
+    if !hl_status.is_success() {
+        log::error!("[builder/approve] Hyperliquid request failed: {hl_body}");
+        return (
+            StatusCode::BAD_GATEWAY,
+            format!("Hyperliquid rejected: {hl_body}"),
+        )
+            .into_response();
+    }
+
+    if let Ok(hl_json) = serde_json::from_str::<serde_json::Value>(&hl_body)
+        && hl_json.get("status").and_then(|s| s.as_str()) == Some("err")
+    {
+        let msg = hl_json
+            .get("response")
+            .and_then(|r| r.as_str())
+            .unwrap_or("Unknown error");
+        log::error!("[builder/approve] Hyperliquid rejected builder fee approval: {msg}");
+        return (
+            StatusCode::BAD_GATEWAY,
+            format!("Hyperliquid rejected: {msg}"),
+        )
+            .into_response();
+    }
+
+    log::info!(
+        "[builder/approve] builder fee approval confirmed user={} builder={:?} fee={}",
+        auth.pubkey,
+        pending.builder,
+        pending.fee
+    );
+    broadcast_to_user(
+        &state.ws_connections,
+        &auth.pubkey,
+        UpdateFrontend::NeedsBuilderApproval(false),
+    )
+    .await;
+    if let Some(tx) = live_bot_sender(&state, &auth.pubkey).await
+        && let Err(err) = tx.try_send(BotEvent::BuilderApproved)
+    {
+        log::warn!("[builder/approve] failed to notify bot of builder approval: {err}");
+    }
+    // TODO: add a migration/table for persisting builder approval metadata
+    // (pubkey, builder_address, builder_fee, approval timestamp).
+    StatusCode::OK.into_response()
+}
+
+fn parse_builder_address(input: Option<&str>) -> Result<(Address, String), (StatusCode, String)> {
+    let raw = input
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_BUILDER_ADDRESS);
+
+    match raw.parse::<Address>() {
+        Ok(address) => Ok((address, format!("{address:?}").to_lowercase())),
+        Err(_) => Err((
+            StatusCode::BAD_REQUEST,
+            "invalid builder address".to_string(),
+        )),
+    }
+}
+
+fn validate_builder_fee(fee: u64) -> Result<u64, (StatusCode, String)> {
+    if fee > MAX_PERP_BUILDER_FEE {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("builder fee must be at most {MAX_PERP_BUILDER_FEE}"),
+        ));
+    }
+
+    Ok(fee)
+}
+
+fn builder_approval_expired(created_at: Instant, now: Instant) -> bool {
+    now.duration_since(created_at).as_secs() > PENDING_BUILDER_APPROVAL_TTL_SECS
+}
+
 fn normalize_agent_name_prefix(input: Option<&str>) -> Result<String, (StatusCode, String)> {
     let prefix = input
         .map(str::trim)
@@ -1997,6 +2288,48 @@ mod tests {
         );
         assert!(normalize_agent_name_prefix(Some("x".repeat(65).as_str())).is_err());
         assert!(normalize_agent_name_prefix(Some("bad\nname")).is_err());
+    }
+
+    #[test]
+    fn parse_builder_address_parses_and_normalizes_valid_address() {
+        let (_, normalized) =
+            parse_builder_address(Some(" 0x8b56d7FBC8ad2a90E1C1366CA428efb4b5Bed18F "))
+                .expect("valid builder address should parse");
+
+        assert_eq!(normalized, "0x8b56d7fbc8ad2a90e1c1366ca428efb4b5bed18f");
+    }
+
+    #[test]
+    fn parse_builder_address_rejects_invalid_address() {
+        assert!(parse_builder_address(Some("not-address")).is_err());
+    }
+
+    #[test]
+    fn validate_builder_fee_accepts_values_up_to_max() {
+        assert_eq!(validate_builder_fee(0).expect("zero fee should work"), 0);
+        assert_eq!(
+            validate_builder_fee(MAX_PERP_BUILDER_FEE).expect("max fee should work"),
+            MAX_PERP_BUILDER_FEE
+        );
+    }
+
+    #[test]
+    fn validate_builder_fee_rejects_values_above_max() {
+        assert!(validate_builder_fee(MAX_PERP_BUILDER_FEE + 1).is_err());
+    }
+
+    #[test]
+    fn builder_approval_expired_uses_configured_ttl() {
+        let now = Instant::now();
+
+        assert!(!builder_approval_expired(
+            now - Duration::from_secs(PENDING_BUILDER_APPROVAL_TTL_SECS),
+            now
+        ));
+        assert!(builder_approval_expired(
+            now - Duration::from_secs(PENDING_BUILDER_APPROVAL_TTL_SECS + 1),
+            now
+        ));
     }
 
     #[test]

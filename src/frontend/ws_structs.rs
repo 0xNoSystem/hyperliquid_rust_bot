@@ -97,6 +97,15 @@ pub struct BacktestResultUpdate {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UserSession {
+    pub markets: Vec<MarketInfo>,
+    pub universe: Vec<AssetMeta>,
+    pub agent_approved: bool,
+    pub builder_approved: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum UpdateFrontend {
     PreconfirmMarket(String),
     ConfirmMarket(MarketInfo),
@@ -108,10 +117,11 @@ pub enum UpdateFrontend {
     UserError(String),
     BacktestProgress(BacktestProgressUpdate),
     BacktestResult(Box<BacktestResultUpdate>),
-    LoadSession((Vec<MarketInfo>, Vec<AssetMeta>)),
+    LoadSession(UserSession),
     Status(BackendStatus),
     StrategyLog(ScriptLog),
     NeedsApiKey(bool),
+    NeedsBuilderApproval(bool),
 }
 
 #[derive(Clone, Debug, Serialize)]

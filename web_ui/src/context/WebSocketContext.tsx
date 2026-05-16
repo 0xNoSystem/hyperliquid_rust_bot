@@ -38,16 +38,6 @@ const dedupeMarkets = (markets: MarketInfo[]): MarketInfo[] => {
     return Array.from(map.values());
 };
 
-const isAssetMeta = (value: unknown): value is assetMeta =>
-    typeof value === "object" &&
-    value !== null &&
-    "name" in value &&
-    "szDecimals" in value &&
-    "maxLeverage" in value;
-
-const isAssetMetaArray = (value: unknown): value is assetMeta[] =>
-    Array.isArray(value) && (value.length === 0 || isAssetMeta(value[0]));
-
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     children,
 }) => {
@@ -62,6 +52,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [isOffline, setIsOffline] = useState(false);
     const [needsApiKey, setNeedsApiKey] = useState(false);
+    const [needsBuilderApproval, setNeedsBuilderApproval] = useState(false);
     const [strategies, setStrategies] = useState<Strategy[]>([]);
 
     /** ---------- refs for latest state (CRITICAL) ---------- **/
@@ -339,10 +330,16 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                 return;
             }
 
+            if ("needsBuilderApproval" in payload) {
+                setNeedsBuilderApproval(
+                    payload.needsBuilderApproval as boolean
+                );
+                return;
+            }
+
             if ("updateTotalMargin" in payload) {
                 setIsOffline(false);
                 setTotalMargin(payload.updateTotalMargin);
-                setNeedsApiKey(false);
                 return;
             }
 
@@ -385,14 +382,12 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
             if ("loadSession" in payload) {
                 const session = payload.loadSession;
-                if (isAssetMetaArray(session)) {
-                    setUniverse(session);
-                    return;
-                }
-                const [sessionMarkets, meta] = session;
-                setUniverse(meta);
-                if (sessionMarkets.length > 0) setNeedsApiKey(false);
-                const deduped = dedupeMarkets(sessionMarkets.map(toMarketInfo));
+                setUniverse(session.universe);
+                setNeedsApiKey(!session.agentApproved);
+                setNeedsBuilderApproval(!session.builderApproved);
+                const deduped = dedupeMarkets(
+                    session.markets.map(toMarketInfo)
+                );
                 hasLocalMarketsRef.current = deduped.length > 0;
                 setMarkets(deduped);
             }
@@ -548,6 +543,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         isOffline,
         needsApiKey,
         setNeedsApiKey,
+        needsBuilderApproval,
+        setNeedsBuilderApproval,
         errorMsg,
         sendCommand,
         dismissError,
