@@ -216,8 +216,26 @@ export default function StratEditor() {
         [universe]
     );
 
+    useEffect(() => {
+        if (token) return;
+        setActive(null);
+        setIsNew(false);
+        setEditing(false);
+        setLoading(false);
+        setSaving(false);
+        setError(null);
+        setSuccess(null);
+        setName("");
+        setOnIdle("");
+        setOnOpen("");
+        setOnBusy("");
+        setIndicators([]);
+        setStateText("");
+    }, [token]);
+
     const loadStrategy = useCallback(
         async (strat: Strategy) => {
+            if (!token) return;
             setLoading(true);
             setError(null);
             try {

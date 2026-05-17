@@ -212,6 +212,7 @@ impl SignalEngine {
     }
 
     fn apply_open_position_update(&mut self, pos: Option<OpenPosInfo>) {
+        let previous_pos = self.exec_params.open_pos;
         self.exec_params.open_pos = pos;
 
         if self.paused {
@@ -220,6 +221,9 @@ impl SignalEngine {
 
         match pos {
             Some(open_pos) => {
+                if matches!(self.state, EngineState::Closing(_)) && previous_pos == Some(open_pos) {
+                    return;
+                }
                 self.state = EngineState::Open(open_pos);
                 self.queue_pending_tpsl(open_pos);
             }
@@ -278,6 +282,7 @@ impl SignalEngine {
         }
     }
 
+    #[inline]
     fn is_traded_asset(&self, asset: &Arc<str>) -> bool {
         Arc::ptr_eq(&self.asset, asset) || self.asset == *asset
     }
@@ -1381,7 +1386,7 @@ impl PendingOpen {
 mod tests {
     use std::sync::Arc;
 
-    use super::{EngineCommand, ExecParam, SignalEngine};
+    use super::{EngineCommand, EngineState, ExecParam, SignalEngine};
     use crate::backend::scripting::{CompiledStrategy, compile_strategy, create_engine};
     use crate::broadcast::PriceData;
     use crate::{
@@ -1652,6 +1657,66 @@ mod tests {
             .await
             .expect("stop command accepted");
         handle.await.expect("engine task should finish");
+    }
+
+    #[test]
+    fn unchanged_position_update_preserves_closing_state() {
+        let rhai_engine = Arc::new(create_engine());
+        let compiled = CompiledStrategy::noop(rhai_engine.as_ref());
+        let asset = Arc::<str>::from("BTC");
+        let engine = SignalEngine::new_backtest(
+            100.0,
+            2,
+            rhai_engine,
+            compiled,
+            Vec::new(),
+            Arc::clone(&asset),
+        );
+        let mut engine = engine;
+        let open_pos = OpenPosInfo {
+            side: Side::Long,
+            size: 1.0,
+            entry_px: 100.0,
+            open_time: 1_000,
+        };
+
+        engine.exec_params.open_pos = Some(open_pos);
+        engine.state = EngineState::Closing(None);
+        engine.apply_open_position_update(Some(open_pos));
+
+        assert!(matches!(engine.state, EngineState::Closing(None)));
+    }
+
+    #[test]
+    fn changed_position_update_exits_closing_state() {
+        let rhai_engine = Arc::new(create_engine());
+        let compiled = CompiledStrategy::noop(rhai_engine.as_ref());
+        let asset = Arc::<str>::from("BTC");
+        let engine = SignalEngine::new_backtest(
+            100.0,
+            2,
+            rhai_engine,
+            compiled,
+            Vec::new(),
+            Arc::clone(&asset),
+        );
+        let mut engine = engine;
+        let open_pos = OpenPosInfo {
+            side: Side::Long,
+            size: 1.0,
+            entry_px: 100.0,
+            open_time: 1_000,
+        };
+        let reduced_pos = OpenPosInfo {
+            size: 0.5,
+            ..open_pos
+        };
+
+        engine.exec_params.open_pos = Some(open_pos);
+        engine.state = EngineState::Closing(None);
+        engine.apply_open_position_update(Some(reduced_pos));
+
+        assert!(matches!(engine.state, EngineState::Open(pos) if pos == reduced_pos));
     }
 
     #[tokio::test]

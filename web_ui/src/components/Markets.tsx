@@ -10,6 +10,7 @@ import {
     ShieldCheck,
     LayoutGrid,
     List,
+    Wallet,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import MarketCard from "./MarketCard";
@@ -17,8 +18,10 @@ import MarketStrip from "./MarketStrip";
 import { AddMarket } from "./AddMarket";
 import { CachedMarket } from "./CachedMarket";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
+import { useAuth } from "../context/AuthContextStore";
 import { ErrorBanner } from "./ErrorBanner";
 import LoadingDots from "./Loading";
+import WalletConnectModal from "./WalletConnectModal";
 
 const MARKET_LAYOUT_STORAGE_KEY = "markets.layout.v1";
 type MarketLayout = "card" | "strip";
@@ -49,10 +52,12 @@ export default function MarketsPage() {
         requestPauseAll,
         requestSyncMargin,
     } = useWebSocketContext();
+    const { isAuthenticated } = useAuth();
 
     const navigate = useNavigate();
     const location = useLocation();
     const [successBanner, setSuccessBanner] = useState<string | null>(null);
+    const [connectOpen, setConnectOpen] = useState(false);
 
     useEffect(() => {
         const state = location.state as {
@@ -148,11 +153,15 @@ export default function MarketsPage() {
 
     const openAddModal = useCallback(
         (initialAsset?: string) => {
+            if (!isAuthenticated) {
+                setConnectOpen(true);
+                return;
+            }
             requestSyncMargin().catch(console.error);
             setAddInitialAsset(initialAsset);
             setShowAdd(true);
         },
-        [requestSyncMargin]
+        [isAuthenticated, requestSyncMargin]
     );
 
     const handleCloseAdd = () => {
@@ -166,6 +175,10 @@ export default function MarketsPage() {
     };
 
     const handleSyncMargin = () => {
+        if (!isAuthenticated) {
+            setConnectOpen(true);
+            return;
+        }
         setSyncingMargin(true);
         requestSyncMargin()
             .catch(console.error)
@@ -199,7 +212,15 @@ export default function MarketsPage() {
                                 </button>
                             </div>
                             <div className="font-mono text-3xl tracking-tight tabular-nums">
-                                {needsApiKey ? (
+                                {!isAuthenticated ? (
+                                    <button
+                                        onClick={() => setConnectOpen(true)}
+                                        className="cursor-pointer text-accent-brand-strong mt-1 flex items-center gap-2 text-sm font-medium hover:underline"
+                                    >
+                                        <Wallet className="h-4 w-4" />
+                                        Connect Wallet
+                                    </button>
+                                ) : needsApiKey ? (
                                     <button
                                         onClick={() => navigate("/settings")}
                                         className="text-accent-info-link mt-1 flex items-center gap-2 text-sm font-medium hover:underline"
@@ -229,6 +250,7 @@ export default function MarketsPage() {
                         {markets.length !== 0 && (
                             <button
                                 onClick={() => openAddModal()}
+                                disabled={!isAuthenticated}
                                 className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover w-full rounded-md border px-3 py-2"
                             >
                                 <div className="flex items-center justify-center gap-2">
@@ -239,6 +261,7 @@ export default function MarketsPage() {
                         )}
                         <button
                             className="border-action-close-border bg-action-close-bg text-action-close-text hover:bg-action-close-hover w-full rounded-md border px-3 py-2"
+                            disabled={!isAuthenticated}
                             onClick={() =>
                                 requestCloseAll().catch((err) =>
                                     console.error("Close all failed", err)
@@ -252,6 +275,7 @@ export default function MarketsPage() {
                         </button>
                         <button
                             className="border-action-pause-border bg-action-pause-bg text-action-pause-text hover:bg-action-pause-hover w-full rounded-md border px-3 py-2"
+                            disabled={!isAuthenticated}
                             onClick={() =>
                                 requestPauseAll().catch((err) =>
                                     console.error("Pause all failed", err)
@@ -296,7 +320,26 @@ export default function MarketsPage() {
                 <main>
                     {markets.length === 0 && (
                         <div className="border-line-subtle bg-surface-pane grid place-items-center rounded-md border p-12 text-center">
-                            {needsApiKey ? (
+                            {!isAuthenticated ? (
+                                <div>
+                                    <Wallet className="text-app-text/30 mx-auto h-12 w-12" />
+                                    <h2 className="mt-4 text-2xl font-semibold">
+                                        Connect your wallet
+                                    </h2>
+                                    <p className="text-app-text/60 mt-1">
+                                        Explore the terminal first. Connect your
+                                        wallet when you are ready to add markets
+                                        and configure approvals.
+                                    </p>
+                                    <button
+                                        onClick={() => setConnectOpen(true)}
+                                        className="border-accent-brand-strong bg-accent-brand-strong/80 text-white hover:bg-accent-brand-strong cursor-pointer mt-5 inline-flex items-center gap-2 rounded-md border px-4 py-2"
+                                    >
+                                        <Wallet className="h-4 w-4" /> Connect
+                                        Wallet
+                                    </button>
+                                </div>
+                            ) : needsApiKey ? (
                                 <div>
                                     <KeyRound className="text-app-text/30 mx-auto h-12 w-12" />
                                     <h2 className="mt-4 text-2xl font-semibold">
@@ -609,6 +652,10 @@ export default function MarketsPage() {
                 )}
             </AnimatePresence>
             <style>{`@keyframes scan{0%{transform:translateX(0)}100%{transform:translateX(-25%)}}`}</style>
+            <WalletConnectModal
+                open={connectOpen}
+                onClose={() => setConnectOpen(false)}
+            />
         </div>
     );
 }

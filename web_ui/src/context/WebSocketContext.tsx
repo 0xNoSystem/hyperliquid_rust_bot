@@ -122,6 +122,20 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     /** ---------- localStorage hydration (scoped per wallet) ---------- **/
     useEffect(() => {
+        if (!address) {
+            setMarkets([]);
+            setCachedMarkets([]);
+            setBacktestRuns({});
+            setTotalMargin(0);
+            setNeedsApiKey(false);
+            setNeedsBuilderApproval(false);
+            setStrategies([]);
+            setIsOffline(false);
+            setErrorWithTimeout(null);
+            hasLocalMarketsRef.current = false;
+            return;
+        }
+
         try {
             const raw = localStorage.getItem(userKey("markets.v1", address));
             if (raw) {
@@ -152,7 +166,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         } catch {
             console.log("Failed to hydrate localStorage");
         }
-    }, [address]);
+    }, [address, setErrorWithTimeout]);
 
     useEffect(() => {
         if (address)
@@ -400,7 +414,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
     }, [sendCommand]);
 
     const fetchStrategies = useCallback(async () => {
-        if (!tokenRef.current) return;
+        if (!tokenRef.current) {
+            setStrategies([]);
+            return;
+        }
         try {
             const res = await fetch(`${API_URL}/strategies`, {
                 headers: { Authorization: `Bearer ${tokenRef.current}` },

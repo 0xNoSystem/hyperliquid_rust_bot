@@ -5,6 +5,7 @@ import {
     CheckCircle,
     ShieldCheck,
     ExternalLink,
+    Wallet,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
@@ -12,6 +13,7 @@ import { useAuth } from "../context/AuthContextStore";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { ALL_WALLETS, type WalletProvider } from "../wallet";
 import { API_URL } from "../consts";
+import WalletConnectModal from "./WalletConnectModal";
 
 function getActiveProvider(): WalletProvider {
     const w = window as unknown as Record<string, unknown>;
@@ -51,9 +53,10 @@ export default function Settings() {
     const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(
         null
     );
+    const [connectOpen, setConnectOpen] = useState(false);
 
     const navigate = useNavigate();
-    const { token } = useAuth();
+    const { token, isAuthenticated } = useAuth();
     const {
         needsApiKey,
         setNeedsApiKey,
@@ -193,8 +196,46 @@ export default function Settings() {
             </motion.button>
 
             <div className="relative mx-auto mt-14 grid max-w-5xl gap-6 lg:grid-cols-2">
+                {!isAuthenticated && (
+                    <div className="border-accent-brand-strong bg-surface-pane rounded-md border p-6 lg:col-span-2">
+                        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center gap-3">
+                                <Wallet className=" h-8 w-8" />
+                                <div>
+                                    <h2 className="text-xl font-semibold">
+                                        Connect Wallet
+                                    </h2>
+                                    <p className="text-app-text/60 text-sm">
+                                        Wallet login is required before API key
+                                        authorization or builder fee approval.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setConnectOpen(true)}
+                                className="border-accent-brand-strong bg-accent-brand-strong/80 text-white hover:bg-accent-brand-strong cursor-pointer rounded-md border px-4 py-2"
+                            >
+                                Connect Wallet
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <div className="border-line-subtle bg-surface-pane rounded-md border p-6">
-                    {needsApiKey ? (
+                    {!isAuthenticated ? (
+                        <div className="flex items-center gap-3 opacity-60">
+                            <ShieldCheck className="text-app-text/40 h-8 w-8" />
+                            <div>
+                                <h2 className="text-xl font-semibold">
+                                    Trading Agent
+                                </h2>
+                                <p className="text-app-text/60 text-sm">
+                                    Connect your wallet first.
+                                </p>
+                            </div>
+                        </div>
+                    ) : needsApiKey ? (
                         <>
                             <h2 className="mb-2 text-xl font-semibold">
                                 Authorize Trading Agent
@@ -288,7 +329,19 @@ export default function Settings() {
                 </div>
 
                 <div className="border-line-subtle bg-surface-pane rounded-md border p-6">
-                    {needsBuilderApproval ? (
+                    {!isAuthenticated ? (
+                        <div className="flex items-center gap-3 opacity-60">
+                            <ShieldCheck className="text-app-text/40 h-8 w-8" />
+                            <div>
+                                <h2 className="text-xl font-semibold">
+                                    Builder Fee
+                                </h2>
+                                <p className="text-app-text/60 text-sm">
+                                    Connect your wallet first.
+                                </p>
+                            </div>
+                        </div>
+                    ) : needsBuilderApproval ? (
                         <>
                             <h2 className="mb-2 text-xl font-semibold">
                                 Approve Builder Fee
@@ -363,6 +416,10 @@ export default function Settings() {
                     </motion.div>
                 )}
             </AnimatePresence>
+            <WalletConnectModal
+                open={connectOpen}
+                onClose={() => setConnectOpen(false)}
+            />
         </div>
     );
 }

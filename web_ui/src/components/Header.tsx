@@ -1,10 +1,20 @@
 import React, { useState } from "react";
-import { Github, ExternalLink, Moon, Sun, LogOut, Menu, X } from "lucide-react";
+import {
+    Github,
+    ExternalLink,
+    Moon,
+    Sun,
+    LogOut,
+    Menu,
+    X,
+    Wallet,
+} from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
 import { useTheme } from "../context/ThemeContextStore";
 import { useAuth } from "../context/AuthContextStore";
 import RotatingCube from "./Cube";
+import WalletConnectModal from "./WalletConnectModal";
 
 const Header: React.FC = () => {
     const { isOffline } = useWebSocketContext();
@@ -12,10 +22,11 @@ const Header: React.FC = () => {
     const { address, logout } = useAuth();
     const navigate = useNavigate();
     const [menuOpen, setMenuOpen] = useState(false);
+    const [connectOpen, setConnectOpen] = useState(false);
 
     const handleDisconnect = () => {
         logout();
-        navigate("/login", { replace: true });
+        navigate("/", { replace: true });
     };
     const isLight = theme === "light";
 
@@ -107,22 +118,27 @@ const Header: React.FC = () => {
                     >
                         Settings
                     </Link>
-                    <button
-                        onClick={handleDisconnect}
-                        className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-accent-danger-soft/20 hover:text-accent-danger-soft inline-flex items-center gap-2 rounded-md border px-3 py-1"
-                        title={
-                            address
-                                ? `${address.slice(0, 6)}…${address.slice(-4)}`
-                                : "Disconnect"
-                        }
-                    >
-                        <LogOut className="h-4 w-4" />
-                        <span className="text-[12px]">
-                            {address
-                                ? `${address.slice(0, 6)}…${address.slice(-4)}`
-                                : "Disconnect"}
-                        </span>
-                    </button>
+                    {address ? (
+                        <button
+                            onClick={handleDisconnect}
+                            className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-accent-danger-soft/20 hover:text-accent-danger-soft inline-flex items-center gap-2 rounded-md border px-3 py-1"
+                            title={`${address.slice(0, 6)}…${address.slice(-4)}`}
+                        >
+                            <LogOut className="h-4 w-4" />
+                            <span className="text-[12px]">
+                                {`${address.slice(0, 6)}…${address.slice(-4)}`}
+                            </span>
+                        </button>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={() => setConnectOpen(true)}
+                            className="border-accent-brand-strong bg-accent-brand-strong/80 text-white hover:bg-accent-brand inline-flex items-center gap-2 rounded-md border px-3 py-1"
+                        >
+                            <Wallet className="h-4 w-4" />
+                            <span className="text-[12px]">Connect Wallet</span>
+                        </button>
+                    )}
                 </div>
 
                 {/* Mobile burger */}
@@ -206,22 +222,38 @@ const Header: React.FC = () => {
                     >
                         Settings
                     </Link>
-                    <button
-                        onClick={() => {
-                            setMenuOpen(false);
-                            handleDisconnect();
-                        }}
-                        className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-accent-danger-soft/20 hover:text-accent-danger-soft inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2"
-                    >
-                        <LogOut className="h-4 w-4" />
-                        <span className="text-[12px]">
-                            {address
-                                ? `${address.slice(0, 6)}…${address.slice(-4)}`
-                                : "Disconnect"}
-                        </span>
-                    </button>
+                    {address ? (
+                        <button
+                            onClick={() => {
+                                setMenuOpen(false);
+                                handleDisconnect();
+                            }}
+                            className="border-line-subtle bg-app-surface-2 text-app-text hover:bg-accent-danger-soft/20 hover:text-accent-danger-soft inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2"
+                        >
+                            <LogOut className="h-4 w-4" />
+                            <span className="text-[12px]">
+                                {`${address.slice(0, 6)}…${address.slice(-4)}`}
+                            </span>
+                        </button>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setMenuOpen(false);
+                                setConnectOpen(true);
+                            }}
+                            className="border-action-add-border bg-action-add-bg text-action-add-text hover:bg-action-add-hover inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2"
+                        >
+                            <Wallet className="h-4 w-4" />
+                            <span className="text-[12px]">Connect Wallet</span>
+                        </button>
+                    )}
                 </div>
             )}
+            <WalletConnectModal
+                open={connectOpen}
+                onClose={() => setConnectOpen(false)}
+            />
         </header>
     );
 };
