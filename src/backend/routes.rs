@@ -1,4 +1,3 @@
-use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,8 +16,7 @@ use tower_http::trace::TraceLayer;
 
 use super::app_state::{AppState, CachedStrategy, WsConnection, broadcast_to_user};
 use super::auth::{self, AuthUser};
-use super::db::{BacktestResultRow, BacktestRunRow};
-use crate::backtest::{BacktestResult, BacktestRunRequest};
+use crate::backtest::BacktestRunRequest;
 use crate::metrics::{RuntimeMetricsSnapshot, runtime_metrics_snapshot};
 use crate::{
     BacktestProgressUpdate, BacktestResultUpdate, BacktestRunError, BacktestRunPayload,
@@ -41,8 +39,6 @@ const STRATEGY_INDICATORS_MAX: usize = 512;
 const MARKET_PATH_MAX_LEN: usize = 64;
 const NONCE_TTL_SECS: u64 = 300;
 const MAX_PENDING_NONCES: usize = 10_000;
-const READINESS_DB_TIMEOUT_SECS: u64 = 2;
-const DB_QUERY_TIMEOUT_SECS: u64 = 10;
 const BOT_STARTUP_WAIT_TIMEOUT_SECS: u64 = 90;
 const BOT_STARTUP_WAIT_POLL_MS: u64 = 50;
 
@@ -101,14 +97,10 @@ async fn healthz() -> StatusCode {
 }
 
 async fn readyz(State(state): State<Arc<AppState>>) -> StatusCode {
-    match tokio::time::timeout(
-        Duration::from_secs(READINESS_DB_TIMEOUT_SECS),
-        sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&state.pool),
-    )
-    .await
-    {
-        Ok(Ok(1)) => StatusCode::NO_CONTENT,
-        Ok(Ok(_)) | Ok(Err(_)) | Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+    if state.store.is_ready().await {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
     }
 }
 
@@ -116,34 +108,9 @@ async fn get_metrics(_auth: AuthUser) -> Json<RuntimeMetricsSnapshot> {
     Json(runtime_metrics_snapshot())
 }
 
-async fn db_query_timeout<T, E, F>(label: &str, fut: F) -> Result<T, StatusCode>
-where
-    F: Future<Output = Result<T, E>>,
-    E: std::fmt::Display,
-{
-    match tokio::time::timeout(Duration::from_secs(DB_QUERY_TIMEOUT_SECS), fut).await {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(err)) => {
-            log::warn!("database query {label} failed: {err}");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-        Err(_) => {
-            log::warn!("database query {label} timed out");
-            Err(StatusCode::SERVICE_UNAVAILABLE)
-        }
-    }
-}
-
-async fn db_query_timeout_string<T, E, F>(label: &str, fut: F) -> Result<T, String>
-where
-    F: Future<Output = Result<T, E>>,
-    E: std::fmt::Display,
-{
-    match tokio::time::timeout(Duration::from_secs(DB_QUERY_TIMEOUT_SECS), fut).await {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(err)) => Err(format!("database query {label} failed: {err}")),
-        Err(_) => Err(format!("database query {label} timed out")),
-    }
+fn store_error(label: &str, err: String) -> StatusCode {
+    log::warn!("local storage operation {label} failed: {err}");
+    StatusCode::INTERNAL_SERVER_ERROR
 }
 
 enum CorsPolicy {
@@ -271,14 +238,11 @@ async fn verify_signature(
         )?;
     }
 
-    // Upsert user in DB
-    db_query_timeout(
-        "verify_signature upsert user",
-        sqlx::query("INSERT INTO users (pubkey) VALUES ($1) ON CONFLICT (pubkey) DO NOTHING")
-            .bind(&address)
-            .execute(&state.pool),
-    )
-    .await?;
+    state
+        .store
+        .ensure_wallet(&address)
+        .await
+        .map_err(|err| store_error("ensure wallet", err))?;
 
     // Issue JWT
     let token = auth::issue_jwt(&address, &state.jwt_secret)
@@ -417,7 +381,7 @@ async fn get_or_create_bot_sender(
             };
 
             let (bot, cmd_tx) = build_context
-                .build_bot(pubkey, &state.pool, &state.encryption_key)
+                .build_bot(pubkey, state.store.clone(), &state.encryption_key)
                 .await?;
 
             let registered_tx = {
@@ -455,11 +419,11 @@ fn spawn_bot(
     tokio::spawn(async move {
         let cleanup_pubkey = pubkey.clone();
         let ws_connections = state.ws_connections.clone();
-        let pool = state.pool.clone();
+        let store = state.store.clone();
         let rhai_engine = state.rhai_engine.clone();
         let strategy_cache = state.strategy_cache.clone();
         if let Err(e) = bot
-            .start(ws_connections, pubkey, pool, rhai_engine, strategy_cache)
+            .start(ws_connections, pubkey, store, rhai_engine, strategy_cache)
             .await
         {
             log::error!("Bot exited with error: {:?}", e);
@@ -580,7 +544,7 @@ async fn run_backtest(
         request,
         state.rhai_engine.clone(),
         state.strategy_cache.clone(),
-        &state.pool,
+        state.store.clone(),
         state.candle_store.clone(),
     )
     .await
@@ -625,19 +589,6 @@ async fn run_backtest(
     {
         Ok(mut result) => {
             result.run_id = run_id.clone();
-
-            // Save to DB (fire-and-forget)
-            let pool = state.pool.clone();
-            let pk_save = auth.pubkey.clone();
-            let strat_cache = state.strategy_cache.clone();
-            let result_for_db = result.clone();
-            tokio::spawn(async move {
-                if let Err(e) =
-                    save_backtest_to_db(&pool, &pk_save, &strat_cache, &result_for_db).await
-                {
-                    log::warn!("failed to save backtest to DB: {e}");
-                }
-            });
 
             let ws_conns = state.ws_connections.clone();
             let pk = auth.pubkey.clone();
@@ -733,18 +684,11 @@ async fn get_trades(
     validate_market_path(&market)?;
     let (limit, offset) = bounded_pagination(params.limit, params.offset);
 
-    let rows = db_query_timeout(
-        "get_trades",
-        sqlx::query_as::<_, super::db::TradeRow>(
-        "SELECT * FROM trades WHERE pubkey = $1 AND market = $2 ORDER BY close_time DESC LIMIT $3 OFFSET $4",
-    )
-    .bind(&auth.pubkey)
-    .bind(&market)
-    .bind(limit)
-    .bind(offset)
-            .fetch_all(&state.pool),
-    )
-    .await?;
+    let rows = state
+        .store
+        .list_trades(&auth.pubkey, &market, limit, offset)
+        .await
+        .map_err(|err| store_error("list trades", err))?;
 
     Ok(Json(rows))
 }
@@ -753,41 +697,30 @@ async fn get_trades(
 
 async fn list_strategies(
     State(state): State<Arc<AppState>>,
-    auth: AuthUser,
+    _auth: AuthUser,
     Query(params): Query<StrategyListQueryParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let (limit, offset) = bounded_strategy_list_pagination(params.limit, params.offset);
-    let rows = db_query_timeout(
-        "list_strategies",
-        sqlx::query_as::<_, super::db::StrategySummary>(
-        "SELECT id, name, is_active FROM strategies WHERE pubkey = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
-    )
-    .bind(&auth.pubkey)
-    .bind(limit)
-    .bind(offset)
-            .fetch_all(&state.pool),
-    )
-    .await?;
+    let rows = state
+        .store
+        .list_strategies(limit, offset)
+        .await
+        .map_err(|err| store_error("list strategies", err))?;
 
     Ok(Json(rows))
 }
 
 async fn get_strategy(
     State(state): State<Arc<AppState>>,
-    auth: AuthUser,
-    Path(id): Path<sqlx::types::Uuid>,
+    _auth: AuthUser,
+    Path(id): Path<uuid::Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let row = db_query_timeout(
-        "get_strategy",
-        sqlx::query_as::<_, super::db::StrategyRow>(
-            "SELECT * FROM strategies WHERE id = $1 AND pubkey = $2",
-        )
-        .bind(id)
-        .bind(&auth.pubkey)
-        .fetch_optional(&state.pool),
-    )
-    .await?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let row = state
+        .store
+        .strategy(id)
+        .await
+        .map_err(|err| store_error("get strategy", err))?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(row))
 }
@@ -811,7 +744,7 @@ struct StrategyListQueryParams {
 
 async fn save_strategy(
     State(state): State<Arc<AppState>>,
-    auth: AuthUser,
+    _auth: AuthUser,
     Json(payload): Json<SaveStrategyPayload>,
 ) -> Result<impl IntoResponse, StatusCode> {
     if let Some(response) = validate_strategy_payload_bounds(&payload) {
@@ -866,24 +799,24 @@ async fn save_strategy(
         }
     };
 
-    let row = db_query_timeout(
-        "save_strategy",
-        sqlx::query_as::<_, super::db::StrategyRow>(
-        "INSERT INTO strategies (pubkey, name, on_idle, on_open, on_busy, indicators, state_declarations, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING *",
-    )
-    .bind(&auth.pubkey)
-    .bind(&strategy_name)
-    .bind(&payload.on_idle)
-    .bind(&payload.on_open)
-    .bind(&payload.on_busy)
-    .bind(&payload.indicators)
-    .bind(&payload.state_declarations)
-    .bind(payload.is_active.unwrap_or(false))
-            .fetch_one(&state.pool),
-    )
-    .await?;
+    let now = chrono::Utc::now();
+    let row = super::storage_models::StrategyRow {
+        id: uuid::Uuid::new_v4(),
+        name: strategy_name.clone(),
+        on_idle: payload.on_idle.clone(),
+        on_open: payload.on_open.clone(),
+        on_busy: payload.on_busy.clone(),
+        indicators: payload.indicators.clone(),
+        state_declarations: payload.state_declarations.clone(),
+        is_active: Some(payload.is_active.unwrap_or(false)),
+        created_at: Some(now),
+        updated_at: Some(now),
+    };
+    let row = state
+        .store
+        .insert_strategy(row)
+        .await
+        .map_err(|err| store_error("save strategy", err))?;
 
     {
         let mut cache = state.strategy_cache.write().await;
@@ -903,11 +836,11 @@ async fn save_strategy(
 
 async fn update_strategy(
     State(state): State<Arc<AppState>>,
-    auth: AuthUser,
+    _auth: AuthUser,
     Path(id): Path<String>,
     Json(payload): Json<SaveStrategyPayload>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let id: sqlx::types::Uuid = id.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+    let id: uuid::Uuid = id.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
     if let Some(response) = validate_strategy_payload_bounds(&payload) {
         return Ok(response);
     }
@@ -960,25 +893,33 @@ async fn update_strategy(
         }
     };
 
-    let row = db_query_timeout(
-        "update_strategy",
-        sqlx::query_as::<_, super::db::StrategyRow>(
-        "UPDATE strategies SET name = $1, on_idle = $2, on_open = $3, on_busy = $4, indicators = $5, state_declarations = $6, is_active = $7, updated_at = now()
-         WHERE id = $8 AND pubkey = $9
-         RETURNING *",
-    )
-    .bind(&strategy_name)
-    .bind(&payload.on_idle)
-    .bind(&payload.on_open)
-    .bind(&payload.on_busy)
-    .bind(&payload.indicators)
-    .bind(&payload.state_declarations)
-    .bind(payload.is_active.unwrap_or(false))
-    .bind(id)
-    .bind(&auth.pubkey)
-            .fetch_optional(&state.pool),
-    )
-    .await?;
+    let existing = state
+        .store
+        .strategy(id)
+        .await
+        .map_err(|err| store_error("get strategy for update", err))?;
+    let row = match existing {
+        Some(existing) => {
+            let row = super::storage_models::StrategyRow {
+                id,
+                name: strategy_name.clone(),
+                on_idle: payload.on_idle.clone(),
+                on_open: payload.on_open.clone(),
+                on_busy: payload.on_busy.clone(),
+                indicators: payload.indicators.clone(),
+                state_declarations: payload.state_declarations.clone(),
+                is_active: Some(payload.is_active.unwrap_or(false)),
+                created_at: existing.created_at,
+                updated_at: Some(chrono::Utc::now()),
+            };
+            state
+                .store
+                .update_strategy(row)
+                .await
+                .map_err(|err| store_error("update strategy", err))?
+        }
+        None => None,
+    };
 
     match row {
         Some(r) => {
@@ -1054,21 +995,17 @@ fn strategy_validation_error(message: impl Into<String>) -> axum::response::Resp
 
 async fn delete_strategy(
     State(state): State<Arc<AppState>>,
-    auth: AuthUser,
+    _auth: AuthUser,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let id: sqlx::types::Uuid = id.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+    let id: uuid::Uuid = id.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+    let deleted = state
+        .store
+        .delete_strategy(id)
+        .await
+        .map_err(|err| store_error("delete strategy", err))?;
 
-    let result = db_query_timeout(
-        "delete_strategy",
-        sqlx::query("DELETE FROM strategies WHERE id = $1 AND pubkey = $2")
-            .bind(id)
-            .bind(&auth.pubkey)
-            .execute(&state.pool),
-    )
-    .await?;
-
-    if result.rows_affected() == 0 {
+    if !deleted {
         Ok(StatusCode::NOT_FOUND)
     } else {
         // Evict from cache
@@ -1341,17 +1278,12 @@ async fn approve_agent_route(
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
 
-    if let Err(e) = db_query_timeout(
-        "approve_agent update user key",
-        sqlx::query("UPDATE users SET api_key_enc = $1, agent_valid_until = $2 WHERE pubkey = $3")
-            .bind(&encrypted)
-            .bind(valid_until)
-            .bind(&auth.pubkey)
-            .execute(&state.pool),
-    )
-    .await
+    if let Err(err) = state
+        .store
+        .set_encrypted_agent_key(&auth.pubkey, &encrypted, valid_until)
+        .await
     {
-        return e.into_response();
+        return store_error("save agent key", err).into_response();
     }
 
     log::info!(
@@ -1816,125 +1748,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>, pubkey: String) {
     info!("WebSocket disconnected for user {}", pubkey);
 }
 
-// ── Backtest Persistence ────────────────────────────────────────────────────
-
-async fn save_backtest_to_db(
-    pool: &sqlx::PgPool,
-    pubkey: &str,
-    strategy_cache: &super::app_state::StrategyCache,
-    result: &BacktestResult,
-) -> Result<(), String> {
-    let cfg = &result.config;
-    let s = &result.summary;
-
-    // Resolve strategy name from cache or DB
-    let strategy_name = {
-        let guard = strategy_cache.read().await;
-        guard.get(&cfg.strategy_id).map(|c| c.name.clone())
-    };
-    let strategy_name = match strategy_name {
-        Some(name) => name,
-        None => db_query_timeout_string(
-            "backtest strategy name",
-            sqlx::query_scalar::<_, String>("SELECT name FROM strategies WHERE id = $1")
-                .bind(cfg.strategy_id)
-                .fetch_optional(pool),
-        )
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "Unknown".to_string()),
-    };
-
-    let exchange_str = cfg.source.exchange.name();
-    let market_str = cfg.source.market.as_str();
-
-    // Insert into backtest_runs
-    let run_row_id = db_query_timeout_string(
-        "insert backtest_runs",
-        sqlx::query_scalar::<_, sqlx::types::Uuid>(
-            "INSERT INTO backtest_runs (
-            pubkey, strategy_id, strategy_name, asset, resolution,
-            exchange, market, margin, lev, start_time, end_time,
-            net_pnl, return_pct, max_drawdown_pct, total_trades,
-            win_rate_pct, profit_factor, sharpe_ratio,
-            started_at, finished_at
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-            $12, $13, $14, $15, $16, $17, $18, $19, $20
-        ) RETURNING id",
-        )
-        .bind(pubkey)
-        .bind(cfg.strategy_id)
-        .bind(&strategy_name)
-        .bind(&cfg.asset)
-        .bind(cfg.resolution.to_string())
-        .bind(exchange_str)
-        .bind(market_str)
-        .bind(cfg.margin)
-        .bind(cfg.lev as i32)
-        .bind(cfg.start_time as i64)
-        .bind(cfg.end_time as i64)
-        .bind(s.net_pnl)
-        .bind(s.return_pct)
-        .bind(s.max_drawdown_pct)
-        .bind(s.total_trades as i32)
-        .bind(s.win_rate_pct)
-        .bind(s.profit_factor)
-        .bind(s.sharpe_ratio)
-        .bind(result.started_at as i64)
-        .bind(result.finished_at as i64)
-        .fetch_one(pool),
-    )
-    .await?;
-
-    // Insert into backtest_results
-    let trades_json =
-        serde_json::to_value(&result.trades).map_err(|e| format!("serialize trades: {e}"))?;
-    let equity_json =
-        serde_json::to_value(&result.equity_curve).map_err(|e| format!("serialize equity: {e}"))?;
-    let snapshots_json =
-        serde_json::to_value(&result.snapshots).map_err(|e| format!("serialize snapshots: {e}"))?;
-
-    db_query_timeout_string(
-        "insert backtest_results",
-        sqlx::query(
-            "INSERT INTO backtest_results (
-            run_id, initial_equity, final_equity,
-            gross_profit, gross_loss, avg_win, avg_loss, expectancy,
-            wins, losses, candles_loaded, candles_processed,
-            max_drawdown_abs, trades, equity_curve, snapshots
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
-        )",
-        )
-        .bind(run_row_id)
-        .bind(s.initial_equity)
-        .bind(s.final_equity)
-        .bind(s.gross_profit)
-        .bind(s.gross_loss)
-        .bind(s.avg_win)
-        .bind(s.avg_loss)
-        .bind(s.expectancy)
-        .bind(s.wins as i32)
-        .bind(s.losses as i32)
-        .bind(result.candles_loaded as i64)
-        .bind(result.candles_processed as i64)
-        .bind(s.max_drawdown_abs)
-        .bind(&trades_json)
-        .bind(&equity_json)
-        .bind(&snapshots_json)
-        .execute(pool),
-    )
-    .await?;
-
-    info!(
-        "backtest saved: run={} asset={} strategy={}",
-        run_row_id, cfg.asset, strategy_name
-    );
-    Ok(())
-}
-
 // ── Backtest History Routes ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -1946,82 +1759,20 @@ struct BacktestHistoryQuery {
 }
 
 async fn list_backtest_history(
-    State(state): State<Arc<AppState>>,
-    auth: AuthUser,
+    State(_state): State<Arc<AppState>>,
+    _auth: AuthUser,
     Query(params): Query<BacktestHistoryQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let (limit, offset) = bounded_pagination(params.limit, params.offset);
-
-    let rows = match (&params.asset, &params.strategy_id) {
-        (Some(asset), Some(sid)) => {
-            let strategy_id: uuid::Uuid = sid.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
-            db_query_timeout(
-                "list_backtest_history asset strategy",
-                sqlx::query_as::<_, BacktestRunRow>(
-                    "SELECT * FROM backtest_runs
-                 WHERE pubkey = $1 AND asset = $2 AND strategy_id = $3
-                 ORDER BY created_at DESC LIMIT $4 OFFSET $5",
-                )
-                .bind(&auth.pubkey)
-                .bind(asset)
-                .bind(strategy_id)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&state.pool),
-            )
-            .await?
-        }
-        (Some(asset), None) => {
-            db_query_timeout(
-                "list_backtest_history asset",
-                sqlx::query_as::<_, BacktestRunRow>(
-                    "SELECT * FROM backtest_runs
-                 WHERE pubkey = $1 AND asset = $2
-                 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
-                )
-                .bind(&auth.pubkey)
-                .bind(asset)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&state.pool),
-            )
-            .await?
-        }
-        (None, Some(sid)) => {
-            let strategy_id: uuid::Uuid = sid.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
-            db_query_timeout(
-                "list_backtest_history strategy",
-                sqlx::query_as::<_, BacktestRunRow>(
-                    "SELECT * FROM backtest_runs
-                 WHERE pubkey = $1 AND strategy_id = $2
-                 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
-                )
-                .bind(&auth.pubkey)
-                .bind(strategy_id)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&state.pool),
-            )
-            .await?
-        }
-        (None, None) => {
-            db_query_timeout(
-                "list_backtest_history",
-                sqlx::query_as::<_, BacktestRunRow>(
-                    "SELECT * FROM backtest_runs
-                 WHERE pubkey = $1
-                 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-                )
-                .bind(&auth.pubkey)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&state.pool),
-            )
-            .await?
-        }
-    };
-
-    Ok(Json(rows))
+    if let Some(strategy_id) = params.strategy_id {
+        strategy_id
+            .parse::<uuid::Uuid>()
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+    }
+    let _ = (
+        params.asset,
+        bounded_pagination(params.limit, params.offset),
+    );
+    Ok(Json(Vec::<serde_json::Value>::new()))
 }
 
 fn bounded_pagination(limit: Option<i64>, offset: Option<i64>) -> (i64, i64) {
@@ -2052,59 +1803,19 @@ fn validate_market_path(market: &str) -> Result<(), StatusCode> {
 }
 
 async fn get_backtest_result(
-    State(state): State<Arc<AppState>>,
-    auth: AuthUser,
-    Path(id): Path<uuid::Uuid>,
-) -> Result<impl IntoResponse, StatusCode> {
-    // Verify ownership
-    let owns = db_query_timeout(
-        "get_backtest_result ownership",
-        sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM backtest_runs WHERE id = $1 AND pubkey = $2)",
-        )
-        .bind(id)
-        .bind(&auth.pubkey)
-        .fetch_one(&state.pool),
-    )
-    .await?;
-
-    if !owns {
-        return Err(StatusCode::NOT_FOUND);
-    }
-
-    let row = db_query_timeout(
-        "get_backtest_result",
-        sqlx::query_as::<_, BacktestResultRow>("SELECT * FROM backtest_results WHERE run_id = $1")
-            .bind(id)
-            .fetch_optional(&state.pool),
-    )
-    .await?;
-
-    match row {
-        Some(r) => Ok(Json(r)),
-        None => Err(StatusCode::NOT_FOUND),
-    }
+    State(_state): State<Arc<AppState>>,
+    _auth: AuthUser,
+    Path(_id): Path<uuid::Uuid>,
+) -> StatusCode {
+    StatusCode::NOT_FOUND
 }
 
 async fn delete_backtest_run(
-    State(state): State<Arc<AppState>>,
-    auth: AuthUser,
-    Path(id): Path<uuid::Uuid>,
+    State(_state): State<Arc<AppState>>,
+    _auth: AuthUser,
+    Path(_id): Path<uuid::Uuid>,
 ) -> impl IntoResponse {
-    let result = db_query_timeout(
-        "delete_backtest_run",
-        sqlx::query("DELETE FROM backtest_runs WHERE id = $1 AND pubkey = $2")
-            .bind(id)
-            .bind(&auth.pubkey)
-            .execute(&state.pool),
-    )
-    .await;
-
-    match result {
-        Ok(r) if r.rows_affected() > 0 => StatusCode::NO_CONTENT,
-        Ok(_) => StatusCode::NOT_FOUND,
-        Err(status) => status,
-    }
+    StatusCode::NOT_FOUND
 }
 
 #[cfg(test)]

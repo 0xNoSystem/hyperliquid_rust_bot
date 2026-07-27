@@ -223,7 +223,7 @@ impl CandleCache {
                         if queue_full {
                             log::info!(
                                 "candle cache queue recovered for {} after dropping {} updates",
-                                &asset,
+                                asset,
                                 dropped
                             );
                             queue_full = false;
@@ -236,13 +236,13 @@ impl CandleCache {
                         if !queue_full {
                             log::warn!(
                                 "candle cache queue full for {}; dropping live candle updates until it drains",
-                                &asset
+                                asset
                             );
                             queue_full = true;
                         }
                     }
                     Err(TrySendError::Closed(_)) => {
-                        log::warn!("candle cache queue closed for {}", &asset);
+                        log::warn!("candle cache queue closed for {}", asset);
                         break;
                     }
                 }
@@ -335,7 +335,7 @@ impl CandleCache {
             let mut completed = HashSet::new();
 
             for tf in request.keys() {
-                log::info!("Fetching {:?} candles for {}", tf, &asset);
+                log::info!("Fetching {:?} candles for {}", tf, asset);
                 let mut last_err = None;
                 for attempt in 0..3 {
                     match load_candles(&client, &asset, *tf, HL_MAX_CANDLES).await {
@@ -343,7 +343,7 @@ impl CandleCache {
                             if data.is_empty() {
                                 log::warn!(
                                     "candle fetch returned no candles for {} {:?}",
-                                    &asset,
+                                    asset,
                                     tf
                                 );
                             }
@@ -355,7 +355,7 @@ impl CandleCache {
                         Err(e) => {
                             log::warn!(
                                 "backfill failed for {} {:?} (attempt {}): {:?}",
-                                &asset,
+                                asset,
                                 tf,
                                 attempt + 1,
                                 e
@@ -368,7 +368,7 @@ impl CandleCache {
                 if let Some(err) = last_err {
                     log::error!(
                         "candle fetch exhausted retries for {} {:?}: {}",
-                        &asset,
+                        asset,
                         tf,
                         err
                     );

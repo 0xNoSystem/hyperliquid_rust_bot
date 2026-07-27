@@ -174,7 +174,7 @@ impl Executor {
             if retries > Self::MAX_RETRIES {
                 return Err(Error::Custom(format!(
                     "Failed to cancle resting order for {} market, please cancel manually on https://app.hyperliquid.xyz/trade/{}",
-                    &asset, &asset,
+                    asset, asset,
                 )));
             }
             sleep(Duration::from_millis(100)).await;
@@ -400,7 +400,7 @@ impl Executor {
                         if retries >= Self::MAX_RETRIES {
                             warn!(
                                 "kill() exhausted retries for {} — position may still be open on-chain",
-                                &asset
+                                asset
                             );
                             break;
                         }

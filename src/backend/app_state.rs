@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use rhai::Engine;
-use sqlx::PgPool;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Sender, error::TrySendError};
 use uuid::Uuid;
@@ -13,6 +12,7 @@ use alloy::signers::local::PrivateKeySigner;
 use hyperliquid_rust_sdk::{ApproveAgent, ApproveBuilderFee};
 
 use super::bot_manager::BotManager;
+use super::local_store::LocalStore;
 use super::scripting::{CompiledStrategy, StateDeclarations};
 use crate::backtest::CandleStore;
 use crate::metrics;
@@ -66,7 +66,7 @@ pub struct CachedStrategy {
 pub type StrategyCache = Arc<RwLock<HashMap<Uuid, CachedStrategy>>>;
 
 pub struct AppState {
-    pub pool: PgPool,
+    pub store: Arc<LocalStore>,
     pub ws_connections: WsConnections,
     pub bot_manager: Arc<RwLock<BotManager>>,
     pub rhai_engine: Arc<Engine>,

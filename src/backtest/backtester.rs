@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use log::{info, warn};
 use rhai::Engine;
-use sqlx::PgPool;
 
 use super::downsample::{cap_snapshots, lttb_equity};
 use super::fetcher::{DataSource, Fetcher, RequestLimiter};
@@ -11,6 +10,7 @@ use super::types::{
     BacktestProgress, BacktestResult, BacktestRunRequest, BacktestSummary, CandlePoint,
     EquityPoint, PositionSnapshot, SnapshotReason,
 };
+use crate::backend::LocalStore;
 use crate::backend::app_state::StrategyCache;
 use crate::strategy::replace_self_with_asset;
 use crate::{
@@ -135,7 +135,7 @@ impl Backtester {
         request: BacktestRunRequest,
         rhai_engine: Arc<Engine>,
         strategy_cache: StrategyCache,
-        pool: &PgPool,
+        store: Arc<LocalStore>,
         candle_store: Arc<super::candle_store::CandleStore>,
     ) -> Result<Self, Error> {
         let sid = request.config.strategy_id;
@@ -151,15 +151,12 @@ impl Backtester {
             if let Some(entry) = cached {
                 (entry.compiled, entry.indicators)
             } else {
-                // Cache miss — fetch from DB, compile, and cache
-                let row = sqlx::query_as::<_, crate::backend::db::StrategyRow>(
-                    "SELECT * FROM strategies WHERE id = $1",
-                )
-                .bind(sid)
-                .fetch_optional(pool)
-                .await
-                .map_err(|e| Error::Custom(format!("DB error fetching strategy: {e}")))?
-                .ok_or_else(|| Error::Custom(format!("strategy {sid} not found")))?;
+                // Cache miss — fetch from local storage, compile, and cache
+                let row = store
+                    .strategy(sid)
+                    .await
+                    .map_err(|e| Error::Custom(format!("local storage error: {e}")))?
+                    .ok_or_else(|| Error::Custom(format!("strategy {sid} not found")))?;
 
                 let state_decls: Option<crate::backend::scripting::StateDeclarations> = row
                     .state_declarations

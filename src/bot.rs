@@ -5,11 +5,10 @@ use crate::{
 };
 
 use crate::backend::app_state::{StrategyCache, WsConnections, broadcast_to_user};
+use crate::backend::{LocalStore, TradeRow};
 use crate::broadcast::{
     BroadcastCmd, CacheCmdIn, PriceAsset, PriceData, SubReply, SubscribePayload,
-    UserEventRelayHandle,
 };
-use crate::stream::AccountEvent;
 use hyperliquid_rust_sdk::{
     AssetMeta, AssetPosition, BaseUrl, Error, InfoClient, LedgerUpdate, LedgerUpdateData, Message,
     Subscription, UserData,
@@ -18,7 +17,6 @@ use log::warn;
 use rhai::Engine;
 use rustc_hash::FxHasher;
 use serde::Deserialize;
-use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
@@ -46,8 +44,6 @@ const MARKET_COMMAND_SEND_TIMEOUT_SECS: u64 = 5;
 const BOT_EVENT_SEND_TIMEOUT_SECS: u64 = 5;
 const MARGIN_SYNC_FALLBACK_SECS: u64 = 30;
 const MARGIN_SYNC_STAGGER_MAX_SECS: u64 = 30;
-const BOT_DB_QUERY_TIMEOUT_SECS: u64 = 10;
-const TRADE_PERSIST_TIMEOUT_SECS: u64 = 10;
 const EMPTY_MARKET_IDLE_TIMEOUT_SECS: u64 = 4 * 60 * 60;
 const EMPTY_MARKET_IDLE_CHECK_SECS: u64 = 60;
 const MARKET_TASK_JOIN_TIMEOUT_SECS: u64 = 10;
@@ -214,51 +210,38 @@ fn empty_market_idle_expired(
 }
 
 fn spawn_trade_persistence_worker(
-    pool: PgPool,
+    store: Arc<LocalStore>,
     pubkey: String,
     mut rx: Receiver<TradePersistence>,
 ) {
     tokio::spawn(async move {
         while let Some(item) = rx.recv().await {
-            persist_trade(&pool, &pubkey, item).await;
+            persist_trade(&store, &pubkey, item).await;
         }
     });
 }
 
-async fn persist_trade(pool: &PgPool, pubkey: &str, item: TradePersistence) {
-    let side_str = format!("{:?}", item.trade.side);
-    let open_type = format!("{:?}", item.trade.open.fill_type);
-    let close_type = format!("{:?}", item.trade.close.fill_type);
-
-    let query = sqlx::query(
-        "INSERT INTO trades (pubkey, market, side, size, pnl, total_pnl, fees, funding, open_time, open_price, open_type, close_time, close_price, close_type, strategy) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
-    )
-    .bind(pubkey)
-    .bind(&item.asset)
-    .bind(&side_str)
-    .bind(item.trade.size)
-    .bind(item.trade.pnl)
-    .bind(item.trade.total_pnl)
-    .bind(item.trade.fees)
-    .bind(item.trade.funding)
-    .bind(item.trade.open.time as i64)
-    .bind(item.trade.open.price)
-    .bind(&open_type)
-    .bind(item.trade.close.time as i64)
-    .bind(item.trade.close.price)
-    .bind(&close_type)
-    .bind(&item.trade.strategy);
-
-    match timeout(
-        Duration::from_secs(TRADE_PERSIST_TIMEOUT_SECS),
-        query.execute(pool),
-    )
-    .await
-    {
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => log::warn!("Failed to persist trade for {}: {:?}", item.asset, e),
-        Err(_) => log::warn!("Timed out persisting trade for {}", item.asset),
+async fn persist_trade(store: &LocalStore, pubkey: &str, item: TradePersistence) {
+    let row = TradeRow {
+        id: uuid::Uuid::new_v4(),
+        pubkey: pubkey.to_string(),
+        market: item.asset.clone(),
+        side: format!("{:?}", item.trade.side),
+        size: item.trade.size,
+        pnl: item.trade.pnl,
+        total_pnl: item.trade.total_pnl,
+        fees: item.trade.fees,
+        funding: item.trade.funding,
+        open_time: item.trade.open.time as i64,
+        open_price: item.trade.open.price,
+        open_type: format!("{:?}", item.trade.open.fill_type),
+        close_time: item.trade.close.time as i64,
+        close_price: item.trade.close.price,
+        close_type: format!("{:?}", item.trade.close.fill_type),
+        strategy: item.trade.strategy,
+    };
+    if let Err(e) = store.append_trade(pubkey, row).await {
+        log::warn!("Failed to persist trade for {}: {}", item.asset, e);
     }
 }
 
@@ -273,7 +256,6 @@ pub struct Bot {
     asset_feeds: HashMap<Arc<str>, BotAssetFeed, BuildHasherDefault<FxHasher>>,
     broadcast_tx: Sender<BroadcastCmd>,
     candle_rx: Sender<CacheCmdIn>,
-    user_event_relay: Option<UserEventRelayHandle>,
     _fees: (f64, f64),
     _bot_tx: Sender<BotEvent>,
     bot_rv: Receiver<BotEvent>,
@@ -284,7 +266,7 @@ pub struct Bot {
     update_tx: Sender<MarketUpdate>,
     ws_connections: Option<WsConnections>,
     pubkey: Option<String>,
-    pool: Option<PgPool>,
+    store: Option<Arc<LocalStore>>,
     rhai_engine: Option<Arc<Engine>>,
     strategy_cache: Option<StrategyCache>,
     chain_open_positions: Vec<AssetPosition>,
@@ -297,17 +279,11 @@ struct BotAssetFeed {
     handle: JoinHandle<()>,
 }
 
-enum UserEventMessage {
-    QuickNode(AccountEvent),
-    Sdk(Message),
-}
-
 impl Bot {
     pub async fn new(
         wallet: Wallet,
         broadcast_tx: Sender<BroadcastCmd>,
         candle_rx: Sender<CacheCmdIn>,
-        user_event_relay: Option<UserEventRelayHandle>,
     ) -> Result<(Self, Sender<BotEvent>), Error> {
         let info_client = info_client_with_reconnect_timeout("bot", wallet.url).await?;
         let fees = wallet.get_user_fees().await?;
@@ -328,7 +304,6 @@ impl Bot {
                 asset_feeds: HashMap::default(),
                 broadcast_tx,
                 candle_rx,
-                user_event_relay,
                 _fees: fees,
                 _bot_tx: bot_tx.clone(),
                 bot_rv,
@@ -339,7 +314,7 @@ impl Bot {
                 update_tx,
                 ws_connections: None,
                 pubkey: None,
-                pool: None,
+                store: None,
                 rhai_engine: None,
                 strategy_cache: None,
                 chain_open_positions: Vec::new(),
@@ -455,7 +430,7 @@ impl Bot {
                             if queue_full {
                                 log::info!(
                                     "{} bot price router recovered after dropping {} updates",
-                                    &asset_key,
+                                    asset_key,
                                     dropped
                                 );
                                 queue_full = false;
@@ -468,7 +443,7 @@ impl Bot {
                             if !queue_full {
                                 log::warn!(
                                     "{} bot price router full; dropping live price updates",
-                                    &asset_key
+                                    asset_key
                                 );
                                 queue_full = true;
                             }
@@ -476,7 +451,7 @@ impl Bot {
                         Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        log::warn!("{} bot feed lagged by {} messages", &asset_key, n);
+                        log::warn!("{} bot feed lagged by {} messages", asset_key, n);
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         queue_bot_event(
@@ -578,7 +553,7 @@ impl Bot {
         {
             Ok(()) => {}
             Err(TrySendError::Full(cmd)) => {
-                warn!("broadcast queue full while unsubscribing {}", &asset);
+                warn!("broadcast queue full while unsubscribing {}", asset);
                 match timeout(
                     Duration::from_secs(BROADCAST_SUBSCRIBE_TIMEOUT_SECS),
                     self.broadcast_tx.send(cmd),
@@ -589,19 +564,19 @@ impl Bot {
                     Ok(Err(_)) => {
                         warn!(
                             "broadcast channel closed before delayed unsubscribe for {}",
-                            &asset
+                            asset
                         );
                     }
                     Err(_) => {
                         warn!(
                             "timed out queuing delayed broadcaster unsubscribe for {}",
-                            &asset
+                            asset
                         );
                     }
                 }
             }
             Err(TrySendError::Closed(_)) => {
-                warn!("failed to unsubscribe {} from broadcaster", &asset);
+                warn!("failed to unsubscribe {} from broadcaster", asset);
             }
         }
     }
@@ -769,24 +744,17 @@ impl Bot {
             if let Some(entry) = cached {
                 (entry.compiled, entry.indicators, entry.name)
             } else {
-                // Cache miss — fetch from DB, compile, and cache
-                let pool = self
-                    .pool
+                // Cache miss — fetch from local storage, compile, and cache
+                let store = self
+                    .store
                     .as_ref()
-                    .ok_or_else(|| Error::Custom("DB pool not initialized".to_string()))?;
+                    .ok_or_else(|| Error::Custom("local storage not initialized".to_string()))?;
 
-                let row = timeout(
-                    Duration::from_secs(BOT_DB_QUERY_TIMEOUT_SECS),
-                    sqlx::query_as::<_, crate::backend::db::StrategyRow>(
-                        "SELECT * FROM strategies WHERE id = $1",
-                    )
-                    .bind(sid)
-                    .fetch_optional(pool),
-                )
-                .await
-                .map_err(|_| Error::Custom("DB query timed out fetching strategy".to_string()))?
-                .map_err(|e| Error::Custom(format!("DB error fetching strategy: {e}")))?
-                .ok_or_else(|| Error::Custom(format!("strategy {sid} not found")))?;
+                let row = store
+                    .strategy(sid)
+                    .await
+                    .map_err(|e| Error::Custom(format!("local storage error: {e}")))?
+                    .ok_or_else(|| Error::Custom(format!("strategy {sid} not found")))?;
 
                 let state_decls: Option<crate::backend::scripting::StateDeclarations> = match row
                     .state_declarations
@@ -843,7 +811,7 @@ impl Bot {
         if self.markets.contains_key(&asset) {
             self.send_to_frontend(UpdateFrontend::UserError(format!(
                 "{} market is already added.",
-                &asset
+                asset
             )))
             .await;
             return Ok(());
@@ -857,7 +825,7 @@ impl Bot {
         {
             self.send_to_frontend(UpdateFrontend::UserError(format!(
                 "Cannot add a market with open on-chain position({})",
-                &asset
+                asset
             )))
             .await;
             return Ok(());
@@ -931,7 +899,7 @@ impl Bot {
                         pk,
                         UpdateFrontend::UserError(format!(
                             "Market {} exited with error:\n {:?}",
-                            &task_asset, e
+                            task_asset, e
                         )),
                     )
                     .await;
@@ -1044,20 +1012,6 @@ impl Bot {
         }
     }
 
-    async fn handle_user_event_message(
-        &mut self,
-        msg: UserEventMessage,
-        margin_book: &Arc<Mutex<MarginBook>>,
-    ) {
-        match msg {
-            UserEventMessage::QuickNode(event) => {
-                self.handle_quicknode_account_event(event, margin_book)
-                    .await;
-            }
-            UserEventMessage::Sdk(msg) => self.handle_sdk_user_message(msg, margin_book).await,
-        }
-    }
-
     async fn handle_sdk_user_message(
         &mut self,
         msg: Message,
@@ -1083,45 +1037,6 @@ impl Bot {
         } else if let Message::NoData = msg {
             self.send_to_frontend(UpdateFrontend::Status(BackendStatus::Offline))
                 .await;
-        }
-    }
-
-    async fn handle_quicknode_account_event(
-        &mut self,
-        event: AccountEvent,
-        margin_book: &Arc<Mutex<MarginBook>>,
-    ) {
-        match event {
-            AccountEvent::Fill(fills) => {
-                self.handle_user_fills(fills.into_iter().map(|event| event.fill).collect())
-                    .await;
-            }
-            AccountEvent::Funding(fundings) => {
-                for event in fundings {
-                    self.handle_user_funding(event.funding.coin, event.funding.usdc)
-                        .await;
-                }
-            }
-            AccountEvent::NonFundingLedgerUpdates(updates) => {
-                self.handle_user_non_funding_ledger_updates(
-                    updates.into_iter().map(|event| event.update).collect(),
-                    margin_book,
-                )
-                .await;
-            }
-            AccountEvent::Raw {
-                stream_type,
-                payload,
-            } => {
-                warn!("Unhandled QuickNode account event stream={stream_type:?} payload={payload}");
-            }
-            AccountEvent::Error(err) => {
-                warn!("QuickNode account event stream error: {err}");
-            }
-            AccountEvent::NoData => {
-                self.send_to_frontend(UpdateFrontend::Status(BackendStatus::Offline))
-                    .await;
-            }
         }
     }
 
@@ -1208,10 +1123,6 @@ impl Bot {
         margin_book_handle: &mut Option<JoinHandle<()>>,
         close_markets: bool,
     ) {
-        if let Some(relay) = &self.user_event_relay {
-            relay.unsubscribe(self.wallet.pubkey);
-        }
-
         if close_markets {
             self.close_all().await;
         }
@@ -1239,7 +1150,7 @@ impl Bot {
         mut self,
         ws_connections: WsConnections,
         pubkey: String,
-        pool: PgPool,
+        store: Arc<LocalStore>,
         rhai_engine: Arc<Engine>,
         strategy_cache: StrategyCache,
     ) -> Result<(), Error> {
@@ -1249,7 +1160,7 @@ impl Bot {
 
         self.ws_connections = Some(ws_connections.clone());
         self.pubkey = Some(pubkey.clone());
-        self.pool = Some(pool);
+        self.store = Some(store);
         self.rhai_engine = Some(rhai_engine);
         self.strategy_cache = Some(strategy_cache);
         self.refresh_builder_approval_status(&pubkey).await;
@@ -1314,9 +1225,9 @@ impl Bot {
         let upd_ws = ws_connections.clone();
         let upd_pk = pubkey.clone();
         let upd_bot_tx = self._bot_tx.clone();
-        let trade_persist_tx = self.pool.clone().map(|pool| {
+        let trade_persist_tx = self.store.clone().map(|store| {
             let (tx, rx) = channel::<TradePersistence>(TRADE_PERSIST_QUEUE_SIZE);
-            spawn_trade_persistence_worker(pool, pubkey.clone(), rx);
+            spawn_trade_persistence_worker(store, pubkey.clone(), rx);
             tx
         });
 
@@ -1451,61 +1362,8 @@ impl Bot {
             }
         });
 
-        let (user_tx, mut user_rv) = channel::<UserEventMessage>(USER_EVENT_QUEUE_SIZE);
-        let mut relay_user_events = false;
-
-        if let Some(relay) = self.user_event_relay.clone() {
-            match relay.subscribe(self.wallet.pubkey).await {
-                Ok(mut quicknode_rx) => {
-                    log::info!("Subscribed to shared QuickNode account event relay");
-                    let user_tx = user_tx.clone();
-                    let relay_token = cancel_token.clone();
-                    tokio::spawn(async move {
-                        let mut queue_full = false;
-                        let mut dropped = 0_u64;
-                        loop {
-                            tokio::select! {
-                                _ = relay_token.cancelled() => break,
-                                event = quicknode_rx.recv() => {
-                                    let Some(event) = event else {
-                                        break;
-                                    };
-
-                                    match user_tx.try_send(UserEventMessage::QuickNode(event)) {
-                                        Ok(()) => {
-                                            if queue_full {
-                                                log::info!(
-                                                    "QuickNode account event queue recovered after dropping {dropped} events"
-                                                );
-                                                queue_full = false;
-                                                dropped = 0;
-                                            }
-                                        }
-                                        Err(TrySendError::Full(_)) => {
-                                            metrics::inc_quicknode_account_queue_dropped();
-                                            dropped = dropped.saturating_add(1);
-                                            if !queue_full {
-                                                warn!("QuickNode account event queue full; dropping events");
-                                                queue_full = true;
-                                            }
-                                        }
-                                        Err(TrySendError::Closed(_)) => break,
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    relay_user_events = true;
-                }
-                Err(err) => {
-                    warn!(
-                        "Failed to subscribe to shared QuickNode account event relay, falling back to SDK websocket: {err}"
-                    );
-                }
-            }
-        }
-
-        if !relay_user_events {
+        let (user_tx, mut user_rv) = channel::<Message>(USER_EVENT_QUEUE_SIZE);
+        {
             let (sdk_tx, mut sdk_rx) = unbounded_channel();
             let sdk_token = cancel_token.clone();
             let _id = info_subscribe_timeout(
@@ -1538,7 +1396,7 @@ impl Bot {
                                 break;
                             };
 
-                            match user_tx.try_send(UserEventMessage::Sdk(msg)) {
+                            match user_tx.try_send(msg) {
                                 Ok(()) => {
                                     if queue_full {
                                         log::info!(
@@ -1599,7 +1457,7 @@ impl Bot {
                 },
 
                 Some(msg) = user_rv.recv() => {
-                    self.handle_user_event_message(msg, &margin_user_edit).await;
+                    self.handle_sdk_user_message(msg, &margin_user_edit).await;
                 },
 
                 Some((asset, data)) = price_router_rv.recv() => {
@@ -1657,7 +1515,7 @@ impl Bot {
                                     if positions.iter().any(|p| p.position.coin == asset) {
                                         self.send_to_frontend(UserError(format!(
                                             "Cannot resume {}: close the on-chain position first",
-                                            &asset
+                                            asset
                                         ))).await;
                                         continue;
                                     }
@@ -1674,14 +1532,14 @@ impl Bot {
                                 MarketCommandSendResult::TimedOut => {
                                     self.send_to_frontend(UserError(format!(
                                         "Resume failed: {} market command queue is full",
-                                        &asset
+                                        asset
                                     ))).await;
                                     continue;
                                 }
                                 MarketCommandSendResult::Closed | MarketCommandSendResult::Missing => {
                                     self.send_to_frontend(UserError(format!(
                                         "Resume failed: {} market is not available",
-                                        &asset
+                                        asset
                                     ))).await;
                                     continue;
                                 }
@@ -1702,14 +1560,14 @@ impl Bot {
                                 MarketCommandSendResult::TimedOut => {
                                     self.send_to_frontend(UserError(format!(
                                         "Pause failed: {} market command queue is full",
-                                        &asset
+                                        asset
                                     ))).await;
                                     continue;
                                 }
                                 MarketCommandSendResult::Closed | MarketCommandSendResult::Missing => {
                                     self.send_to_frontend(UserError(format!(
                                         "Pause failed: {} market is not available",
-                                        &asset
+                                        asset
                                     ))).await;
                                     continue;
                                 }
@@ -1828,7 +1686,7 @@ impl Bot {
                                 if has_position {
                                     self.send_to_frontend(
                                         UserError(format!(
-                                            "Leverage update failed: {} market has open order(s)", &command.asset)
+                                            "Leverage update failed: {} market has open order(s)", command.asset)
                                             )).await;
                                     continue;
                                 }
@@ -1859,25 +1717,16 @@ impl Bot {
                                 if let Some(entry) = cached {
                                     (entry.compiled, entry.indicators, entry.name)
                                 } else {
-                                    let pool = match self.pool.as_ref() {
-                                        Some(p) => p,
+                                    let store = match self.store.as_ref() {
+                                        Some(store) => store,
                                         None => {
-                                            self.send_to_frontend(UserError("DB not initialized".into())).await;
+                                            self.send_to_frontend(UserError("Local storage not initialized".into())).await;
                                             continue;
                                         }
                                     };
-                                    let row = match timeout(
-                                        Duration::from_secs(BOT_DB_QUERY_TIMEOUT_SECS),
-                                        sqlx::query_as::<_, crate::backend::db::StrategyRow>(
-                                            "SELECT * FROM strategies WHERE id = $1",
-                                        )
-                                        .bind(sid)
-                                        .fetch_optional(pool),
-                                    )
-                                    .await
-                                    {
-                                        Ok(Ok(Some(r))) => r,
-                                        Ok(Ok(None)) => {
+                                    let row = match store.strategy(sid).await {
+                                        Ok(Some(row)) => row,
+                                        Ok(None) => {
                                             self.send_to_frontend(UserError(format!(
                                                 "Strategy {} not found",
                                                 sid
@@ -1885,17 +1734,9 @@ impl Bot {
                                             .await;
                                             continue;
                                         }
-                                        Ok(Err(e)) => {
-                                            self.send_to_frontend(UserError(format!("DB error: {e}")))
+                                        Err(e) => {
+                                            self.send_to_frontend(UserError(format!("Local storage error: {e}")))
                                                 .await;
-                                            continue;
-                                        }
-                                        Err(_) => {
-                                            self.send_to_frontend(UserError(format!(
-                                                "Timed out fetching strategy {}",
-                                                sid
-                                            )))
-                                            .await;
                                             continue;
                                         }
                                     };
@@ -1981,7 +1822,7 @@ impl Bot {
                                 Some(true) => {
                                     self.send_to_frontend(
                                         UserError(format!(
-                                            "Margin update failed: {} market has open order(s)", &asset)
+                                            "Margin update failed: {} market has open order(s)", asset)
                                             )).await;
                                     continue;
                                 }

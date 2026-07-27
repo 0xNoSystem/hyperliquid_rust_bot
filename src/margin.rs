@@ -102,7 +102,7 @@ impl MarginBook {
         {
             let book = book.lock().await;
             if !book.map.contains_key(&asset) {
-                return Err(Error::Custom(format!("{} market doesn't exist", &asset)));
+                return Err(Error::Custom(format!("{} market doesn't exist", asset)));
             }
         }
 
@@ -110,7 +110,7 @@ impl MarginBook {
 
         let mut book = book.lock().await;
         let Some(current_margin) = book.map.get(&asset).copied() else {
-            return Err(Error::Custom(format!("{} market doesn't exist", &asset)));
+            return Err(Error::Custom(format!("{} market doesn't exist", asset)));
         };
         let free = book.free() + current_margin;
 

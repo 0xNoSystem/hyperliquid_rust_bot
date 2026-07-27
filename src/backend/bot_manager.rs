@@ -4,16 +4,16 @@ use std::time::Duration;
 use alloy::signers::local::PrivateKeySigner;
 use futures_util::future::join_all;
 use log::{info, warn};
-use sqlx::PgPool;
+use std::sync::Arc;
 use tokio::sync::mpsc::{Sender, error::TrySendError};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use crate::broadcast::{BroadcastCmd, CacheCmdIn, UserEventRelayHandle};
+use super::local_store::LocalStore;
+use crate::broadcast::{BroadcastCmd, CacheCmdIn};
 use crate::{BaseUrl, Bot, BotEvent, Wallet};
 
 const MANAGER_EVENT_SEND_TIMEOUT_SECS: u64 = 5;
-const MANAGER_DB_QUERY_TIMEOUT_SECS: u64 = 10;
 const MANAGER_BOT_JOIN_TIMEOUT_SECS: u64 = 60;
 
 struct BotHandle {
@@ -32,27 +32,20 @@ enum ManagerEventSend {
 pub(crate) struct BotBuildContext {
     broadcast_tx: Sender<BroadcastCmd>,
     cache_tx: Sender<CacheCmdIn>,
-    user_event_relay: Option<UserEventRelayHandle>,
 }
 
 pub struct BotManager {
     bots: HashMap<String, BotHandle>,
     broadcast_tx: Sender<BroadcastCmd>,
     cache_tx: Sender<CacheCmdIn>,
-    user_event_relay: Option<UserEventRelayHandle>,
 }
 
 impl BotManager {
-    pub fn new(
-        broadcast_tx: Sender<BroadcastCmd>,
-        cache_tx: Sender<CacheCmdIn>,
-        user_event_relay: Option<UserEventRelayHandle>,
-    ) -> Self {
+    pub fn new(broadcast_tx: Sender<BroadcastCmd>, cache_tx: Sender<CacheCmdIn>) -> Self {
         Self {
             bots: HashMap::new(),
             broadcast_tx,
             cache_tx,
-            user_event_relay,
         }
     }
 
@@ -65,7 +58,6 @@ impl BotManager {
         BotBuildContext {
             broadcast_tx: self.broadcast_tx.clone(),
             cache_tx: self.cache_tx.clone(),
-            user_event_relay: self.user_event_relay.clone(),
         }
     }
 
@@ -294,39 +286,23 @@ impl BotBuildContext {
     pub(crate) async fn build_bot(
         &self,
         pubkey: &str,
-        pool: &PgPool,
+        store: Arc<LocalStore>,
         encryption_key: &[u8; 32],
     ) -> Result<(Bot, Sender<BotEvent>), crate::Error> {
         info!("[bot/startup] loading encrypted agent key for user={pubkey}");
-        let row = tokio::time::timeout(
-            Duration::from_secs(MANAGER_DB_QUERY_TIMEOUT_SECS),
-            sqlx::query_as::<_, (Option<Vec<u8>>,)>(
-                "SELECT api_key_enc FROM users WHERE pubkey = $1",
-            )
-            .bind(pubkey)
-            .fetch_optional(pool),
-        )
-        .await
-        .map_err(|_| {
-            warn!("[bot/startup] timed out fetching encrypted agent key for user={pubkey}");
-            crate::Error::Custom("DB query timed out fetching API key".to_string())
-        })?
-        .map_err(|e| {
-            warn!("[bot/startup] DB error fetching encrypted agent key for user={pubkey}: {e}");
-            crate::Error::Custom(format!("DB error: {}", e))
-        })?;
-
-        let row = match row {
-            Some((Some(row),)) => row,
-            Some((None,)) => {
-                warn!("[bot/startup] user row has no encrypted agent key for user={pubkey}");
-                return Err(crate::Error::Custom("user has no API key set".to_string()));
-            }
-            None => {
-                warn!("[bot/startup] no user row found while loading agent key for user={pubkey}");
-                return Err(crate::Error::Custom("user has no API key set".to_string()));
-            }
-        };
+        let row = store
+            .encrypted_agent_key(pubkey)
+            .await
+            .map_err(|e| {
+                warn!(
+                    "[bot/startup] local storage error fetching agent key for user={pubkey}: {e}"
+                );
+                crate::Error::Custom(format!("local storage error: {e}"))
+            })?
+            .ok_or_else(|| {
+                warn!("[bot/startup] wallet has no encrypted agent key for user={pubkey}");
+                crate::Error::Custom("user has no API key set".to_string())
+            })?;
         info!(
             "[bot/startup] encrypted agent key loaded for user={pubkey}, bytes={}",
             row.len()
@@ -357,17 +333,12 @@ impl BotBuildContext {
             e
         })?;
 
-        Bot::new(
-            wallet,
-            self.broadcast_tx.clone(),
-            self.cache_tx.clone(),
-            self.user_event_relay.clone(),
-        )
-        .await
-        .map_err(|e| {
-            warn!("[bot/startup] failed to initialize bot for user={pubkey}: {e}");
-            e
-        })
+        Bot::new(wallet, self.broadcast_tx.clone(), self.cache_tx.clone())
+            .await
+            .map_err(|e| {
+                warn!("[bot/startup] failed to initialize bot for user={pubkey}: {e}");
+                e
+            })
     }
 }
 

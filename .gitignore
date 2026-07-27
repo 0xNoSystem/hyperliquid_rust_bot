@@ -1,8 +1,10 @@
+.codex
+.agents
 .env
 /target
 testnet
 web_ui/.vite
 /data
+/storage
 /src/bin/test.rs
-
 

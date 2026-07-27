@@ -1,6 +1,6 @@
 # Hyperliquid Trading Terminal
 
-A multi-user perpetual futures trading terminal for [Hyperliquid](https://hyperliquid.xyz), featuring a scripting engine that lets you write, test, and deploy automated trading strategies from your browser.
+A locally run perpetual futures trading terminal for [Hyperliquid](https://hyperliquid.xyz), featuring a scripting engine that lets you write, test, and deploy automated trading strategies from your browser.
 
 Built with a Rust backend (Axum + WebSocket) and a React frontend. Strategies are written in **Rhai** (a Rust-native scripting language), execute server-side with sandboxed resource limits, and can combine indicator signals across multiple assets and timeframes.
 
@@ -11,7 +11,7 @@ Built with a Rust backend (Axum + WebSocket) and a React frontend. Strategies ar
 ```
 Browser (React)                     Server (Rust)
  +-----------+    REST / WS    +-------------------+
- | Strategy  | -------------> | Bot per user       |
+ | Strategy  | -------------> | Bot per wallet     |
  |  Editor   |                | SignalEngine        |
  | Backtest  |                |  -> Rhai scripts    |
  | Dashboard |  <------------ |  -> Indicators      |
@@ -26,56 +26,35 @@ Browser (React)                     Server (Rust)
 
 ---
 
-## Production Operations
+## Local Operation
 
-Required backend env:
+No database or API-provider configuration is required. The backend uses Hyperliquid's public mainnet API and stores encrypted wallet agent keys, global strategies, and wallet trade history under `./storage`.
 
-```bash
-DATABASE_URL=postgres://...
-JWT_SECRET=at_least_32_random_bytes
-ENCRYPTION_KEY=64_hex_chars
-```
+Strategies are shared across every locally connected wallet. Agent keys and trade history remain wallet-scoped. Backtest results are returned to the browser but are not persisted.
 
-Recommended production env:
+Optional backend env:
 
 ```bash
-SERVER_BIND_ADDR=0.0.0.0:8090
-DATABASE_MAX_CONNECTIONS=10
-DATABASE_CONNECT_TIMEOUT_SECONDS=10
-DATABASE_ACQUIRE_TIMEOUT_SECONDS=5
-CORS_ORIGINS=https://your-ui.example
-QUICKNODE_HYPERCORE_ENDPOINTS=https://endpoint-1...,https://endpoint-2...
-# Or configure one build-account endpoint per variable:
-QUICKNODE_HYPERCORE_ENDPOINT1=https://endpoint-1...
-QUICKNODE_HYPERCORE_ENDPOINT2=https://endpoint-2...
-# ...
-QUICKNODE_HYPERCORE_ENDPOINT10=https://endpoint-10...
+STORAGE_DIR=./storage
+SERVER_BIND_ADDR=127.0.0.1:8090
+CORS_ORIGINS=http://localhost:5173
+JWT_SECRET=optional_32_byte_or_longer_override
 ```
 
-QuickNode account-event streaming is used when a QuickNode HyperCore endpoint is configured. Before promoting a deployment, run the gated soak against the same provider account and at least two representative user addresses:
+`storage/master.key` is generated automatically and is used to encrypt agent keys. Keep the entire storage directory private and backed up. The server binds to loopback by default; do not expose a local bot holding agent keys to a public network.
 
-```bash
-QN_SOAK_USERS='0xabc...,0xdef...' \
-QN_SOAK_SECONDS=900 \
-QN_SOAK_RECONNECT_EVERY_SECONDS=120 \
-QN_SOAK_CHURN_EVERY_SECONDS=60 \
-cargo run --release --bin qn_soak
-```
-
-The soak exits non-zero if QuickNode returns JSON-RPC errors, subscription acknowledgements are missing, or configured reconnect/churn cycles do not execute. For the final live gate, run it against a wallet that will intentionally produce an account event during the window, then set `QN_SOAK_REQUIRE_EVENTS=true` or `QN_SOAK_REQUIRE_ACCOUNT_EVENTS=true` to require at least one routed payload before passing.
-
-Health checks before deploy:
+Health checks:
 
 ```bash
 curl -fsS http://127.0.0.1:8090/healthz
 curl -fsS http://127.0.0.1:8090/readyz
 ./ci.sh
-cargo run --release --bin load -- --bots 100 --markets-per-bot 3 --ticks 2000 --account-events 1000 --queue 128 --slow-every 25 --slow-delay-us 250
+cargo run --release --bin load -- --bots 10 --markets-per-bot 3 --ticks 2000 --account-events 1000 --queue 128 --slow-every 25 --slow-delay-us 250
 ```
 
-Runtime overload counters are exposed from the authenticated `GET /metrics` endpoint. Watch the `*Dropped` and `*Lagged` counters during load, reconnects, and frontend fanout.
+Runtime overload counters are exposed from the authenticated `GET /metrics` endpoint. Watch the `*Dropped` and `*Lagged` counters during reconnects and frontend fanout.
 
-`CORS_ORIGINS` is fail-closed when unset or invalid. Use a comma-separated list of browser origins in production, or set `CORS_ORIGINS=*` only for local development.
+`CORS_ORIGINS` is fail-closed when unset or invalid. Use a comma-separated list of local browser origins, or set `CORS_ORIGINS=*` only for local development.
 
 ---
 
@@ -135,7 +114,7 @@ Each script can return an **Intent** (a trading action) or return nothing (do no
 
 ### Authoring Rules
 
-The backend saves your raw Rhai code in the database, but validates a transient expanded version first. Expansion currently does two things:
+The backend saves your raw Rhai code in local JSON storage, but validates a transient expanded version first. Expansion currently does two things:
 
 - Rewrites supported `extract()` calls into real indicator-map access.
 - Prepends state-variable initialization generated from the State Variables box.

@@ -159,7 +159,7 @@ impl Broadcaster {
                 if let Err(e) =
                     spawn_hl_feed(info_client, cmd_tx, Arc::clone(&asset), tx, url).await
                 {
-                    log::error!("HL feed for {} exited with error: {:?}", &asset, e);
+                    log::error!("HL feed for {} exited with error: {:?}", asset, e);
                     queue_cleanup(&cleanup_tx, asset);
                 }
             });
@@ -201,20 +201,20 @@ impl Broadcaster {
                         Ok(Err(_)) => {
                             log::warn!(
                                 "candle cache channel closed before delayed feed drop for {}",
-                                &asset_name
+                                asset_name
                             );
                         }
                         Err(_) => {
-                            log::warn!("timed out queuing delayed feed drop for {}", &asset_name);
+                            log::warn!("timed out queuing delayed feed drop for {}", asset_name);
                         }
                     }
                 });
-                log::warn!("candle cache queue full while dropping feed for {}", &asset);
+                log::warn!("candle cache queue full while dropping feed for {}", asset);
             }
             Err(TrySendError::Closed(_)) => {
                 log::warn!(
                     "candle cache channel closed while dropping feed for {}",
-                    &asset
+                    asset
                 );
             }
         }
@@ -227,7 +227,7 @@ impl Broadcaster {
             if let Err(e) = info_unsubscribe_timeout("broadcaster", &mut client, sub_id).await {
                 log::warn!(
                     "failed to unsubscribe {} (sub_id {}): {:?}",
-                    &asset,
+                    asset,
                     sub_id,
                     e
                 );
@@ -366,7 +366,7 @@ impl Broadcaster {
                         }
                         BroadcastCmd::SetSubId { asset, sub_id } => self.set_sub_id(&asset, sub_id),
                         BroadcastCmd::CleanUp(asset) => {
-                            log::warn!("cleaning up dead feed for {}", &asset);
+                            log::warn!("cleaning up dead feed for {}", asset);
                             self.channels.remove(&asset);
                             self.pending_unsubscribes.remove(&asset);
                             self.drop_cache_feed(asset);
@@ -401,7 +401,7 @@ async fn spawn_hl_feed(
                 }
                 log::warn!(
                     "Failed to subscribe to {} (attempt {}/{}): {:?}",
-                    &asset,
+                    asset,
                     attempts,
                     SUBSCRIPTION_ATTEMPTS_MAX,
                     e
@@ -422,18 +422,18 @@ async fn spawn_hl_feed(
         Ok(Ok(())) => Ok(()),
         Ok(Err(err)) => Err(Error::Custom(format!(
             "failed to queue sub id for {}: {}",
-            &asset, err
+            asset, err
         ))),
         Err(_) => Err(Error::Custom(format!(
             "timed out queuing sub id for {}",
-            &asset
+            asset
         ))),
     } {
         let mut client = info_client.lock().await;
         if let Err(unsub_err) = info_unsubscribe_timeout("broadcaster", &mut client, sub_id).await {
             log::warn!(
                 "failed to clean up {} subscription {} after SetSubId failure: {:?}",
-                &asset,
+                asset,
                 sub_id,
                 unsub_err
             );
@@ -480,7 +480,7 @@ async fn spawn_hl_feed(
                                             log::info!(
                                                 "recovered {} missed 1m candles for {}",
                                                 missed.len(),
-                                                &fetch_asset
+                                                fetch_asset
                                             );
                                             let _ = fetch_tx.send(PriceData::Bulk(missed));
                                         }
@@ -488,7 +488,7 @@ async fn spawn_hl_feed(
                                         Err(e) => {
                                             log::warn!(
                                                 "failed to fetch missed window for {}: {:?}",
-                                                &fetch_asset,
+                                                fetch_asset,
                                                 e
                                             );
                                         }
@@ -496,7 +496,7 @@ async fn spawn_hl_feed(
                                 } else if let Err(e) = fetch_client {
                                     log::warn!(
                                         "failed to create recovery InfoClient for {}: {:?}",
-                                        &fetch_asset,
+                                        fetch_asset,
                                         e
                                     );
                                 }
@@ -506,12 +506,12 @@ async fn spawn_hl_feed(
                     last_confirmed_close = Some(price.open_time);
                     let _ = tx.send(PriceData::Single(price));
                 }
-                Err(e) => log::warn!("malformed candle for {}: {:?}", &asset, e),
+                Err(e) => log::warn!("malformed candle for {}: {:?}", asset, e),
             },
             Message::NoData if !disconnected => {
                 disconnected = true;
                 disconnection_start = Some(Instant::now());
-                log::info!("{} price stream disconnected", &asset);
+                log::info!("{} price stream disconnected", asset);
             }
             _ => {}
         }
@@ -538,21 +538,18 @@ fn queue_cleanup(cmd_tx: &Sender<BroadcastCmd>, asset: Arc<str>) {
                     Ok(Err(_)) => {
                         log::warn!(
                             "broadcaster command channel closed before delayed cleanup for {}",
-                            &asset_name
+                            asset_name
                         );
                     }
                     Err(_) => {
-                        log::warn!("timed out queuing delayed cleanup for {}", &asset_name);
+                        log::warn!("timed out queuing delayed cleanup for {}", asset_name);
                     }
                 }
             });
-            log::warn!(
-                "broadcaster command queue full while cleaning up {}",
-                &asset
-            );
+            log::warn!("broadcaster command queue full while cleaning up {}", asset);
         }
         Err(TrySendError::Closed(_)) => {
-            log::warn!("failed to queue cleanup for {}: channel closed", &asset);
+            log::warn!("failed to queue cleanup for {}: channel closed", asset);
         }
     }
 }

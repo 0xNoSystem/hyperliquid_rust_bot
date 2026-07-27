@@ -718,7 +718,7 @@ impl Market {
                                 if !frontend_price_backpressure_warned {
                                     log::warn!(
                                         "bot update queue full for {}; dropping frontend price updates",
-                                        &asset_name
+                                        asset_name
                                     );
                                     frontend_price_backpressure_warned = true;
                                 }
@@ -726,7 +726,7 @@ impl Market {
                             Err(TrySendError::Closed(_)) => {
                                 log::warn!(
                                     "bot update queue closed for {}; stopping market price bridge",
-                                    &asset_name
+                                    asset_name
                                 );
                                 break;
                             }
@@ -772,7 +772,7 @@ impl Market {
                         if queue_full {
                             log::info!(
                                 "strategy log queue recovered for {} after dropping {} logs",
-                                &asset,
+                                asset,
                                 dropped
                             );
                             queue_full = false;
@@ -783,7 +783,7 @@ impl Market {
                         metrics::inc_strategy_log_dropped();
                         dropped = dropped.saturating_add(1);
                         if !queue_full {
-                            log::warn!("strategy log queue full for {}; dropping logs", &asset);
+                            log::warn!("strategy log queue full for {}; dropping logs", asset);
                             queue_full = true;
                         }
                     }
