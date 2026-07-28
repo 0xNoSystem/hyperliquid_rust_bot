@@ -13,7 +13,7 @@
         "@tailwindcss/vite": "^4.1.18",
         "ace-builds": "^1.43.6",
         "framer-motion": "^12.23.26",
-        "kwant": "^1.0.5",
+        "kwant": "^2.0.4",
         "lucide-react": "^0.539.0",
         "react": "^19.2.3",
         "react-ace": "^14.0.1",

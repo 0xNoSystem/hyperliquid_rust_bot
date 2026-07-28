@@ -700,15 +700,15 @@ impl Market {
             let mut frontend_price_backpressure_warned = false;
             while let Some((tick_asset, data)) = px_receiver.recv().await {
                 if tick_asset == asset_name {
-                    let last_price = match &data {
-                        PriceData::Single(p) => Some(p.close),
-                        PriceData::Bulk(ps) => ps.last().map(|p| p.close),
+                    let last_candle = match &data {
+                        PriceData::Single(price) => Some(*price),
+                        PriceData::Bulk(prices) => prices.last().copied(),
                     };
-                    if let Some(px) = last_price {
+                    if let Some(candle) = last_candle {
                         let update = MarketUpdate::RelayToFrontend(UpdateFrontend::MarketStream(
                             MarketStream::Price {
                                 asset: Arc::clone(&asset_name),
-                                price: px,
+                                price: candle,
                             },
                         ));
                         match bot_price_update.try_send(update) {

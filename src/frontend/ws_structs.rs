@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::backtest::{BacktestProgress, BacktestResult};
 use crate::{
-    AssetMargin, EngineView, IndexId, MarginAllocation, MarketState, OpenPositionLocal, TradeInfo,
-    Value,
+    AssetMargin, EngineView, IndexId, MarginAllocation, MarketState, OpenPositionLocal, Price,
+    TradeInfo, Value,
 };
 use hyperliquid_rust_sdk::AssetMeta;
 use serde::{Deserialize, Serialize};
@@ -73,12 +73,25 @@ pub enum EditMarketInfo {
 pub enum MarketStream {
     Price {
         asset: Arc<str>,
-        price: f64,
+        #[serde(with = "PriceDef")]
+        price: Price,
     },
     Indicators {
         asset: Arc<str>,
         data: Vec<IndicatorData>,
     },
+}
+
+#[derive(Serialize)]
+#[serde(remote = "Price", rename_all = "camelCase")]
+struct PriceDef {
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
+    open_time: u64,
+    close_time: u64,
+    vlm: f64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -137,4 +150,46 @@ pub enum BackendStatus {
     Online,
     Offline,
     Shutdown,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn market_price_stream_serializes_the_full_candle() {
+        let update = UpdateFrontend::MarketStream(MarketStream::Price {
+            asset: Arc::from("BTC"),
+            price: Price {
+                open: 100.0,
+                high: 102.0,
+                low: 99.0,
+                close: 101.0,
+                open_time: 60_000,
+                close_time: 119_999,
+                vlm: 42.5,
+            },
+        });
+
+        assert_eq!(
+            serde_json::to_value(update).unwrap(),
+            json!({
+                "marketStream": {
+                    "price": {
+                        "asset": "BTC",
+                        "price": {
+                            "open": 100.0,
+                            "high": 102.0,
+                            "low": 99.0,
+                            "close": 101.0,
+                            "openTime": 60_000,
+                            "closeTime": 119_999,
+                            "vlm": 42.5
+                        }
+                    }
+                }
+            })
+        );
+    }
 }

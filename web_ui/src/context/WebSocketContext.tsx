@@ -19,6 +19,7 @@ const userKey = (base: string, addr: string | null) =>
 
 const withMarketDefaults = (market: MarketInfo): MarketInfo => ({
     ...market,
+    liveCandle: market.liveCandle ?? null,
     indicators: market.indicators ?? [],
     trades: market.trades ?? [],
     log: market.log ?? [],
@@ -28,6 +29,7 @@ const toMarketInfo = (market: BackendMarketInfo): MarketInfo => ({
     ...market,
     state: "Ready",
     prev: market.price,
+    liveCandle: null,
     trades: [],
     log: [],
 });
@@ -241,6 +243,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
                                   state: "Loading",
                                   price: null,
                                   prev: null,
+                                  liveCandle: null,
                                   lev: null,
                                   margin: null,
                                   pnl: null,
@@ -368,11 +371,25 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
             if ("marketStream" in payload) {
                 const stream = payload.marketStream;
                 if ("price" in stream) {
-                    const { asset, price } = stream.price;
+                    const { asset, price: streamedPrice } = stream.price;
+                    const liveCandle =
+                        typeof streamedPrice === "number"
+                            ? null
+                            : streamedPrice;
+                    const price =
+                        typeof streamedPrice === "number"
+                            ? streamedPrice
+                            : streamedPrice.close;
                     setMarkets((prev) =>
                         prev.map((m) =>
                             m.asset === asset
-                                ? { ...m, prev: m.price ?? m.prev, price }
+                                ? {
+                                      ...m,
+                                      prev: m.price ?? m.prev,
+                                      price,
+                                      liveCandle:
+                                          liveCandle ?? m.liveCandle,
+                                  }
                                 : m
                         )
                     );
