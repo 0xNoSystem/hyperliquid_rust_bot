@@ -156,12 +156,23 @@ export interface BackendMarketInfo {
     engineState: EngineView;
 }
 
+export interface LiveCandle {
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    openTime: number;
+    closeTime: number;
+    vlm: number;
+}
+
 export interface MarketInfo {
     asset: string;
     state: "Loading" | "Ready";
     lev: number | null;
     price: number | null;
     prev: number | null;
+    liveCandle: LiveCandle | null;
     margin: number | null;
     pnl: number | null;
     strategyName: string;
@@ -412,7 +423,7 @@ export interface UserSession {
 export type BackendLoadSessionPayload = UserSession;
 
 export type MarketStream =
-    | { price: { asset: string; price: number } }
+    | { price: { asset: string; price: LiveCandle | number } }
     | { indicators: { asset: string; data: indicatorData[] } };
 
 export type BackendStatus = "online" | "offline" | "shutdown";

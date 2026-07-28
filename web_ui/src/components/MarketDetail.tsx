@@ -1,6 +1,6 @@
 // src/components/MarketDetail.tsx
 // Alternative “Trading Terminal” layout — keyboard/terminal vibes, split panes, neon accents. Keeps the same backend interactions and batching behavior.
-import { KwantChart } from "kwant";
+import { KwantChart, type CandleData } from "kwant";
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { useWebSocketContext } from "../context/WebSocketContextStore";
@@ -32,11 +32,285 @@ import type {
     IndicatorKind,
     IndicatorName,
     IndexId,
+    LiveCandle,
     MarketInfo,
     TimeFrame,
     TradeInfo,
 } from "../types";
 import { ArrowLeft, Plus, Minus, X } from "lucide-react";
+
+const HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info";
+const CHART_CANDLE_COUNT = 1_000;
+const CHART_INTERVALS = [
+    ["1m", 60_000],
+    ["3m", 3 * 60_000],
+    ["5m", 5 * 60_000],
+    ["15m", 15 * 60_000],
+    ["30m", 30 * 60_000],
+    ["1h", 60 * 60_000],
+    ["2h", 2 * 60 * 60_000],
+    ["4h", 4 * 60 * 60_000],
+    ["12h", 12 * 60 * 60_000],
+    ["1d", 24 * 60 * 60_000],
+    ["3d", 3 * 24 * 60 * 60_000],
+    ["1w", 7 * 24 * 60 * 60_000],
+    ["1M", 30 * 24 * 60 * 60_000],
+] as const;
+type HyperliquidTimeFrame = (typeof CHART_INTERVALS)[number][0];
+const DEFAULT_VOLUME_DECIMALS = 8;
+
+interface CandlesSnapshotResponse {
+    t: number;
+    T: number;
+    s: string;
+    i: HyperliquidTimeFrame;
+    o: string;
+    c: string;
+    h: string;
+    l: string;
+    v: string;
+    n: number;
+}
+
+function normalizeVolume(volume: number, decimals: number): number {
+    if (!Number.isFinite(volume)) return volume;
+
+    const safeDecimals = Math.min(12, Math.max(0, Math.trunc(decimals)));
+    return Number(volume.toFixed(safeDecimals));
+}
+
+function getProvisionalBucketBounds(
+    interval: HyperliquidTimeFrame,
+    timestamp: number,
+    latestCandle: CandleData
+): { start: number; end: number } {
+    if (interval === "1M") {
+        const date = new Date(timestamp);
+        const start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+        const end =
+            Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1) - 1;
+        return { start, end };
+    }
+
+    const intervalMs = CHART_INTERVALS.find(
+        ([candidate]) => candidate === interval
+    )?.[1];
+    if (!intervalMs) {
+        return { start: timestamp, end: timestamp };
+    }
+
+    // Anchor to Hyperliquid's fetched buckets instead of assuming every
+    // timeframe is aligned to the Unix epoch (notably 3d and 1w).
+    const elapsed = Math.max(0, timestamp - latestCandle.start);
+    const bucketOffset = Math.floor(elapsed / intervalMs) * intervalMs;
+    const start = latestCandle.start + bucketOffset;
+    return { start, end: start + intervalMs - 1 };
+}
+
+function upsertLiveCandleAcrossTimeframes(
+    snapshots: CandleData[],
+    liveCandle: LiveCandle | null,
+    asset: string
+): CandleData[] {
+    if (!liveCandle || snapshots.length === 0) return snapshots;
+
+    const numericValues = [
+        liveCandle.open,
+        liveCandle.high,
+        liveCandle.low,
+        liveCandle.close,
+        liveCandle.openTime,
+        liveCandle.closeTime,
+        liveCandle.vlm,
+    ];
+    if (
+        numericValues.some((value) => !Number.isFinite(value)) ||
+        liveCandle.closeTime <= liveCandle.openTime
+    ) {
+        return snapshots;
+    }
+
+    const matchingIndexes = new Map<HyperliquidTimeFrame, number>();
+    const latestIndexes = new Map<HyperliquidTimeFrame, number>();
+    let existingOneMinuteIndex = -1;
+    let latestOneMinuteStart = -Infinity;
+
+    snapshots.forEach((candle, index) => {
+        const interval = CHART_INTERVALS.find(
+            ([candidate]) => candidate === candle.interval
+        )?.[0];
+        if (!interval) return;
+
+        const latestIndex = latestIndexes.get(interval);
+        if (
+            latestIndex === undefined ||
+            candle.start > snapshots[latestIndex].start
+        ) {
+            latestIndexes.set(interval, index);
+        }
+
+        if (
+            candle.start <= liveCandle.openTime &&
+            liveCandle.openTime <= candle.end
+        ) {
+            matchingIndexes.set(interval, index);
+        }
+
+        if (interval === "1m") {
+            latestOneMinuteStart = Math.max(
+                latestOneMinuteStart,
+                candle.start
+            );
+            if (candle.start === liveCandle.openTime) {
+                existingOneMinuteIndex = index;
+            }
+        }
+    });
+
+    if (liveCandle.openTime < latestOneMinuteStart) return snapshots;
+
+    const existingOneMinute =
+        existingOneMinuteIndex >= 0
+            ? snapshots[existingOneMinuteIndex]
+            : null;
+
+    // Hyperliquid's live 1m volume is cumulative. A smaller value means this
+    // websocket update is older than the snapshot/update already in the store.
+    if (
+        existingOneMinute &&
+        liveCandle.vlm < existingOneMinute.volume
+    ) {
+        return snapshots;
+    }
+
+    const volumeDelta = Math.max(
+        0,
+        liveCandle.vlm - (existingOneMinute?.volume ?? 0)
+    );
+    const merged = snapshots.slice();
+    const additions: CandleData[] = [];
+
+    for (const [interval] of CHART_INTERVALS) {
+        const latestIndex = latestIndexes.get(interval);
+        if (latestIndex === undefined) continue;
+
+        if (interval === "1m") {
+            const nextOneMinute: CandleData = {
+                open: liveCandle.open,
+                high: liveCandle.high,
+                low: liveCandle.low,
+                close: liveCandle.close,
+                start: liveCandle.openTime,
+                end: liveCandle.closeTime,
+                volume: liveCandle.vlm,
+                trades: existingOneMinute?.trades ?? 0,
+                asset,
+                interval,
+            };
+
+            if (existingOneMinuteIndex >= 0) {
+                merged[existingOneMinuteIndex] = nextOneMinute;
+            } else {
+                additions.push(nextOneMinute);
+            }
+            continue;
+        }
+
+        const matchingIndex = matchingIndexes.get(interval);
+        if (matchingIndex !== undefined) {
+            const existing = snapshots[matchingIndex];
+            merged[matchingIndex] = {
+                ...existing,
+                high: Math.max(existing.high, liveCandle.high),
+                low: Math.min(existing.low, liveCandle.low),
+                close: liveCandle.close,
+                volume: existing.volume + volumeDelta,
+            };
+            continue;
+        }
+
+        const latest = snapshots[latestIndex];
+        if (liveCandle.openTime <= latest.end) continue;
+
+        const { start, end } = getProvisionalBucketBounds(
+            interval,
+            liveCandle.openTime,
+            latest
+        );
+        additions.push({
+            open: liveCandle.open,
+            high: liveCandle.high,
+            low: liveCandle.low,
+            close: liveCandle.close,
+            start,
+            end,
+            volume: liveCandle.vlm,
+            trades: 0,
+            asset,
+            interval,
+        });
+    }
+
+    return additions.length > 0 ? [...merged, ...additions] : merged;
+}
+
+async function candle_snapshot(
+    coin: string,
+    interval: HyperliquidTimeFrame,
+    startTime: number,
+    endTime: number,
+    signal?: AbortSignal
+): Promise<CandleData[]> {
+    const response = await fetch(HYPERLIQUID_INFO_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+            type: "candleSnapshot",
+            req: { coin, interval, startTime, endTime },
+        }),
+    });
+
+    if (!response.ok) {
+        throw new Error(
+            `Hyperliquid ${interval} candles failed (${response.status})`
+        );
+    }
+
+    const candles = (await response.json()) as CandlesSnapshotResponse[];
+    return candles.map((candle) => ({
+        open: Number(candle.o),
+        high: Number(candle.h),
+        low: Number(candle.l),
+        close: Number(candle.c),
+        start: candle.t,
+        end: candle.T,
+        volume: Number(candle.v),
+        trades: candle.n,
+        asset: candle.s,
+        interval: candle.i,
+    }));
+}
+
+async function loadHyperliquidCandles(
+    asset: string,
+    signal: AbortSignal
+): Promise<CandleData[]> {
+    const endTime = Date.now();
+    const candleGroups = await Promise.all(
+        CHART_INTERVALS.map(([interval, intervalMs]) =>
+            candle_snapshot(
+                asset,
+                interval,
+                Math.max(0, endTime - intervalMs * CHART_CANDLE_COUNT),
+                endTime,
+                signal
+            )
+        )
+    );
+
+    return candleGroups.flat();
+}
 
 const formatPrice = (n: number) => {
     if (n > 1 && n < 2) return n.toFixed(4);
@@ -142,6 +416,76 @@ export default function MarketDetail() {
         () => universe.find((u) => u.name === market?.asset),
         [universe, market]
     );
+    const chartAsset = market?.asset ?? routeAsset ?? "";
+    const [chartCandles, setChartCandles] = useState<CandleData[]>([]);
+    const formattedChartCandles = useMemo(() => {
+        const volumeDecimals = meta?.szDecimals ?? DEFAULT_VOLUME_DECIMALS;
+        return chartCandles.map((candle) => ({
+            ...candle,
+            volume: normalizeVolume(candle.volume, volumeDecimals),
+        }));
+    }, [chartCandles, meta?.szDecimals]);
+    const latestLiveCandleRef = useRef<{
+        asset: string;
+        candle: LiveCandle | null;
+    }>({ asset: "", candle: null });
+    latestLiveCandleRef.current = {
+        asset: chartAsset,
+        candle: market?.liveCandle ?? null,
+    };
+
+    useEffect(() => {
+        if (!chartAsset) {
+            setChartCandles([]);
+            return;
+        }
+
+        const controller = new AbortController();
+        setChartCandles([]);
+
+        loadHyperliquidCandles(chartAsset, controller.signal)
+            .then((candles) => {
+                const latestLive = latestLiveCandleRef.current;
+                if (
+                    controller.signal.aborted ||
+                    latestLive.asset !== chartAsset
+                ) {
+                    return;
+                }
+
+                setChartCandles(
+                    upsertLiveCandleAcrossTimeframes(
+                        candles,
+                        latestLive.candle,
+                        chartAsset
+                    )
+                );
+            })
+            .catch((error: unknown) => {
+                if (
+                    error instanceof DOMException &&
+                    error.name === "AbortError"
+                ) {
+                    return;
+                }
+                console.error("Failed to load Hyperliquid chart candles", error);
+            });
+
+        return () => controller.abort();
+    }, [chartAsset]);
+
+    useEffect(() => {
+        const liveCandle = market?.liveCandle ?? null;
+        if (!chartAsset || !liveCandle) return;
+
+        setChartCandles((candles) =>
+            upsertLiveCandleAcrossTimeframes(
+                candles,
+                liveCandle,
+                chartAsset
+            )
+        );
+    }, [chartAsset, market?.liveCandle]);
 
     const pxDecimals = meta ? MAX_DECIMALS - meta.szDecimals - 1 : 3;
 
@@ -726,32 +1070,29 @@ export default function MarketDetail() {
                     <section
                         className={`${Pane} min-h-[50vh] overflow-hidden sm:min-h-[60vh] lg:min-h-[65vh]`}
                     >
-                        <div className={`${Head} flex flex-col gap-2 sm:block`}>
-                            Chart{" "}
-                            <span className="text-accent-danger-muted/50">
-                                Note: This is a reference spot price chart,{" "}
-                                <a
-                                    className="text-accent-highlight font-bold underline"
-                                    href={`https://app.hyperliquid.xyz/trade/${market.asset}`}
-                                    target="_blank"
-                                >
-                                    Hyperliquid chart
-                                </a>{" "}
-                                (PERPS) is likely different
-                            </span>
-                        </div>
                         <div className="px-4 pt-4 pb-3"></div>
                         <div
                             className={`${Chart} kwant-theme relative min-h-[42vh] sm:min-h-[52vh] lg:min-h-[60vh]`}
                         >
-                            <KwantChart
-                                asset={routeAsset}
-                                title="KWANT"
-                                backgroundColor="rgb(var(--app-surface-2))"
-                                gridColor="rgb(var(--app-bg))"
-                                secondaryColor="#36c5f0"
-                                crosshairColor="rgb(var(--app-text))"
-                            />
+                            {formattedChartCandles.length > 0 ? (
+                                <KwantChart
+                                    hlocv_data={formattedChartCandles}
+                                    source_name="hyperliquid"
+                                    enable_caching
+                                    live_price
+                                    show_source
+                                    asset={market.asset}
+                                    title="KWANT"
+                                    backgroundColor="rgb(var(--app-surface-2))"
+                                    gridColor="rgb(var(--app-bg))"
+                                    secondaryColor="#36c5f0"
+                                    crosshairColor="rgb(var(--app-text))"
+                                />
+                            ) : (
+                                <div className="text-app-text/50 flex min-h-[42vh] items-center justify-center text-xs tracking-widest uppercase sm:min-h-[52vh] lg:min-h-[60vh]">
+                                    Loading chart…
+                                </div>
+                            )}
                         </div>
                     </section>
 
